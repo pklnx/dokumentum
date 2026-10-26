@@ -12,7 +12,9 @@ SwiftUI, data in the owner's private iCloud, no server, no accounts of its
 own, no web UI.
 
 Name and domain: **Dokumentum**, `dokumentum.app` (maintainer decision,
-2026-10-26). The identifiers below use the domain in reverse-DNS form.
+2026-10-26). The identifiers below use the maintainer's developer domain
+`pklnx.space` in reverse-DNS form (`space.pklnx.*`), shared by future pklnx
+apps.
 
 ### Maintainer decisions (2026-10-26)
 - Native app only (iPhone and Mac), sync through iCloud (CloudKit). No server.
@@ -43,9 +45,9 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 |---|---|
 | Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3) |
 | Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked in step 0 against the Xcode on GitHub's macOS runners; if the runners lag behind, the minimum stays at the newest SDK they offer until they catch up |
-| Bundle ID | `app.dokumentum.Dokumentum` (extension: `app.dokumentum.Dokumentum.Share`) |
-| iCloud container | `iCloud.app.dokumentum.Dokumentum` (new; the old container stays untouched) |
-| App group | `group.app.dokumentum` (app and share extension) |
+| Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
+| iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
+| App group | `group.space.pklnx.dokumentum` (app and share extension) |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
 
