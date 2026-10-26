@@ -11,9 +11,8 @@ devices of one person: an iPhone 18 Pro and a MacBook Air 13" (M4). Native
 SwiftUI, data in the owner's private iCloud, no server, no accounts of its
 own, no web UI.
 
-Name: **Dokumentum** (maintainer decision, 2026-10-26). The maintainer owns
-`documentum.app` (with c); the identifiers below use it in reverse-DNS form,
-which needs no matching app name. Website domain: open question 2.
+Name and domain: **Dokumentum**, `dokumentum.app` (maintainer decision,
+2026-10-26). The identifiers below use the domain in reverse-DNS form.
 
 ### Maintainer decisions (2026-10-26)
 - Native app only (iPhone and Mac), sync through iCloud (CloudKit). No server.
@@ -44,9 +43,9 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 |---|---|
 | Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3) |
 | Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked in step 0 against the Xcode on GitHub's macOS runners; if the runners lag behind, the minimum stays at the newest SDK they offer until they catch up |
-| Bundle ID | `app.documentum.Dokumentum` (extension: `app.documentum.Dokumentum.Share`) |
-| iCloud container | `iCloud.app.documentum.Dokumentum` (new; the old container stays untouched) |
-| App group | `group.app.documentum` (app and share extension) |
+| Bundle ID | `app.dokumentum.Dokumentum` (extension: `app.dokumentum.Dokumentum.Share`) |
+| iCloud container | `iCloud.app.dokumentum.Dokumentum` (new; the old container stays untouched) |
+| App group | `group.app.dokumentum` (app and share extension) |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
 
@@ -234,7 +233,7 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 ### Without a milestone (backlog)
 | # | Step | Content | Size |
 |---|---|---|---|
-| 17 | documentum.app | A small static site: product page, privacy policy, support address (needed before any App Store listing) | S |
+| 17 | dokumentum.app | A small static site: product page, privacy policy, support address (needed before any App Store listing) | S |
 
 ## 6. Open questions
 1. **CI for a private repository** (decided before step 0). GitHub bills
@@ -244,9 +243,6 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
    with the developer program, to be verified; also uploads to TestFlight),
    a self-hosted runner on the MacBook (only while it is awake), or a
    public repository later.
-2. **Website domain.** `documentum.app` is spelled with c, the app with k.
-   Register `dokumentum.app` as well, or keep the site on `documentum.app`?
-   Not needed before step 17.
 
 To settle inside the steps: store location
 (step 1), whether `extractedText` gets its own model (step 1, by

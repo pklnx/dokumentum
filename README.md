@@ -5,4 +5,4 @@ Native SwiftUI, documents in your private iCloud, no server, no accounts.
 
 Status: planning. See [docs/development/plan.md](docs/development/plan.md).
 
-Website: later (domain open, see the plan).
+Website: [dokumentum.app](https://dokumentum.app) (later).
