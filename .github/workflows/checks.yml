@@ -1,0 +1,29 @@
+name: Checks
+
+# Checks that run on Linux. Build and app tests run in Xcode Cloud (docs/development/plan.md, section 4).
+# There is deliberately no `paths` filter: these jobs are required checks, so they must run on every pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Script self-tests
+        run: python3 scripts/check-labels.py --self-test
+      - name: Labels file
+        run: python3 scripts/check-labels.py

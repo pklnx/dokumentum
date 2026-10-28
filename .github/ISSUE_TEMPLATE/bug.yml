@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove the contents of your documents from logs and screenshots before posting.
+        Security problems: please use the private vulnerability report (link on the previous page) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+      placeholder: |
+        1. Imported a PDF with …
+        2. Opened the document …
+        Expected: …
+        Actual: …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "App version and build (Settings), or the git commit (`git rev-parse --short HEAD`)."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Device (iPhone or Mac), iOS or macOS version, whether iCloud sync is turned on.
+      placeholder: iPhone 18 Pro, iOS 27, iCloud on
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: What should be true when this is fixed? A regression test that fails without the fix is always part of it.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Crash report or Console output. Pasted as code."
+      render: text

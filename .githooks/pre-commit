@@ -1,0 +1,16 @@
+#!/bin/sh
+# Refuses a commit when the staged changes contain a credential.
+# Enable once per clone:  git config core.hooksPath .githooks
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed, skipping the credential check." >&2
+  echo "pre-commit: install it with 'brew install gitleaks'; CI checks again." >&2
+  exit 0
+fi
+
+if ! gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml .; then
+  echo "" >&2
+  echo "pre-commit: gitleaks found a credential in the staged changes (see above)." >&2
+  echo "pre-commit: remove it from the files; if it was ever pushed, revoke it." >&2
+  exit 1
+fi

@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an improvement or new feature.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        When the issue is labelled `plan`, an implementation plan is posted here as a comment and the label
+        changes to `review`. An independent plan review follows; once the plan is approved, `review` is replaced
+        by `ready` and the issue is built.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or inconvenient today? A concrete example helps.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How it could work. Rough ideas are fine.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      description: What should be true when this is finished? Each item is checked before the merge.
+      placeholder: |
+        - …
+        - …
