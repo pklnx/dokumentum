@@ -13,6 +13,7 @@ Dokumentum: a native SwiftUI document archive (paperless-ngx style) for one pers
 5. One branch + PR per part; body "Closes #<sub>." and "Part K of #N.".
 6. Review: one session reviewer for app code. Risky PRs get a second, independent reviewer; the coordinator adds the label `second-review`: CloudKit schema changes (label `schema`), deletes, rewriting user data, entitlements and capabilities, any new network access.
 7. Merge: approving review + green required checks; before merging, a PR comment names the reports read and checks every "Done when" item (met with evidence, or "after merge"); squash merge pinned to the reviewed head SHA. Never auto-merge, never change rulesets or repo settings.
+   - A PR that touches the secret scan's allowlist or configuration (`.gitleaks.toml` and files it extends, `.gitleaksignore`, a new `gitleaks:allow` comment, `.github/workflows/secrets.yml`, `scripts/secret-scan-*`, `.githooks/pre-commit`) is merged only after the maintainer's explicit OK. The coordinator asks via AskUserQuestion, names the changed entries (file, rule id, path or fingerprint) and never posts secret values; the OK is noted on the PR.
 
 Maintainer-only steps: deploying the CloudKit schema to Production, TestFlight uploads, App Store Connect settings, signing certificates.
 
@@ -24,6 +25,7 @@ Blocking in reviews only: crash, data loss/corruption, hang, wrong result in a m
 - CloudKit schema changes are additive only; every model change comes with a schema version and a migration test. Synced enums are stored as raw strings with a fallback for unknown values.
 - The share extension never opens the store; it hands files to the app through the app-group queue.
 - Locally run only the tests of what changed; CI runs everything. Agents never watch CI.
+- Builds and app tests run in the macOS VM (local sessions); Xcode Cloud is the PR check; cloud sessions verify only what runs on Linux.
 - Ask instead of guessing on product decisions (AskUserQuestion, recommendation first).
 
 ## Session handover

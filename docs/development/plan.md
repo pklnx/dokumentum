@@ -182,10 +182,24 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   iPhone simulator for the app target, a UI smoke suite (iPhone and Mac) of
   at most 10 tests. No real documents, no network, no real iCloud in tests
   (in-memory store).
-- CI (GitHub Actions): `packages` (swift test, macOS), `app-ios` (build + tests,
-  simulator), `app-macos` (build + tests), `lint` (SwiftFormat/SwiftLint,
-  localisation check), `secret-scan`. Where the macOS jobs run is open
-  (see section 6): a private repository pays 10× for macOS minutes.
+- CI (decided 2026-10-28, section 6, question 1): Xcode Cloud runs build and
+  tests, GitHub Actions on Linux runners (`ubuntu-24.04`) run the rest.
+  | Where | Check | Content |
+  |---|---|---|
+  | Xcode Cloud, workflow `PR` (and `Main` on pushes to `main`) | one Test action per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The exact check names are copied from the first `PR` run before the ruleset is set |
+  | GitHub Actions `checks.yml` | `lint` | Python check scripts and their self-tests (labels file; more scripts arrive with the steps that need them) |
+  | GitHub Actions `checks.yml` | `localization` | the String Catalog check (added with the Xcode project) |
+  | GitHub Actions `checks.yml` | `kit-linux` | `swift format lint` and the `DokumentumKit` tests with the pinned Swift for Linux toolchain (added with the packages) |
+  | GitHub Actions `secrets.yml` | `secret-scan` | gitleaks (pinned binary, SHA-256) over the commits a PR adds |
+
+  swift-format, the formatter bundled with the Swift toolchain, replaces
+  SwiftFormat and SwiftLint, so no extra tool is needed.
+- Development setup: implementation (Xcode, simulators, `xcodebuild`, device
+  runs) happens in a macOS VM on the maintainer's Mac mini with Claude Code
+  inside it (local sessions, `gh` available). Cloud sessions (Linux) plan,
+  review plans and verify only what runs on Linux: scripts, workflows, docs,
+  and `swift test` / `swift format lint` for `DokumentumKit`. Details:
+  [index.md](./index.md).
 - Releases: TestFlight builds from a tag, version `YY.MM.N` (e.g. `26.11.1`);
   every TestFlight upload needs the maintainer's OK, like releases elsewhere.
 
@@ -199,7 +213,7 @@ M ≈ 2-3 PRs, L ≈ 4+ PRs.
 ### Milestone 1: Core (v1 on TestFlight)
 | # | Step | Content | Size |
 |---|---|---|---|
-| 0 | Repository and skeleton | Xcode project (multiplatform target, two packages, share-extension placeholder), identifiers and entitlements, CI, lint, CLAUDE.md, docs, issue templates, labels, ported test infrastructure. Maintainer steps: App ID, iCloud container, app group, capabilities in the developer portal. Empty app starts on both devices from Xcode | M |
+| 0 | Repository and skeleton | Xcode project (multiplatform target, two packages, share-extension placeholder), identifiers and entitlements, CI (Xcode Cloud + GitHub Actions on Linux), lint, CLAUDE.md, docs, issue templates, labels, ported test infrastructure. Maintainer steps: App ID, iCloud container, app group, capabilities in the developer portal. Empty app starts on both devices from Xcode | M |
 | 1 | Data model and sync | Models of 3.3, versioned schema with migration test, `ArchiveStore`, store location, CloudKit private DB, in-memory store for tests, frozen-enum rule, repair passes, sync status view, two-device conflict test | L |
 | 2 | Library UI | Sidebar (inbox, all, tags, correspondents, types), list, detail with PDFKit viewer, "still downloading" state, edit title/date/metadata, delete into a minimal trash (restore, empty); Mac: three columns and menu commands; iPhone: navigation stack. Works with fixture documents seeded by a debug command, since import comes in step 3 | L |
 | 3 | Import | Files picker, drag and drop and ⌘O (Mac), share extension with app-group queue (iOS), photos from the library; images → PDF; duplicates by SHA-256; processing queue with claims | M |
@@ -238,13 +252,14 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 | 17 | dokumentum.app | A small static site: product page, privacy policy, support address (needed before any App Store listing) | S |
 
 ## 6. Open questions
-1. **CI for a private repository** (decided before step 0). GitHub bills
+1. **CI for a private repository** (decided 2026-10-28). GitHub bills
    macOS minutes at 10× for private repositories, so the included minutes
-   cover roughly 10 PR runs a month (check github.com/pricing; GitHub has
-   announced price changes). Options: Xcode Cloud (25 compute hours a month
-   with the developer program, to be verified; also uploads to TestFlight),
-   a self-hosted runner on the MacBook (only while it is awake), or a
-   public repository later.
+   would cover roughly 10 PR runs a month (check github.com/pricing; GitHub
+   has announced price changes). Decision: Xcode Cloud for build, tests and
+   later the TestFlight uploads (25 compute hours a month with the developer
+   program; to verify in App Store Connect, Xcode Cloud, Usage), and GitHub
+   Actions on Linux runners for lint, the localisation check, the
+   `DokumentumKit` tests and the secret scan. Section 4 lists the checks.
 
 To settle inside the steps: store location
 (step 1), whether `extractedText` gets its own model (step 1, by
