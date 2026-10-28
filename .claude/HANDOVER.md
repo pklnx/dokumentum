@@ -1,11 +1,17 @@
 # Handover
 
-## State (2026-10-26)
-- Dokumentum (repository `pklnx/dokumentum`, private) replaces pklnx/document-archive and pklnx/paperless-go; both are frozen, no data migration.
-- Plan in `docs/development/plan.md`, plan review worked in, maintainer answers of 2026-10-26 in section 1; waits for the maintainer's final OK (this PR).
+## State (2026-10-28)
+- Dokumentum (`pklnx/dokumentum`, private) replaces pklnx/document-archive and pklnx/paperless-go; both are frozen, no data migration. Plan: `docs/development/plan.md`.
+- Step 0 (#1, `ready`) has four parts; plan and decisions are on #1 (plan comment, T1-T10 coordinator decisions, P1-P4 maintainer decisions).
+  - Part 1 (#20) merged with #24: repository basics, Linux CI (`lint`, `secret-scan`), labels.
+  - Part 2 (#21, Xcode project and packages) is next; it runs in the macOS VM on the maintainer's Mac mini (Claude Code there).
+  - Part 3 (#22, identifiers, entitlements, share-extension placeholder; `second-review`) waits only for part 2.
+  - Part 4 (#23, test infrastructure) follows part 2, in parallel with part 3.
+- Apple: enrolment done, Team ID `88GY2V9C2A`; iCloud container, app group and both App IDs registered; App Store Connect record "Dokumentum" (primary language German, store metadata only).
 
-## Next
-- Step 0 (repository and skeleton, #1) is split into four parts, see the plan on #1. Part 1 (#20: repository basics, Linux CI, secret scan) is in review; parts 2-4 need the macOS VM.
-- Milestones 1-4 (Core, Automation, Deadlines and reminders, System integration; no due dates) and issues #1-#18 (one per roadmap step; #18 without a milestone) exist since 2026-10-26.
-- Open before step 0: the CI decision for the private repository (plan §6, question 1); the labels of the ticket flow (part of #1).
-- `gh api` (REST) works in cloud sessions; GraphQL does not.
+## Maintainer actions open
+- VM: macOS 27 on host and guest, Xcode 27.x; confirm versions (`sw_vers`, `xcodebuild -version`) at the start of #21.
+- Xcode Cloud onboarding once part 2's project exists (plan on #1, maintainer step 6); then the ruleset with the required checks (step 8).
+
+## Notes
+- Cloud sessions: Linux, no Swift/Xcode; `gh api` (REST) works, GraphQL does not. Builds and app tests run in the VM.
