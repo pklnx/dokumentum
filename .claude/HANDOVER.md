@@ -12,6 +12,7 @@
 ## Maintainer actions open
 - VM: macOS 27 on host and guest, Xcode 27.x; confirm versions (`sw_vers`, `xcodebuild -version`) at the start of #21.
 - Xcode Cloud onboarding once part 2's project exists (plan on #1, maintainer step 6); then the ruleset with the required checks (step 8).
+- The rest of #1's maintainer steps (3 devices, 7 compute hours, 9 device check from the MacBook Air per P4) and T10 (DW2/DW3 move to a later part if onboarding comes after #21): see the plan and the last comments on #1.
 
 ## Notes
 - Cloud sessions: Linux, no Swift/Xcode; `gh api` (REST) works, GraphQL does not. Builds and app tests run in the VM.
