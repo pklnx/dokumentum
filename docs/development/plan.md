@@ -135,7 +135,7 @@ model too (decided in step 1 by measurement).
 | `DocumentType` | id, name, documents |
 
 Later steps add fields additively (notes, favorite, ASN, deadlines, matching
-rules, saved views, trash). Names follow the old app where they fit, so the
+rules, saved views, trash retention). Names follow the old app where they fit, so the
 archive folder format (step 16) can stay compatible with its version 1.x.
 
 ### 3.4 Processing pipeline
@@ -171,7 +171,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 ### 3.6 Porting from document-archive
 | Ported (cleaned up, tests along) | Rebuilt | Dropped |
 |---|---|---|
-| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), image cleanup and scanner wrapper, tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, share queue, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), undo stash |
+| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), image cleanup and scanner wrapper, tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, share queue, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
 
 ## 4. Development process
 - Workflow, roles, labels and review rules as in `pklnx/dev-process`; the
@@ -229,7 +229,7 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 | 12 | Spotlight and Shortcuts | Spotlight index (on-device, can be turned off), App Intents: add a file, find documents | M |
 | 13 | Notes, favorites, ASN | Markdown notes, favorites, archive serial number | M |
 | 14 | Saved views | Saved filters in the sidebar | S |
-| 15 | Full trash | Retention (30 days), automatic purge, undo notice | S |
+| 15 | Full trash | Retention (30 days), automatic purge, an undo notice after a delete | S |
 | 16 | Backup export | The archive folder format (PDF + JSON per document) to a folder in iCloud Drive or on the Mac | M |
 
 ### Without a milestone (backlog)
