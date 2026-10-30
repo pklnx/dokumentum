@@ -17,9 +17,9 @@ infrastructure are added by the parts that create them.
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
-## Setup in the VM
+## Setup on the development machine (VM or separate macOS user)
 
-1. macOS 27 on the host and in the VM, Xcode 27.x installed and selected
+1. macOS 27 (on the host and, if used, in the VM), Xcode 27.x installed and selected
    (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
    Accounts.
 2. `gh auth status` is OK.
