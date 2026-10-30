@@ -12,14 +12,14 @@ infrastructure are added by the parts that create them.
 
 | Where | Used for |
 |---|---|
-| macOS VM on the maintainer's Mac mini (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code. |
+| The maintainer's MacBook Pro: a macOS VM or a separate macOS user (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code. |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
-## Setup in the VM
+## Setup on the development machine (VM or separate macOS user)
 
-1. macOS 27 on the host and in the VM, Xcode 27.x installed and selected
+1. macOS 27 (on the host and, if used, in the VM), Xcode 27.x installed and selected
    (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
    Accounts.
 2. `gh auth status` is OK.

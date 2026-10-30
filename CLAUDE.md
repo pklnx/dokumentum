@@ -25,7 +25,7 @@ Blocking in reviews only: crash, data loss/corruption, hang, wrong result in a m
 - CloudKit schema changes are additive only; every model change comes with a schema version and a migration test. Synced enums are stored as raw strings with a fallback for unknown values.
 - The share extension never opens the store; it hands files to the app through the app-group queue.
 - Locally run only the tests of what changed; CI runs everything. Agents never watch CI.
-- Builds and app tests run in the macOS VM (local sessions); Xcode Cloud is the PR check; cloud sessions verify only what runs on Linux.
+- Builds and app tests run on the development MacBook Pro (VM or separate macOS user; local sessions); Xcode Cloud is the PR check; cloud sessions verify only what runs on Linux.
 - Ask instead of guessing on product decisions (AskUserQuestion, recommendation first).
 
 ## Session handover

@@ -7,7 +7,7 @@ both are frozen, nothing is migrated from them.
 ## 1. Product
 
 A personal document archive in the style of paperless-ngx for exactly two
-devices of one person: an iPhone 18 Pro and a MacBook Air 13" (M4). Native
+devices of one person: an iPhone 18 Pro and a MacBook Pro (M6). Native
 SwiftUI, data in the owner's private iCloud, no server, no accounts of its
 own, no web UI.
 
@@ -195,8 +195,9 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   swift-format, the formatter bundled with the Swift toolchain, replaces
   SwiftFormat and SwiftLint, so no extra tool is needed.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`, device
-  runs) happens in a macOS VM on the maintainer's Mac mini with Claude Code
-  inside it (local sessions, `gh` available). Cloud sessions (Linux) plan,
+  runs) happens on the maintainer's MacBook Pro, in a macOS VM or in a
+  separate macOS user (decided when the machine arrives), with Claude Code
+  there (local sessions, `gh` available). Cloud sessions (Linux) plan,
   review plans and verify only what runs on Linux: scripts, workflows, docs,
   and `swift test` / `swift format lint` for `DokumentumKit`. Details:
   [index.md](./index.md).
