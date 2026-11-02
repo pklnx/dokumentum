@@ -19,6 +19,9 @@ Maintainer-only steps: deploying the CloudKit schema to Production, TestFlight u
 
 Blocking in reviews only: crash, data loss/corruption, hang, wrong result in a main function, security/privacy problem, broken main flow, missing/failing test for new behaviour, violation of plan or maintainer decision. Everything else is a follow-up issue labelled `followup`.
 
+## GitHub operations
+Commands per operation: `.claude/github-operations.md`, read before the first GitHub write. An MCP `issue_write` labels update replaces the whole set.
+
 ## Rules
 - Tests never touch real documents, real iCloud, real credentials or the network (in-memory store; stub external APIs).
 - Every behaviour change has tests; a bug fix has a regression test that fails without the fix. Tests wait for signals, never for time.
