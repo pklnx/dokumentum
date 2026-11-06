@@ -31,6 +31,14 @@
     {
       "parallelizable" : true,
       "target" : {
+        "containerPath" : "container:Packages/DokumentumKit",
+        "identifier" : "DokumentumTestSupportTests",
+        "name" : "DokumentumTestSupportTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
         "containerPath" : "container:Packages/DokumentumCore",
         "identifier" : "DokumentumCoreTests",
         "name" : "DokumentumCoreTests"

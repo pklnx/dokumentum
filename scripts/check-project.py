@@ -33,7 +33,9 @@ SCHEME = "Dokumentum.xcodeproj/xcshareddata/xcschemes/Dokumentum.xcscheme"
 XCODE_VERSION = ".xcode-version"
 CI_SCRIPTS = ["ci_scripts/ci_post_clone.sh", "ci_scripts/ci_post_xcodebuild.sh"]
 TEST_PLANS = {
-    "TestPlans/Default.xctestplan": {"DokumentumTests", "DokumentumKitTests", "DokumentumCoreTests"},
+    "TestPlans/Default.xctestplan": {
+        "DokumentumTests", "DokumentumKitTests", "DokumentumTestSupportTests", "DokumentumCoreTests",
+    },
     "TestPlans/UISmoke.xctestplan": {"DokumentumUITests"},
 }
 # Never in the .pbxproj, whether or not the xcconfig sets them at the moment.
@@ -316,6 +318,7 @@ def fixture_plan(*targets):
 FIXTURE_DEFAULT_PLAN = fixture_plan(
     ("container:Dokumentum.xcodeproj", "A7", "DokumentumTests"),
     ("container:Packages/DokumentumKit", "DokumentumKitTests", "DokumentumKitTests"),
+    ("container:Packages/DokumentumKit", "DokumentumTestSupportTests", "DokumentumTestSupportTests"),
     ("container:Packages/DokumentumCore", "DokumentumCoreTests", "DokumentumCoreTests"))
 
 
@@ -328,6 +331,7 @@ def write_fixture(root):
         "TestPlans/UISmoke.xctestplan": fixture_plan(("container:Dokumentum.xcodeproj", "A8", "DokumentumUITests")),
         XCODE_VERSION: "27.1\n",
         "Packages/DokumentumKit/Tests/DokumentumKitTests/.gitkeep": "",
+        "Packages/DokumentumKit/Tests/DokumentumTestSupportTests/.gitkeep": "",
         "Packages/DokumentumCore/Tests/DokumentumCoreTests/.gitkeep": "",
     }
     files.update({script: "#!/bin/bash\n" for script in CI_SCRIPTS})

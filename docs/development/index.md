@@ -4,9 +4,8 @@ How to work on Dokumentum. Product and architecture: [plan.md](./plan.md).
 Workflow, roles and review rules: `CLAUDE.md` and
 [pklnx/dev-process](https://github.com/pklnx/dev-process).
 
-This page grows with the steps. It describes what exists now (repository
-basics, the Xcode project, the packages and the checks); the test
-infrastructure is added by the part that creates it.
+This page grows with the steps. It describes what exists now: repository
+basics, the Xcode project, the packages, the test infrastructure and the checks.
 
 ## Where work runs
 
@@ -56,11 +55,12 @@ macOS, iPhone only), `DokumentumTests` (Swift Testing, hosted by the app) and
 From the repository root (`-derivedDataPath build` keeps a build in the ignored `build/` folder):
 
 ```sh
-# Test plan Default: DokumentumTests, DokumentumKitTests, DokumentumCoreTests
+# Test plan Default: DokumentumTests, DokumentumKitTests, DokumentumTestSupportTests, DokumentumCoreTests
 xcodebuild -scheme Dokumentum -destination 'platform=macOS' test
 xcodebuild -scheme Dokumentum -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
 
-# Test plan UISmoke: DokumentumUITests (one test arrives with part 4)
+# Test plan UISmoke: DokumentumUITests
+xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=macOS' test
 xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
 
 # The packages alone, without a simulator
@@ -73,18 +73,91 @@ swift format lint --strict --recursive --configuration .swift-format Dokumentum*
 
 The iPhone 18 Pro exists only on the iOS 27.0 simulator runtime, so the destination names the OS.
 UI tests on macOS need Automation Mode: without it the run ends with "Timed out while enabling
-automation mode". `automationmodetool` shows its state; enabling it needs the machine's administrator
-password once (`sudo automationmodetool enable-automationmode-without-authentication`).
+automation mode". `automationmodetool` shows its state ("This device DOES NOT REQUIRE user
+authentication" is what a run without a person needs; the mode itself stays disabled between runs).
+Allowing that needs the machine's administrator password once
+(`sudo automationmodetool enable-automationmode-without-authentication`).
+
+## Waiting in tests
+
+**Tests never wait for time.** No `Task.sleep`, no `Task.yield()` loops, no fixed debounce and no
+"wait N ms, then check": a test waits for a signal that says the thing happened, and a scaled timeout
+is only the safety net that ends a test whose signal never comes. Why: under parallel tests on a busy
+runner, every `Task.sleep` in the test host needs a thread of the cooperative pool to wake up. While
+text recognition and PDF rendering fill the pool, every sleep stalls, on the predecessor's iOS CI
+runner for a minute and more. A wait that then compares the clock with its deadline finds it passed,
+while the work it waits for has not had its turn yet. A fixed sleep "long enough" for a debounce or a
+request is the same bet.
+
+`scripts/check-test-waits.py`, part of `lint`, enforces this in `DokumentumTests`, `DokumentumUITests`,
+`Packages/*/Tests` and `DokumentumTestSupport`. A use that is justified stays when it says why, on its
+line or in the comment lines directly above it: `// allow-wait: <reason>`. Waits of XCTest with a
+condition (`waitForExistence`) are fine: UI tests use them. The script does not flag `clock.sleep(for:)`
+on a `Clock`: its pattern leaves out `.sleep(`, because `debounce.sleep(…)` must stay allowed. That rule
+holds without the script.
+
+One timed wait is allowed: a negative check, which has no signal because it shows that something does
+not happen. `negativeCheck()` in `WaitingTests` is the helper for it, and `BlockedActorTests` does the
+same with a longer net. Both use `safetyNet`, and a slow machine can make them miss a broken helper, but
+they can never fail a correct one.
+
+The tools are in the library `DokumentumTestSupport` (`Packages/DokumentumKit`), which every test
+target can import:
+
+| Tool | For | Instead of |
+|---|---|---|
+| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
+| `ManualDebounce` | Code that sleeps through an injected function: the test sees each event start the quiet period (`waitForStarts`) and ends it with `fire()` | A short debounce and sleeping "twice the debounce" |
+| `TestSignal` | Any event: the hook calls `fire()`, the test awaits `wait(for:)`; `TestSignal.counting(stream)` counts the elements of a stream | Polling a counter |
+| `TestSupport.waitForCancellation` | A body that must keep running until its test stops it | Sleeping for a long time |
+| `TestSupport.waitUntil` | State that has no signal. It counts rounds, not the clock, so a stall costs one round, not the budget | A hand-written poll with a deadline |
+
+```swift
+let reached = Checkpoint()
+defer { reached.release() }
+var environment = ProcessingEnvironment.live
+environment.someHook = { await reached.pass() }   // each step adds its own hooks
+let run = Task { await work(environment) }
+await reached.reached()   // the work stands at the hook now
+run.cancel()
+reached.release()
+```
+
+**A test must not hang when a helper or the code under test is broken.** Wait with a tool above, and
+await `task.value` only once a signal said that the task ends. `Checkpoint.pass()` holds a task forever
+when nobody releases it; `WaitingTests` shows the pattern.
+
+**Tests never block the main actor** with synchronous work that can take long: they call the
+`@concurrent` API instead.
+
+**The safety net waits with the waiter's actor.** A `TestSignal` wait (and `Checkpoint.reached`,
+`ManualDebounce.waitForStarts`) passes its caller's isolation (`#isolation`) to
+`TestSupport.safetyNet`, and every round takes a turn on that actor after its sleep. The work a
+main-actor test waits for usually needs the main actor too, so while the main actor is busy the net
+stands still with it instead of running out. A wait from a nonisolated test counts pool rounds only.
+`BlockedActorTests` checks the net and each of the three waits.
+
+**The timeout scale.** Every wait multiplies its timeout by `DOKUMENTUM_TEST_TIMEOUT_SCALE` (1 when it
+is missing or not a positive number), for a run that is slowed down on purpose. `swift test` passes the
+variable on as it is. For `xcodebuild`, set `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`: it strips
+the prefix and passes the variable on to the test host.
+
+**The seam.** `ProcessingEnvironment` (`DokumentumCore`) holds what the pipeline reads from outside. A
+test runs its body in `ProcessingEnvironment.$current.withValue(…) { … }`, so tests running in parallel
+each see their own. It is a task-local: `Task {}` inherits it, `Task.detached` does not, so code that
+detaches captures it first. Each step adds the fields it needs. `TestEnvironment.isIsolated` says
+whether this run stays away from real data; it holds in the app host, in the test bundles `xcodebuild`
+runs, and under `swift test`.
 
 ## Checks
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), and flags tests that wait for time (`scripts/check-test-waits.py`). |
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
-| `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests. |
+| `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Not onboarded yet. |
+| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |
 
 Run the Python checks from the repository root:
 
@@ -95,6 +168,8 @@ python3 scripts/check-project.py --self-test
 python3 scripts/check-project.py
 python3 scripts/check-localization.py --self-test
 python3 scripts/check-localization.py --catalog
+python3 scripts/check-test-waits.py --self-test
+python3 scripts/check-test-waits.py
 ```
 
 `--catalog` only reads the catalog. `python3 scripts/check-localization.py <derived data path>` also
