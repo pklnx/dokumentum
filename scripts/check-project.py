@@ -14,10 +14,12 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   fails `lint`. A signed build adds keys of its own beyond these files (for example
   application-identifier, the team identifier and get-task-allow).
 - The share extension is embedded in the iOS app only (both platform filters, in either form Xcode
-  and xcodebuild accept) and links no package.
-- Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, CODE_SIGN_IDENTITY
-  and CODE_SIGNING_ALLOWED are not set in the project or a target, and Config/Unsigned.xcconfig holds
-  exactly its three macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig.
+  and xcodebuild accept), into PlugIns. It links no package and imports neither the store nor the
+  model, and its Info.plist holds exactly the placeholder's keys and activation rule.
+- Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, SIGNING_OVERRIDES
+  are not set in the project or a target, and Config/Unsigned.xcconfig holds exactly its three
+  macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig, which is never committed, and
+  conditions on an SDK name no version: this script resolves them on the bare SDK names.
 - No setting of Xcode's "App Sandbox & Hardened Runtime" category is set (CAPABILITY_SETTINGS): these
   inject entitlements past the files. The one exception is ENABLE_HARDENED_RUNTIME = NO in
   Project.xcconfig, until step 8 decides hardened runtime. The App Sandbox comes from the macOS
@@ -40,6 +42,7 @@ import pathlib
 import plistlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree
@@ -47,6 +50,7 @@ import xml.parsers.expat
 
 PROJECT = "Dokumentum.xcodeproj/project.pbxproj"
 XCCONFIG = "Config/Project.xcconfig"
+LOCAL_XCCONFIG = "Config/Local.xcconfig"
 UNSIGNED_XCCONFIG = "Config/Unsigned.xcconfig"
 SCHEME = "Dokumentum.xcodeproj/xcshareddata/xcschemes/Dokumentum.xcscheme"
 XCODE_VERSION = ".xcode-version"
@@ -67,7 +71,9 @@ XCCONFIG_ONLY = {
     "SWIFT_VERSION",
 }
 # Never in the .pbxproj either: with no signing identity, Config/Unsigned.xcconfig does this from outside.
-SIGNING_OVERRIDES = {"CODE_SIGN_IDENTITY", "CODE_SIGNING_ALLOWED"}
+SIGNING_OVERRIDES = {"CODE_SIGN_IDENTITY", "CODE_SIGNING_ALLOWED", "OTHER_CODE_SIGN_FLAGS"}
+# Not in Project.xcconfig either. CODE_SIGN_IDENTITY may stand there, just not as "-".
+XCCONFIG_SIGNING_OVERRIDES = SIGNING_OVERRIDES - {"CODE_SIGN_IDENTITY"}
 # The whole category "App Sandbox & Hardened Runtime" of CoreBuildSystem.xcspec, Xcode 27.1 (25 settings).
 # An explicit list, not a prefix: ENABLE_PREVIEWS and ENABLE_TESTABILITY must keep passing, and some of
 # these do not start with ENABLE_. A later Xcode may add settings: compare when .xcode-version changes.
@@ -128,6 +134,20 @@ ALL_SDKS = "iphoneos iphonesimulator macosx"
 IOS_SDKS = "iphoneos iphonesimulator"
 APP_TARGET = "Dokumentum"
 SHARE_TARGET = "DokumentumShare"
+SHARE_FOLDER = "DokumentumShare"
+# The store and the model stay out of the extension (CLAUDE.md, plan.md section 3.4).
+SHARE_FORBIDDEN_IMPORTS = {"DokumentumCore", "SwiftData"}
+# The placeholder's whole Info.plist file. Step 3 changes the rule here, on purpose.
+SHARE_INFO_CONTENT = {"NSExtension": {
+    "NSExtensionAttributes": {
+        "NSExtensionActivationRule": (
+            "SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $attachment, "
+            'ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.adobe.pdf" OR '
+            'ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image").@count >= 1).@count >= 1'),
+    },
+    "NSExtensionPointIdentifier": "com.apple.share-services",
+    "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).ShareViewController",
+}}
 
 
 def on_ios_and_mac(ios, mac):
@@ -238,16 +258,17 @@ def parse_xcconfig(text):
     """The settings of an xcconfig: {key: [(condition, value)]}. The key has no [sdk=...] condition."""
     settings = {}
     for line in text.splitlines():
-        match = re.match(r"\s*([A-Za-z_]\w*)((?:\[[^\]]*\])*)\s*=\s*(.*?)\s*$", line)
+        # Xcode also accepts a space before the condition: `KEY [sdk=*] = value`.
+        match = re.match(r"\s*([A-Za-z_]\w*)((?:\s*\[[^\]]*\])*)\s*=\s*(.*?)\s*$", line)
         if match:
             value = re.sub(r"\s*//.*$", "", match.group(3))
-            settings.setdefault(match.group(1), []).append((match.group(2), value))
+            settings.setdefault(match.group(1), []).append((re.sub(r"\s", "", match.group(2)), value))
     return settings
 
 
 def xcconfig_includes(text):
-    """The #include lines of an xcconfig, stripped."""
-    return [line.strip() for line in text.splitlines() if line.strip().startswith("#include")]
+    """The #include lines of an xcconfig, stripped. Xcode also accepts `# include`."""
+    return [line.strip() for line in text.splitlines() if re.match(r"\s*#\s*include", line)]
 
 
 def resolve(settings, name, target, sdk, depth=0):
@@ -282,7 +303,7 @@ def expand(settings, value, target, sdk, depth=0):
 
 def setting_name(key):
     """A build setting's name without its condition: `KEY[sdk=macosx*]` becomes `KEY`."""
-    return key.split("[", 1)[0]
+    return key.split("[", 1)[0].strip()
 
 
 def file_reference_paths(objects, group_id, prefix=""):
@@ -300,6 +321,13 @@ def file_reference_paths(objects, group_id, prefix=""):
     return paths
 
 
+def second_base_configuration_keys(configuration):
+    """baseConfigurationReferenceAnchor and ...RelativePath: the form of a base configuration that lies
+    inside a synchronized folder."""
+    return sorted(key for key in configuration if key.startswith("baseConfigurationReference")
+                  and key != "baseConfigurationReference")
+
+
 def check_build_configurations(objects, project, paths, xcconfig_keys):
     problems = []
     protected = xcconfig_keys | XCCONFIG_ONLY
@@ -311,6 +339,8 @@ def check_build_configurations(objects, project, paths, xcconfig_keys):
         where = f"project configuration {configuration.get('name')}"
         if paths.get(configuration.get("baseConfigurationReference")) != XCCONFIG:
             problems.append(f"{where}: its base configuration must be {XCCONFIG}")
+        for key in second_base_configuration_keys(configuration):
+            problems.append(f"{where}: {key} names another base configuration; {XCCONFIG} is the only one")
         for key in sorted(configuration.get("buildSettings", {})):
             problems += check_project_setting(where, key, protected)
     for target_id in project.get("targets", []):
@@ -320,6 +350,8 @@ def check_build_configurations(objects, project, paths, xcconfig_keys):
             where = f"target {target.get('name')}, configuration {configuration.get('name')}"
             if "baseConfigurationReference" in configuration:
                 problems.append(f"{where}: has its own base configuration; {XCCONFIG} is the only one")
+            for key in second_base_configuration_keys(configuration):
+                problems.append(f"{where}: {key} names its own base configuration; {XCCONFIG} is the only one")
             for key in sorted(configuration.get("buildSettings", {})):
                 problems += check_project_setting(where, key, protected)
     for target_id, attributes in project.get("attributes", {}).get("TargetAttributes", {}).items():
@@ -354,8 +386,13 @@ def check_xcconfig(text, settings):
             if (key, condition, value) != ("ENABLE_HARDENED_RUNTIME", "", "NO"):
                 problems.append(f"{XCCONFIG}: sets {key}{condition} = {value}, which injects entitlements past "
                                 "the entitlements files")
-    if "CODE_SIGNING_ALLOWED" in settings:
-        problems.append(f"{XCCONFIG}: sets CODE_SIGNING_ALLOWED; a build without signing says so on its command line")
+    for key in sorted(XCCONFIG_SIGNING_OVERRIDES & set(settings)):
+        problems.append(f"{XCCONFIG}: sets {key}; a build that signs differently says so on its command line")
+    for key, lines in sorted(settings.items()):
+        for condition, _ in lines:
+            if any(re.search(r"\d", pattern) for pattern in re.findall(r"\[sdk=([^\]]*)\]", condition)):
+                problems.append(f"{XCCONFIG}: {key}{condition} names an SDK version, which this script cannot "
+                                "resolve; use [sdk=macosx*] or [sdk=iphone*]")
     if settings.get("DEVELOPMENT_TEAM") != [("", TEAM)]:
         problems.append(f"{XCCONFIG}: DEVELOPMENT_TEAM must be one line with the team {TEAM}")
     if settings.get("CODE_SIGN_STYLE") != [("", "Automatic")]:
@@ -442,8 +479,37 @@ def check_info_plists(root):
     actual, problem = read_plist(root, SHARE_INFO)
     if problem:
         problems.append(problem)
-    elif actual.get("NSExtension", {}).get("NSExtensionPointIdentifier") != "com.apple.share-services":
-        problems.append(f"{SHARE_INFO}: NSExtensionPointIdentifier must be com.apple.share-services")
+    elif actual != SHARE_INFO_CONTENT:
+        problems.append(f"{SHARE_INFO}: must hold exactly the placeholder's keys and activation rule "
+                        f"(SHARE_INFO_CONTENT in scripts/check-project.py), found {actual}")
+    return problems
+
+
+def check_local_xcconfig(root):
+    """Config/Local.xcconfig overrides everything, so it stays personal. A file in the tree is fine; a
+    committed one is not. A directory without git (the self-test's fixtures) has nothing committed."""
+    try:
+        result = subprocess.run(["git", "-C", str(root), "ls-files", "--", LOCAL_XCCONFIG], capture_output=True, text=True)
+    except OSError as error:
+        return [f"{LOCAL_XCCONFIG}: cannot ask git whether it is committed: {error}"]
+    if result.returncode != 0:
+        if (root / ".git").exists():
+            return [f"{LOCAL_XCCONFIG}: cannot ask git whether it is committed: {result.stderr.strip()}"]
+        return []
+    if result.stdout.strip():
+        return [f"{LOCAL_XCCONFIG} is committed; it overrides everything and stays personal"]
+    return []
+
+
+def check_share_sources(root):
+    """The extension never opens the store: no import of the store's or the model's framework."""
+    problems = []
+    pattern = re.compile(r"^\s*(?:@\w+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(\w+)", re.M)
+    for path in sorted((root / SHARE_FOLDER).rglob("*.swift")):
+        for module in pattern.findall(path.read_text(encoding="utf-8")):
+            if module in SHARE_FORBIDDEN_IMPORTS:
+                problems.append(f"{path.relative_to(root)}: imports {module}; the extension never opens the store "
+                                "(plan.md, section 3.4)")
     return problems
 
 
@@ -469,8 +535,14 @@ def platform_filters(entry):
     return filters
 
 
+def embeds_into_plugins(phase):
+    """Both forms of the destination: `dstSubfolderSpec = 13;` and Xcode's newer `dstSubfolder = PlugIns;`."""
+    destination = phase.get("dstSubfolderSpec") == "13" or phase.get("dstSubfolder") == "PlugIns"
+    return destination and not phase.get("dstPath")
+
+
 def check_share_extension(objects, project):
-    """Embedded in the iOS app only, through both platform filters; no package linked."""
+    """Embedded in the iOS app only, through both platform filters, into PlugIns; no package linked."""
     by_name = {objects.get(target_id, {}).get("name"): target_id for target_id in project.get("targets", [])}
     if APP_TARGET not in by_name or SHARE_TARGET not in by_name:
         return []  # check_targets reports it.
@@ -492,7 +564,10 @@ def check_share_extension(objects, project):
         phase = objects.get(phase_id, {})
         if phase.get("isa") == "PBXCopyFilesBuildPhase":
             entries = [objects.get(identifier, {}) for identifier in phase.get("files", [])]
-            embedded += [entry for entry in entries if entry.get("fileRef") == share.get("productReference")]
+            found = [entry for entry in entries if entry.get("fileRef") == share.get("productReference")]
+            embedded += found
+            if found and not embeds_into_plugins(phase):
+                problems.append(f"target {APP_TARGET}: {phase.get('name')} must copy {SHARE_TARGET} into PlugIns")
     if len(embedded) != 1:
         problems.append(f"target {APP_TARGET}: needs to embed {SHARE_TARGET} once, found {len(embedded)}")
     for entry in embedded:
@@ -502,6 +577,11 @@ def check_share_extension(objects, project):
 
     if share.get("packageProductDependencies"):
         problems.append(f"target {SHARE_TARGET}: links a package; the extension links neither (plan.md, section 3.4)")
+    for phase_id in share.get("buildPhases", []):
+        for identifier in objects.get(phase_id, {}).get("files", []):
+            if "productRef" in objects.get(identifier, {}):
+                problems.append(f"target {SHARE_TARGET}: links a package in a build phase; the extension links "
+                                "neither (plan.md, section 3.4)")
     return problems
 
 
@@ -587,6 +667,8 @@ def check(root):
     except ValueError as error:
         problems.append(f"{XCCONFIG}: {error}")
     problems += check_share_extension(objects, project)
+    problems += check_share_sources(root)
+    problems += check_local_xcconfig(root)
     problems += check_entitlements(root)
     problems += check_info_plists(root)
     problems += check_unsigned_xcconfig(root)
@@ -627,11 +709,12 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		B0 = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DokumentumKit; sourceTree = "<group>";};
 		B1 = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DokumentumCore; sourceTree = "<group>";};
 		B2 = {isa = PBXFileReference; path = Project.xcconfig; sourceTree = "<group>";};
-		C0 = {isa = PBXNativeTarget; name = DokumentumShare; productReference = C1;};
+		C0 = {isa = PBXNativeTarget; name = DokumentumShare; buildPhases = (C5, ); productReference = C1;};
 		C1 = {isa = PBXFileReference; path = DokumentumShare.appex; sourceTree = BUILT_PRODUCTS_DIR;};
-		C2 = {isa = PBXCopyFilesBuildPhase; files = (C4, ); name = "Embed Foundation Extensions";};
+		C2 = {isa = PBXCopyFilesBuildPhase; dstPath = ""; dstSubfolderSpec = 13; files = (C4, ); name = "Embed Foundation Extensions";};
 		C3 = {isa = PBXTargetDependency; platformFilters = (ios, ); target = C0;};
 		C4 = {isa = PBXBuildFile; fileRef = C1; platformFilters = (ios, );};
+		C5 = {isa = PBXFrameworksBuildPhase; files = ();};
 	};
 	rootObject = A0;
 }
@@ -696,6 +779,7 @@ def write_fixture(root):
         XCCONFIG: FIXTURE_XCCONFIG,
         UNSIGNED_XCCONFIG: FIXTURE_UNSIGNED,
         SCHEME: FIXTURE_SCHEME,
+        f"{SHARE_FOLDER}/ShareViewController.swift": "import UIKit\n// import SwiftData\n",
         "TestPlans/Default.xctestplan": FIXTURE_DEFAULT_PLAN,
         "TestPlans/UISmoke.xctestplan": fixture_plan(("container:Dokumentum.xcodeproj", "A8", "DokumentumUITests")),
         XCODE_VERSION: "27.1\n",
@@ -713,10 +797,52 @@ def write_fixture(root):
     for name, content in ENTITLEMENTS.items():
         (root / name).write_bytes(plistlib.dumps(content))
     (root / IOS_APP_INFO).write_bytes(plistlib.dumps({"UIBackgroundModes": ["remote-notification"]}))
-    (root / SHARE_INFO).write_bytes(plistlib.dumps({"NSExtension": {
-        "NSExtensionPointIdentifier": "com.apple.share-services",
-        "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).ShareViewController",
-    }}))
+    (root / SHARE_INFO).write_bytes(plistlib.dumps(SHARE_INFO_CONTENT))
+
+
+def self_test_post_clone():
+    """The real ci_post_clone.sh under Xcode Cloud's variables, with stand-ins for xcodebuild and sw_vers."""
+    script = pathlib.Path(__file__).resolve().parent.parent / CI_SCRIPTS[0]
+    copied, error, left = "copied Config/Unsigned.xcconfig", "error: ", "left Config/ alone"
+    cases = [
+        ("the workflow PR", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "PR"}, False, 0, copied, True),
+        ("the workflow Main", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "Main"}, False, 0, copied, True),
+        ("the workflow main", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "main"}, False, 0, copied, True),
+        ("the workflow Release", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "Release"}, False, 0, left, False),
+        ("a similar name", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "PR-Release"}, False, 0, left, False),
+        ("no workflow under Xcode Cloud", {"CI_XCODE_CLOUD": "TRUE"}, False, 1, "CI_WORKFLOW is not set", False),
+        ("outside Xcode Cloud", {}, False, 0, left, False),
+        ("a Local.xcconfig already there", {"CI_XCODE_CLOUD": "TRUE", "CI_WORKFLOW": "PR"}, True, 1, error, True),
+    ]
+    for description, variables, local_exists, code, output, local_afterwards in cases:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            (tools / "xcodebuild").write_text(
+                '#!/bin/sh\ncase "$1" in\n-version) echo "Xcode 27.1";;\n'
+                '*) echo "-sdk iphoneos27.1"; echo "-sdk iphonesimulator27.1"; echo "-sdk macosx27.0";;\nesac\n')
+            (tools / "sw_vers").write_text("#!/bin/sh\nexit 0\n")
+            os.chmod(tools / "xcodebuild", 0o755)
+            os.chmod(tools / "sw_vers", 0o755)
+            (root / "Config").mkdir()
+            (root / XCODE_VERSION).write_text("27.1\n")
+            (root / XCCONFIG).write_text("IPHONEOS_DEPLOYMENT_TARGET = 27.0\nMACOSX_DEPLOYMENT_TARGET = 27.0\n")
+            (root / UNSIGNED_XCCONFIG).write_text(FIXTURE_UNSIGNED)
+            if local_exists:
+                (root / LOCAL_XCCONFIG).write_text("// personal\n")
+            environment = {key: value for key, value in os.environ.items() if not key.startswith("CI_")}
+            environment.update(variables, CI_PRIMARY_REPOSITORY_PATH=str(root),
+                               PATH=f"{tools}{os.pathsep}{os.environ['PATH']}")
+            result = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True)
+            combined = result.stdout + result.stderr
+            assert result.returncode == code, f"{description}: exit {result.returncode}, expected {code}: {combined}"
+            assert output in combined, f"{description}: expected {output!r} in {combined}"
+            local = root / LOCAL_XCCONFIG
+            assert local.exists() == local_afterwards, f"{description}: Local.xcconfig exists: {local.exists()}"
+            if local_afterwards and not local_exists:
+                assert local.read_text() == FIXTURE_UNSIGNED, f"{description}: not a copy of the unsigned file"
+    return len(cases)
 
 
 def self_test():
@@ -736,6 +862,14 @@ def self_test():
 
     def in_xcconfig(line):
         return edit(XCCONFIG, "ENABLE_PREVIEWS = YES", f"ENABLE_PREVIEWS = YES\n{line}")
+
+    def in_xcconfig_last(line):
+        return edit(XCCONFIG, '#include? "Local.xcconfig"', f'{line}\n#include? "Local.xcconfig"')
+
+    def committed_local(root):
+        (root / LOCAL_XCCONFIG).write_text("// committed\n")
+        for arguments in (["init", "-q"], ["add", "-f", LOCAL_XCCONFIG]):
+            subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
 
     def set_entitlement(name, key, value):
         def apply(root):
@@ -852,8 +986,8 @@ def self_test():
         ("no dependency on the extension", edit(PROJECT, "dependencies = (C3, );", "dependencies = ();"),
          "needs one dependency on DokumentumShare"),
         ("the extension not embedded", edit(PROJECT, "files = (C4, );", "files = ();"), "needs to embed DokumentumShare once"),
-        ("the extension links a package", edit(PROJECT, "name = DokumentumShare; productReference",
-                                               "name = DokumentumShare; packageProductDependencies = (D0, ); productReference"),
+        ("the extension links a package", edit(PROJECT, "buildPhases = (C5, ); productReference",
+                                               "buildPhases = (C5, ); packageProductDependencies = (D0, ); productReference"),
          "links a package"),
         # Signing.
         ("target identity", in_target("CODE_SIGN_IDENTITY"), "sets CODE_SIGN_IDENTITY"),
@@ -910,8 +1044,65 @@ def self_test():
         ("an extra key in the app's Info.plist", write(IOS_APP_INFO, plistlib.dumps({"UIBackgroundModes": ["remote-notification"], "X": "y"}).decode()),
          "holds only UIBackgroundModes"),
         ("another background mode", write(IOS_APP_INFO, plistlib.dumps({"UIBackgroundModes": ["audio"]}).decode()), "holds only UIBackgroundModes"),
-        ("another extension point", write(SHARE_INFO, plistlib.dumps({"NSExtension": {"NSExtensionPointIdentifier": "x"}}).decode()),
-         "NSExtensionPointIdentifier"),
+        ("another extension point", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
+            **SHARE_INFO_CONTENT["NSExtension"], "NSExtensionPointIdentifier": "x"}}).decode()),
+         "must hold exactly the placeholder's keys"),
+        ("an activation rule that offers everything", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
+            **SHARE_INFO_CONTENT["NSExtension"],
+            "NSExtensionAttributes": {"NSExtensionActivationRule": "TRUEPREDICATE"}}}).decode()),
+         "must hold exactly the placeholder's keys"),
+        ("a background mode in the extension", write(SHARE_INFO, plistlib.dumps(
+            {**SHARE_INFO_CONTENT, "UIBackgroundModes": ["remote-notification"]}).decode()),
+         "must hold exactly the placeholder's keys"),
+        # Forms Xcode accepts that a plain parser overlooks.
+        ("capability with a space before the condition", in_xcconfig("ENABLE_OUTGOING_NETWORK_CONNECTIONS [sdk=*] = YES"),
+         "sets ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=*] = YES"),
+        ("capability with a space on a target", in_target('"ENABLE_OUTGOING_NETWORK_CONNECTIONS [sdk=*]"'), "which injects"),
+        ("identity with a space before the condition", in_xcconfig("CODE_SIGN_IDENTITY [sdk=macosx*] = -"), "next to a team"),
+        ("entitlements with a space before the condition", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS [sdk=macosx*] = Config/x.plist"),
+         "target Dokumentum: CODE_SIGN_ENTITLEMENTS resolves to 'Config/x.plist' on macosx"),
+        ("unsigned file with a spaced extra key", edit(UNSIGNED_XCCONFIG, "// A comment", "ENABLE_OUTGOING_NETWORK_CONNECTIONS [sdk=*] = YES"),
+         "must hold exactly"),
+        ("target base configuration by anchor", edit(PROJECT, "A9 = {isa = XCBuildConfiguration;",
+                                                     "A9 = {isa = XCBuildConfiguration; baseConfigurationReferenceAnchor = A6;"),
+         "target Dokumentum, configuration Debug: baseConfigurationReferenceAnchor names its own"),
+        ("target base configuration by path", edit(PROJECT, "A9 = {isa = XCBuildConfiguration;",
+                                                   "A9 = {isa = XCBuildConfiguration; baseConfigurationReferenceRelativePath = x.xcconfig;"),
+         "baseConfigurationReferenceRelativePath names its own"),
+        ("project base configuration by path", edit(PROJECT, "baseConfigurationReference = B2;",
+                                                    "baseConfigurationReference = B2; baseConfigurationReferenceRelativePath = x.xcconfig;"),
+         "project configuration Debug: baseConfigurationReferenceRelativePath names another"),
+        ("xcconfig with # include", in_xcconfig('# include "Unsigned.xcconfig"'), "the only include allowed"),
+        ("xcconfig with #  include?", in_xcconfig('#  include? "Unsigned.xcconfig"'), "the only include allowed"),
+        ("unsigned file with # include", edit(UNSIGNED_XCCONFIG, "// A comment", '# include "Sneaky.xcconfig"'), "includes another file"),
+        ("entitlements for one SDK version pattern", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27*] = Config/x.plist"),
+         "DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27*] names an SDK version"),
+        ("entitlements for one exact SDK", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27.0] = Config/x.plist"),
+         "names an SDK version"),
+        ("identity for one SDK version", in_xcconfig("CODE_SIGN_IDENTITY[sdk=macosx27*] = Apple Development"), "names an SDK version"),
+        ("xcconfig OTHER_CODE_SIGN_FLAGS", in_xcconfig("OTHER_CODE_SIGN_FLAGS = --options runtime"), "sets OTHER_CODE_SIGN_FLAGS"),
+        ("xcconfig OTHER_CODE_SIGN_FLAGS with a condition", in_xcconfig("OTHER_CODE_SIGN_FLAGS[sdk=macosx*] = --options runtime"),
+         "sets OTHER_CODE_SIGN_FLAGS"),
+        ("target OTHER_CODE_SIGN_FLAGS", in_target("OTHER_CODE_SIGN_FLAGS"), "sets OTHER_CODE_SIGN_FLAGS"),
+        ("project OTHER_CODE_SIGN_FLAGS", in_project("OTHER_CODE_SIGN_FLAGS"), "sets OTHER_CODE_SIGN_FLAGS"),
+        ("a committed Local.xcconfig", committed_local, f"{LOCAL_XCCONFIG} is committed"),
+        ("a personal Local.xcconfig is fine", write(LOCAL_XCCONFIG, "// personal\n"), None),
+        # The extension.
+        ("a package linked in the extension's phase only", edit(PROJECT, "C5 = {isa = PBXFrameworksBuildPhase; files = ();};",
+                                                                "C5 = {isa = PBXFrameworksBuildPhase; files = (C6, );};\n\t\tC6 = {isa = PBXBuildFile; productRef = D0;};"),
+         "links a package in a build phase"),
+        ("the extension imports SwiftData", write(f"{SHARE_FOLDER}/Store.swift", "import SwiftData\n"), "imports SwiftData"),
+        ("the extension imports the core", write(f"{SHARE_FOLDER}/Store.swift", "import DokumentumCore\n"), "imports DokumentumCore"),
+        ("an attributed import", write(f"{SHARE_FOLDER}/Store.swift", "@preconcurrency import SwiftData\n"), "imports SwiftData"),
+        ("a declaration import", write(f"{SHARE_FOLDER}/Store.swift", "import struct DokumentumCore.ProcessingEnvironment\n"),
+         "imports DokumentumCore"),
+        ("an indented import", write(f"{SHARE_FOLDER}/Store.swift", "#if DEBUG\n    import SwiftData\n#endif\n"), "imports SwiftData"),
+        ("embedded into another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolderSpec = 10;"), "must copy DokumentumShare into PlugIns"),
+        ("embedded without a destination", edit(PROJECT, "dstSubfolderSpec = 13;", ""), "must copy DokumentumShare into PlugIns"),
+        ("embedded into a subfolder", edit(PROJECT, 'dstPath = "";', "dstPath = x;"), "must copy DokumentumShare into PlugIns"),
+        ("the newer form of the destination is fine", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolder = PlugIns;"), None),
+        ("the newer form with another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolder = Frameworks;"),
+         "must copy DokumentumShare into PlugIns"),
         ("the extension's Info.plist is gone", remove(SHARE_INFO), f"{SHARE_INFO} is missing"),
         # The unsigned path.
         ("unsigned file missing", remove(UNSIGNED_XCCONFIG), f"{UNSIGNED_XCCONFIG} is missing"),
@@ -965,7 +1156,8 @@ def self_test():
     assert parse_xcconfig("A[sdk=x*][arch=y] = 1\n// B = 2\n#include? \"C\"\nD =\nE = f // g\n") == \
         {"A": [("[sdk=x*][arch=y]", "1")], "D": [("", "")], "E": [("", "f")]}
     assert len(CAPABILITY_SETTINGS) == 25
-    print(f"self-test passed ({len(cases) + 3} cases)")
+    post_clone_cases = self_test_post_clone()
+    print(f"self-test passed ({len(cases) + 3 + post_clone_cases} cases)")
 
 
 def main():

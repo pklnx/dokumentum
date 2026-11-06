@@ -4,10 +4,9 @@
 // key that this file sets. Keep one commented block per topic.
 //
 // Only what is truly structural stays in the .pbxproj: the Debug/Release differences on the
-// project, and on the targets TEST_HOST, BUNDLE_LOADER, TEST_TARGET_NAME, the runpaths and the
-// extension's SKIP_INSTALL. What differs per target goes through a variable named after the target,
-// because $(TARGET_NAME) is the only way to tell the targets apart here; check-project.py asserts
-// what each target resolves to.
+// project, and on the targets TEST_HOST, BUNDLE_LOADER, TEST_TARGET_NAME and the runpaths. What
+// differs per target goes through a variable named after the target, because $(TARGET_NAME) is the
+// only way to tell the targets apart here; check-project.py asserts what each target resolves to.
 
 // Version. MARKETING_VERSION is what users see (CFBundleShortVersionString; TestFlight builds use
 // YY.MM.N from step 8 on, plan.md section 4). CURRENT_PROJECT_VERSION is the build number
@@ -80,10 +79,10 @@ LOCALIZATION_PREFERS_STRING_CATALOGS = YES
 DOKUMENTUM_EMIT_LOC_STRINGS_Dokumentum = YES
 SWIFT_EMIT_LOC_STRINGS = $(DOKUMENTUM_EMIT_LOC_STRINGS_$(TARGET_NAME):default=NO)
 
-// Signing. Automatic with the team; signed builds run on the maintainer's machine and in Xcode Cloud.
-// A machine without a signing identity (the development VM) builds through Config/Unsigned.xcconfig,
-// see docs/development/index.md. Never set CODE_SIGN_IDENTITY = - here: next to a team it gives an ad
-// hoc macOS build with exit 0, and check-project.py rejects it.
+// Signing. Automatic with the team; signed builds run on the maintainer's machine. The development VM
+// and Xcode Cloud's test workflows build macOS through Config/Unsigned.xcconfig, see
+// docs/development/index.md. Never set CODE_SIGN_IDENTITY = - here: next to a team it gives an ad hoc
+// macOS build with exit 0, and check-project.py rejects it.
 CODE_SIGN_STYLE = Automatic
 DEVELOPMENT_TEAM = 88GY2V9C2A
 

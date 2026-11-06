@@ -11,8 +11,8 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 
 | Where | Used for |
 |---|---|
-| A macOS VM on the maintainer's MacBook Pro (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code. It has no signing identity and builds unsigned, see "Build and test". |
-| The MacBook Pro itself, with the maintainer's Apple Account | Signed builds and runs on the iPhone and the Mac. |
+| A macOS VM on the maintainer's MacBook Pro (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: it has no signing identity and builds unsigned, see "Build and test". |
+| The MacBook Pro itself, with the maintainer's Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
@@ -59,8 +59,9 @@ app) and `DokumentumUITests`. Two local packages live in `Packages/`.
 - **Each package is a folder reference in the project**, not an
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
-- **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine and
-  in Xcode Cloud; the VM builds unsigned.
+- **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine. The
+  VM and Xcode Cloud's test workflows build macOS without team and entitlements, see "The unsigned
+  path".
 
 ## Build and test
 
@@ -88,11 +89,17 @@ swift format lint --strict --recursive --configuration .swift-format Dokumentum*
 ```
 
 **The unsigned path.** With the team and the entitlements in the project, a macOS build without a
-signing identity exits 65 (`No profiles for 'space.pklnx.Dokumentum'`, `No signing certificate "Mac
-Development"`); simulator builds and `swift test` do not need one. `Config/Unsigned.xcconfig` makes the
-macOS build ad hoc, without a team and without entitlements. It sets only macOS-conditioned keys, so
-the simulator keeps the real team and keys, which a build shows in its `*-Simulated.xcent` files. The
-project does not reference the file: it reaches a build only through this variable.
+signing identity exits 65 (`No profiles for 'space.pklnx.Dokumentum'`); simulator builds and
+`swift test` do not need one. That error ends with the advice to pass `-allowProvisioningUpdates`: it
+does not apply, and the flag stays barred in the VM. The fix for a forgotten prefix is the prefix.
+`Config/Unsigned.xcconfig` makes the macOS build ad hoc, without a team and without entitlements. It
+sets only macOS-conditioned keys, so the simulator keeps the real team and keys, which a build shows in
+its `*-Simulated.xcent` files. The project does not reference the file: it reaches a build only through
+this variable, or through Xcode Cloud's copy (see "Xcode Cloud").
+
+**What this leaves untested.** macOS tests in the VM and in Xcode Cloud run without the entitlements and
+outside the sandbox, with no iCloud or push keys. Only the maintainer's signed build exercises them. A
+macOS test passing here says nothing about behaviour that depends on them.
 
 - Use the variable as a prefix on a command run from the repository root, and do not export it in a
   profile. Its path is resolved against the current directory. Exported, it would break every build from
@@ -220,6 +227,12 @@ the repository holds only the shared scheme and `ci_scripts/`.
 - `ci_scripts/ci_post_clone.sh` prints `xcodebuild -version`, `xcodebuild -showsdks` and `sw_vers`. It
   fails when the Xcode differs from `.xcode-version`, or when there is no SDK for the minimum OS in
   `Config/Project.xcconfig`.
+- **Xcode Cloud's test actions sign ad hoc**: their command line has `CODE_SIGN_IDENTITY=-`, and macOS
+  refuses to launch an ad hoc test host with `com.apple.developer.*` keys ("Runningboard has returned
+  error 5", "Launchd job spawn failed"). So for the workflows `PR`, `Main` or `main`,
+  `ci_post_clone.sh` copies `Config/Unsigned.xcconfig` to `Config/Local.xcconfig`, and prints that it
+  did. Any other workflow, such as step 8's `Release`, keeps the real signing settings, and the script
+  prints that it left them alone. Under Xcode Cloud without `CI_WORKFLOW` it fails.
 - `ci_scripts/ci_post_xcodebuild.sh` runs the localisation check's build mode on
   `$CI_DERIVED_DATA_PATH` after `build`, `build-for-testing` and `archive`, unless `xcodebuild` failed.
 

@@ -1,8 +1,11 @@
 // The unsigned path for machines without a signing identity (the development VM). Never part of the
-// project: it applies only through the environment variable, as a prefix on a command run from the
+// project: it applies through the environment variable, as a prefix on a command run from the
 // repository root (the path is resolved against the current directory):
 //
 //     XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild ...
+//
+// The one other case: Xcode Cloud's test workflows, whose ci_scripts/ci_post_clone.sh copies this file
+// to Config/Local.xcconfig, because their test actions sign ad hoc.
 //
 // Do not export the variable in a profile, and do not #include this file: scripts/check-project.py
 // fails `lint` on any include in Project.xcconfig other than Local.xcconfig. Commands and what a wrong

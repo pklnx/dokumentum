@@ -48,7 +48,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
-| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine and in Xcode Cloud, the development VM builds unsigned) |
+| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; the development VM and Xcode Cloud's test workflows build macOS unsigned, section 4) |
 | Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; no app group, no network, no file access yet. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
@@ -209,6 +209,15 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 
   swift-format, the formatter bundled with the Swift toolchain, replaces
   SwiftFormat and SwiftLint, so no extra tool is needed.
+- Signing in tests: Xcode Cloud's test actions sign ad hoc (`CODE_SIGN_IDENTITY=-`
+  in their log), whatever the project says, so the team in the project does not
+  decide how they sign (question T4 of #1, answered for tests; whether a
+  distribution build needs the team stays for step 8). macOS refuses to launch an ad
+  hoc test host with `com.apple.developer.*` keys, so `ci_scripts/ci_post_clone.sh`
+  applies `Config/Unsigned.xcconfig` in the workflows `PR` and `Main`, never in
+  step 8's `Release`. So macOS tests in Xcode Cloud and in the VM run without the
+  entitlements and outside the sandbox; only the maintainer's signed build
+  exercises them.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
   in a macOS VM on the maintainer's MacBook Pro, with Claude Code there (local
   sessions, `gh` available). The VM has no signing identity and builds

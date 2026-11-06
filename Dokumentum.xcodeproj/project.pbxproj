@@ -458,7 +458,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
-				SKIP_INSTALL = YES;
 			};
 			name = Debug;
 		};
@@ -466,7 +465,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
-				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
