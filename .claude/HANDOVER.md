@@ -11,7 +11,7 @@
 
 ## Maintainer actions open
 - Development machine: the MacBook Pro replaces the Mac mini (returned) and the MacBook Air (not planned as a target). macOS 27, Xcode 27.x; confirm versions (`sw_vers`, `xcodebuild -version`) at the start of #21. For the agents: the Dev Apple Account (role Developer; accept its iCloud terms before the first sign-in) and a GitHub machine account (open, see #1); in a VM, 16 GB RAM.
-- Xcode Cloud onboarding once part 2's project exists (plan on #1, maintainer step 6); then the ruleset with the required checks (step 8).
+- Xcode Cloud is onboarded (plan on #1, maintainer step 6); next the ruleset with the required checks (step 8).
 - The rest of #1's maintainer steps (3 devices, 7 compute hours, 9 device check on the iPhone and the MacBook Pro) and T10 (DW2/DW3 move to a later part if onboarding comes after #21): see the plan and the last comments on #1.
 
 ## Notes

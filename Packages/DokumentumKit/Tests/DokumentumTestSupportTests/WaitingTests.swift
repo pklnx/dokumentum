@@ -8,6 +8,7 @@ import Testing
 struct WaitingTests {
     /// Gives something that must not happen the time to happen. It only keeps a mutation from going
     /// unnoticed: a slow machine can miss it, but can never fail a correct helper with it.
+    // allow-wait: a negative check has no signal to wait for
     private func negativeCheck() async {
         await TestSupport.safetyNet(.milliseconds(100), interval: .milliseconds(10))
     }
@@ -47,12 +48,31 @@ struct WaitingTests {
         #expect(await waiter.value)
     }
 
-    /// The safety net ends a wait whose signal never comes, with an issue.
+    /// A `fire()` reaches everyone who waits for that count, not just one of them.
+    @Test func aSignalWakesAllItsWaiters() async {
+        let signal = TestSignal()
+        let reached = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<2 {
+                group.addTask { await signal.wait() }
+            }
+            await negativeCheck()  // Both are waiting by now, so one `fire()` has to reach both.
+            signal.fire()
+            var results: [Bool] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+        #expect(reached == [true, true])
+    }
+
+    /// The safety net ends a wait whose signal never comes, with an issue and `false`. The result is
+    /// checked outside `withKnownIssue`: inside, its failure would count as the known issue.
     @Test func aSignalThatNeverComesTimesOut() async {
         let signal = TestSignal()
+        var reached = true
         await withKnownIssue {
-            #expect(await signal.wait(timeout: .milliseconds(100)) == false)
+            reached = await signal.wait(timeout: .milliseconds(100))
         }
+        #expect(!reached)
     }
 
     @Test @MainActor func aCountingSignalFiresForEveryElement() async {
@@ -66,32 +86,6 @@ struct WaitingTests {
     }
 
     // MARK: The safety net
-
-    /// The safety net takes its rounds on the waiter's actor: while that actor is blocked, the
-    /// net stands still, and a net without an actor with twice the budget runs out first.
-    @Test func aBlockedActorHoldsItsSafetyNet() async {
-        let busy = BusyActor()
-        let blocked = Checkpoint()
-        defer { blocked.release() }
-        Task { await busy.block(blocked) }
-        #expect(await blocked.reached())
-
-        let ranOut = TestSignal()
-        Task.detached {
-            await TestSupport.safetyNet(.milliseconds(100), interval: .milliseconds(10), on: busy)
-            ranOut.fire()
-        }
-        // The free net gets the same treatment (detached, no actor) and twice the budget, so a
-        // loaded machine slows both alike; we wait for it to finish, not for a time.
-        let free = Task.detached {
-            await TestSupport.safetyNet(.milliseconds(200), interval: .milliseconds(10))
-        }
-        await free.value
-        #expect(ranOut.count == 0, "the net ran out while its actor was blocked")
-
-        blocked.release()
-        #expect(await ranOut.wait(), "it runs out once the actor is free again")
-    }
 
     @Test func aCancelledSafetyNetEndsEarly() async {
         let ended = TestSignal()
@@ -147,9 +141,11 @@ struct WaitingTests {
 
     @Test func aCheckpointThatIsNeverReachedTimesOut() async {
         let checkpoint = Checkpoint()
+        var reached = true
         await withKnownIssue {
-            #expect(await checkpoint.reached(timeout: .milliseconds(100)) == false)
+            reached = await checkpoint.reached(timeout: .milliseconds(100))
         }
+        #expect(!reached)
     }
 
     /// Suspends until cancelled, built on `Checkpoint`.
@@ -201,9 +197,11 @@ struct WaitingTests {
 
     @Test func aDebounceThatNeverStartsTimesOut() async {
         let debounce = ManualDebounce()
+        var started = true
         await withKnownIssue {
-            #expect(await debounce.waitForStarts(1, timeout: .milliseconds(100)) == false)
+            started = await debounce.waitForStarts(1, timeout: .milliseconds(100))
         }
+        #expect(!started)
     }
 
     // MARK: waitUntil
@@ -213,10 +211,11 @@ struct WaitingTests {
         signal.fire()
         let reached = try await TestSupport.waitUntil { signal.count == 1 }
         #expect(reached)
+        var never = true
         await withKnownIssue {
-            let never = try await TestSupport.waitUntil(timeout: .milliseconds(100)) { false }
-            #expect(!never)
+            never = try await TestSupport.waitUntil(timeout: .milliseconds(100)) { false }
         }
+        #expect(!never)
     }
 
     /// The overload for a condition that needs an actor's turn.
@@ -224,18 +223,115 @@ struct WaitingTests {
         let counter = Counter()
         let reached = try await TestSupport.waitUntil(asynchronously: { await counter.next() >= 3 })
         #expect(reached)
+        var never = true
         await withKnownIssue {
-            let never = try await TestSupport.waitUntil(timeout: .milliseconds(100), asynchronously: { false })
-            #expect(!never)
+            never = try await TestSupport.waitUntil(timeout: .milliseconds(100), asynchronously: { false })
         }
+        #expect(!never)
     }
 }
 
-/// An actor whose executor a test blocks (`aBlockedActorHoldsItsSafetyNet`).
+/// The safety net while the waiter's actor is blocked. Serialized, because each test blocks a thread
+/// of the cooperative pool for its whole run, and together they could use up a small pool.
+@Suite(.serialized) struct BlockedActorTests {
+    /// The safety net takes its rounds on the waiter's actor: while that actor is blocked, the
+    /// net stands still, and a net without an actor with twice the budget runs out first.
+    @Test func aBlockedActorHoldsItsSafetyNet() async {
+        let busy = BusyActor()
+        let blocked = Checkpoint()
+        defer { blocked.release() }
+        Task { await busy.block(blocked) }
+        #expect(await blocked.reached())
+
+        let ranOut = TestSignal()
+        Task.detached {
+            await TestSupport.safetyNet(.milliseconds(100), interval: .milliseconds(10), on: busy)
+            ranOut.fire()
+        }
+        // The free net gets the same treatment (detached, no actor) and twice the budget, so a
+        // loaded machine slows both alike; we wait for it to finish, not for a time.
+        let free = Task.detached {
+            await TestSupport.safetyNet(.milliseconds(200), interval: .milliseconds(10))
+        }
+        await free.value
+        #expect(ranOut.count == 0, "the net ran out while its actor was blocked")
+
+        blocked.release()
+        #expect(await ranOut.wait(), "it runs out once the actor is free again")
+    }
+
+    /// The budget of the waits below, against the longer free net that runs while their actor is
+    /// blocked. A wait that does not pass on its actor runs out during the free net, so the event
+    /// that comes after it is too late: the wait reports `false` with an issue.
+    private static let budget = Duration.milliseconds(300)
+
+    private func aWaitStandsStillWithItsActor(
+        wait: @escaping @Sendable (isolated BusyActor) async -> Bool,
+        event: @escaping @Sendable () async -> Void
+    ) async throws {
+        let busy = BusyActor()
+        let blocked = Checkpoint()
+        defer { blocked.release() }
+        let ended = TestSignal()
+        let waiter = Task {
+            let reached = await busy.blockOnceSuspended(blocked, during: wait)
+            ended.fire()
+            return reached
+        }
+        #expect(await blocked.reached())
+
+        // allow-wait: a negative check, the wait must not run out during this
+        await TestSupport.safetyNet(Self.budget * 3)
+        await event()
+        blocked.release()
+        try #require(await ended.wait())
+        #expect(await waiter.value)
+    }
+
+    @Test func aSignalWaitStandsStillWithItsActor() async throws {
+        let signal = TestSignal()
+        try await aWaitStandsStillWithItsActor(
+            wait: { _ in await signal.wait(timeout: Self.budget) },
+            event: { signal.fire() })
+    }
+
+    @Test func aCheckpointWaitStandsStillWithItsActor() async throws {
+        let checkpoint = Checkpoint()
+        defer { checkpoint.release() }
+        try await aWaitStandsStillWithItsActor(
+            wait: { _ in await checkpoint.reached(timeout: Self.budget) },
+            event: {
+                Task { await checkpoint.pass() }
+                await checkpoint.reached()
+            })
+    }
+
+    @Test func aDebounceWaitStandsStillWithItsActor() async throws {
+        let debounce = ManualDebounce()
+        defer { debounce.fire() }
+        try await aWaitStandsStillWithItsActor(
+            wait: { _ in await debounce.waitForStarts(1, timeout: Self.budget) },
+            event: {
+                Task { _ = try? await debounce.sleep(.seconds(3600)) }
+                await debounce.waitForStarts(1)
+            })
+    }
+}
+
+/// An actor whose executor a test blocks (`BlockedActorTests`).
 private actor BusyActor {
     /// Blocks this actor's thread until `checkpoint` is released.
     func block(_ checkpoint: Checkpoint) {
         checkpoint.passBlocking()
+    }
+
+    /// Runs `wait` on this actor. The actor is blocked from the moment `wait` suspends: the task is
+    /// this actor's next job, so the wait's safety net cannot take a turn before it.
+    func blockOnceSuspended(
+        _ checkpoint: Checkpoint, during wait: @Sendable (isolated BusyActor) async -> Bool
+    ) async -> Bool {
+        Task { block(checkpoint) }
+        return await wait(self)
     }
 }
 

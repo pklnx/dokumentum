@@ -58,11 +58,14 @@ Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 | Where | macOS | Xcode | SDKs | Simulator runtimes |
 |---|---|---|---|---|
 | Development VM (2026-11-06) | 27.2 (26B123) | 27.1 (27A9275), Swift 6.4 | iOS 27.1, iOS Simulator 27.1, macOS 27.0 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
-| Xcode Cloud | pending | pending | pending | pending |
+| Xcode Cloud (2026-11-06) | 27 (26A428) | 27.1 (27A9275) | not recorded | not recorded |
 
-The Xcode Cloud row is filled from the first `ci_post_clone.sh` output after the
-onboarding. `.xcode-version` holds the VM's 27.1; whether Xcode Cloud offers that
-version is not verified yet.
+The Xcode Cloud row comes from the maintainer's workflow settings and the checks
+of PR #37, not from reading the `ci_post_clone.sh` output: that log lives in App
+Store Connect. The gate in the script passed, because the actions that run it are
+green: it fails when the Xcode differs from `.xcode-version` (27.1) or when there
+is no SDK for the minimum OS. The checks are `Dokumentum | PR | Default - iOS`,
+`Dokumentum | PR | Default - macOS` and `Dokumentum | PR`.
 
 ## 3. Architecture
 
@@ -196,7 +199,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   tests, GitHub Actions on Linux runners (`ubuntu-24.04`) run the rest.
   | Where | Check | Content |
   |---|---|---|
-  | Xcode Cloud, workflow `PR` (and `Main` on pushes to `main`) | one Test action per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The exact check names are copied from the first `PR` run before the ruleset is set |
+  | Xcode Cloud, workflow `PR` (and `Main` on pushes to `main`) | one Test action per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The check names are in section 2 |
   | GitHub Actions `checks.yml` | `lint` | Python check scripts and their self-tests (labels file, project invariants; more scripts arrive with the steps that need them) |
   | GitHub Actions `checks.yml` | `localization` | the String Catalog check |
   | GitHub Actions `checks.yml` | `kit-linux` | `swift format lint` and the `DokumentumKit` tests with the pinned Swift for Linux toolchain |

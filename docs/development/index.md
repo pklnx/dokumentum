@@ -92,7 +92,14 @@ request is the same bet.
 `scripts/check-test-waits.py`, part of `lint`, enforces this in `DokumentumTests`, `DokumentumUITests`,
 `Packages/*/Tests` and `DokumentumTestSupport`. A use that is justified stays when it says why, on its
 line or in the comment lines directly above it: `// allow-wait: <reason>`. Waits of XCTest with a
-condition (`waitForExistence`) are fine: UI tests use them.
+condition (`waitForExistence`) are fine: UI tests use them. The script does not flag `clock.sleep(for:)`
+on a `Clock`: its pattern leaves out `.sleep(`, because `debounce.sleep(…)` must stay allowed. That rule
+holds without the script.
+
+One timed wait is allowed: a negative check, which has no signal because it shows that something does
+not happen. `negativeCheck()` in `WaitingTests` is the helper for it, and `BlockedActorTests` does the
+same with a longer net. Both use `safetyNet`, and a slow machine can make them miss a broken helper, but
+they can never fail a correct one.
 
 The tools are in the library `DokumentumTestSupport` (`Packages/DokumentumKit`), which every test
 target can import:
@@ -128,7 +135,7 @@ when nobody releases it; `WaitingTests` shows the pattern.
 `TestSupport.safetyNet`, and every round takes a turn on that actor after its sleep. The work a
 main-actor test waits for usually needs the main actor too, so while the main actor is busy the net
 stands still with it instead of running out. A wait from a nonisolated test counts pool rounds only.
-`WaitingTests.aBlockedActorHoldsItsSafetyNet` checks it.
+`BlockedActorTests` checks the net and each of the three waits.
 
 **The timeout scale.** Every wait multiplies its timeout by `DOKUMENTUM_TEST_TIMEOUT_SCALE` (1 when it
 is missing or not a positive number), for a run that is slowed down on purpose. `swift test` passes the
@@ -150,7 +157,7 @@ runs, and under `swift test`.
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Not onboarded yet. |
+| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |
 
 Run the Python checks from the repository root:
 
