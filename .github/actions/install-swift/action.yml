@@ -1,0 +1,25 @@
+name: Install Swift
+description: >
+  Installs the pinned Swift for Linux release into the runner's temporary folder and puts it on
+  the PATH. Checks the archive's SHA-256. To update, change the version and the checksum here and
+  in docs/development/index.md.
+runs:
+  using: composite
+  steps:
+    - name: Install Swift
+      shell: bash
+      env:
+        SWIFT_VERSION: 6.4.1
+        SWIFT_SHA256: 7d246c7114077ad01dba4ad897628446ada4c489d6c7dbcf39ae3f25cbe17e8b
+      run: |
+        set -euo pipefail
+        release="swift-$SWIFT_VERSION-RELEASE"
+        archive="$release-ubuntu24.04.tar.gz"
+        cd "$RUNNER_TEMP"
+        curl -sSfL --retry 3 -o "$archive" \
+          "https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu2404/$release/$archive"
+        echo "$SWIFT_SHA256  $archive" | sha256sum --check --strict
+        tar -xzf "$archive"
+        rm "$archive"
+        echo "$RUNNER_TEMP/$release-ubuntu24.04/usr/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/$release-ubuntu24.04/usr/bin/swift" --version

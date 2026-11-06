@@ -5,8 +5,8 @@ Workflow, roles and review rules: `CLAUDE.md` and
 [pklnx/dev-process](https://github.com/pklnx/dev-process).
 
 This page grows with the steps. It describes what exists now (repository
-basics and the Linux checks); the Xcode project, build commands and the test
-infrastructure are added by the parts that create them.
+basics, the Xcode project, the packages and the checks); the test
+infrastructure is added by the part that creates it.
 
 ## Where work runs
 
@@ -21,7 +21,9 @@ infrastructure are added by the parts that create them.
 
 1. macOS 27 (on the host and, if used, in the VM), Xcode 27.x installed and selected
    (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
-   Accounts.
+   Accounts. Selecting Xcode with `xcode-select -s` needs `sudo`; without it, set
+   `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (in
+   `~/.zprofile` for login shells).
 2. `gh auth status` is OK.
 3. Once per clone, enable the secret-scan hook:
 
@@ -30,20 +32,95 @@ infrastructure are added by the parts that create them.
    git config core.hooksPath .githooks
    ```
 
+## The project
+
+`Dokumentum.xcodeproj` has one multiplatform app target (`Dokumentum`: iOS and native
+macOS, iPhone only), `DokumentumTests` (Swift Testing, hosted by the app) and
+`DokumentumUITests`. Two local packages live in `Packages/`.
+
+- **Folders are synchronized** (`objectVersion = 77`, `PBXFileSystemSynchronizedRootGroup`):
+  adding a file to `Dokumentum/`, `DokumentumTests/` or `DokumentumUITests/` does not change
+  `project.pbxproj`.
+- **Settings live in `Config/Project.xcconfig`**, the project's base configuration. A setting in the
+  `.pbxproj` overrides it unseen, so `scripts/check-project.py` fails `lint` when the project or a
+  target sets a key from that file. Xcode's capability editor writes such settings: strip them
+  afterwards. Personal overrides go into `Config/Local.xcconfig` (not in git).
+- **Each package is a folder reference in the project**, not an
+  `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
+  its tests from a test plan and still reports success. `check-project.py` guards this.
+- **Builds are signed ad hoc** until part 3 (`CODE_SIGN_IDENTITY = -`, no team), which needs no
+  identity or provisioning profile on the simulator and on this Mac.
+
+## Build and test
+
+From the repository root (`-derivedDataPath build` keeps a build in the ignored `build/` folder):
+
+```sh
+# Test plan Default: DokumentumTests, DokumentumKitTests, DokumentumCoreTests
+xcodebuild -scheme Dokumentum -destination 'platform=macOS' test
+xcodebuild -scheme Dokumentum -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
+
+# Test plan UISmoke: DokumentumUITests (one test arrives with part 4)
+xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
+
+# The packages alone, without a simulator
+swift test --package-path Packages/DokumentumKit
+swift test --package-path Packages/DokumentumCore
+
+# Formatting: the same command as `kit-linux`
+swift format lint --strict --recursive --configuration .swift-format Dokumentum*/ Packages/
+```
+
+The iPhone 18 Pro exists only on the iOS 27.0 simulator runtime, so the destination names the OS.
+UI tests on macOS need Automation Mode: without it the run ends with "Timed out while enabling
+automation mode". `automationmodetool` shows its state; enabling it needs the machine's administrator
+password once (`sudo automationmodetool enable-automationmode-without-authentication`).
+
 ## Checks
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts and validates `.github/labels.json` (`scripts/check-labels.py`). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`). |
+| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
+| `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| Xcode Cloud `PR` | Xcode Cloud | Build and tests; added with the Xcode project. |
-| `localization`, `kit-linux` | GitHub Actions, `checks.yml` | Added with the Xcode project and the packages. |
+| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Not onboarded yet. |
 
 Run the Python checks from the repository root:
 
 ```sh
 python3 scripts/check-labels.py --self-test
 python3 scripts/check-labels.py
+python3 scripts/check-project.py --self-test
+python3 scripts/check-project.py
+python3 scripts/check-localization.py --self-test
+python3 scripts/check-localization.py --catalog
+```
+
+`--catalog` only reads the catalog. `python3 scripts/check-localization.py <derived data path>` also
+finds strings the code uses that never reached the catalog: `xcodebuild` does not add them, only
+Xcode's IDE does. Run it after a build with `-derivedDataPath <derived data path>`.
+
+### Xcode Cloud
+
+The maintainer sets up the workflows in Xcode and App Store Connect (plan on #1, maintainer step 6);
+the repository holds only the shared scheme and `ci_scripts/`.
+
+- Workflow `PR` (Pull Request Changes, target `main`, no file filter) and workflow `Main` (Branch
+  Changes on `main`): Test action, scheme `Dokumentum`, test plan `Default`, once for one iPhone
+  simulator and once for macOS. The Xcode version is the one in `.xcode-version`, macOS 27.
+- `ci_scripts/ci_post_clone.sh` prints `xcodebuild -version`, `xcodebuild -showsdks` and `sw_vers`. It
+  fails when the Xcode differs from `.xcode-version`, or when there is no SDK for the minimum OS in
+  `Config/Project.xcconfig`.
+- `ci_scripts/ci_post_xcodebuild.sh` runs the localisation check's build mode on
+  `$CI_DERIVED_DATA_PATH` after `build`, `build-for-testing` and `archive`, unless `xcodebuild` failed.
+
+Both can be tried locally by setting Xcode Cloud's variables by hand:
+
+```sh
+CI_PRIMARY_REPOSITORY_PATH="$PWD" ci_scripts/ci_post_clone.sh
+CI_XCODEBUILD_ACTION=build-for-testing CI_XCODEBUILD_EXIT_CODE=0 CI_DERIVED_DATA_PATH=build \
+  CI_PRIMARY_REPOSITORY_PATH="$PWD" ci_scripts/ci_post_xcodebuild.sh
 ```
 
 ### Secret scan
@@ -86,7 +163,7 @@ the repository it must be treated as known, even if the history is rewritten.
 
 ## Swift toolchain in a cloud session
 
-A cloud session has no Swift. For `DokumentumKit` (from part 2 on) it installs
+A cloud session has no Swift. For `DokumentumKit` it installs
 the pinned Swift for Linux release into its own scratchpad directory, not into
 the system:
 
@@ -101,5 +178,7 @@ swift --version
 ```
 
 The archive is about 1.1 GB. `swift format lint` is the formatter bundled with
-it. The `kit-linux` job (added with the packages) installs the same release
-with the same checksum, once per run.
+it. The `kit-linux` job installs the same release with the same checksum, once
+per run (`.github/actions/install-swift/action.yml`). Xcode bundles its own
+swift-format for local use; its version cannot be compared with this one (it
+prints `main`), so `kit-linux` has the last word on formatting.

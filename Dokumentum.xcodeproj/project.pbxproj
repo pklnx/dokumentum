@@ -1,0 +1,421 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000021 /* DokumentumCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000021 /* DokumentumCore */; };
+		A10000000000000000000022 /* DokumentumKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000011 /* DokumentumKit */; };
+		B10000000000000000000021 /* DokumentumTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000012 /* DokumentumTestSupport */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B10000000000000000000044 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000040;
+			remoteInfo = Dokumentum;
+		};
+		C10000000000000000000044 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000040;
+			remoteInfo = Dokumentum;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000001 /* Dokumentum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dokumentum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000003 /* Project.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Project.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000001 /* DokumentumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C10000000000000000000001 /* DokumentumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D10000000000000000000001 /* DokumentumKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = DokumentumKit; path = Packages/DokumentumKit; sourceTree = "<group>"; };
+		D10000000000000000000002 /* DokumentumCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = DokumentumCore; path = Packages/DokumentumCore; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000010 /* Dokumentum */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Dokumentum;
+			sourceTree = "<group>";
+		};
+		B10000000000000000000010 /* DokumentumTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DokumentumTests;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000010 /* DokumentumUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DokumentumUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000021 /* DokumentumCore in Frameworks */,
+				A10000000000000000000022 /* DokumentumKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000021 /* DokumentumTestSupport in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000002 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000003 /* Project.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000030 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000010 /* Dokumentum */,
+				B10000000000000000000010 /* DokumentumTests */,
+				C10000000000000000000010 /* DokumentumUITests */,
+				A10000000000000000000002 /* Config */,
+				D10000000000000000000001 /* DokumentumKit */,
+				D10000000000000000000002 /* DokumentumCore */,
+				A10000000000000000000031 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000031 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000001 /* Dokumentum.app */,
+				B10000000000000000000001 /* DokumentumTests.xctest */,
+				C10000000000000000000001 /* DokumentumUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000040 /* Dokumentum */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000060 /* Build configuration list for PBXNativeTarget "Dokumentum" */;
+			buildPhases = (
+				A10000000000000000000041 /* Sources */,
+				A10000000000000000000020 /* Frameworks */,
+				A10000000000000000000042 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000010 /* Dokumentum */,
+			);
+			name = Dokumentum;
+			packageProductDependencies = (
+				D10000000000000000000021 /* DokumentumCore */,
+				D10000000000000000000011 /* DokumentumKit */,
+			);
+			productName = Dokumentum;
+			productReference = A10000000000000000000001 /* Dokumentum.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B10000000000000000000040 /* DokumentumTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumTests" */;
+			buildPhases = (
+				B10000000000000000000041 /* Sources */,
+				B10000000000000000000020 /* Frameworks */,
+				B10000000000000000000042 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B10000000000000000000043 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B10000000000000000000010 /* DokumentumTests */,
+			);
+			name = DokumentumTests;
+			packageProductDependencies = (
+				D10000000000000000000012 /* DokumentumTestSupport */,
+			);
+			productName = DokumentumTests;
+			productReference = B10000000000000000000001 /* DokumentumTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C10000000000000000000040 /* DokumentumUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumUITests" */;
+			buildPhases = (
+				C10000000000000000000041 /* Sources */,
+				C10000000000000000000020 /* Frameworks */,
+				C10000000000000000000042 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C10000000000000000000043 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C10000000000000000000010 /* DokumentumUITests */,
+			);
+			name = DokumentumUITests;
+			productName = DokumentumUITests;
+			productReference = C10000000000000000000001 /* DokumentumUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000050 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2710;
+				LastUpgradeCheck = 2710;
+				TargetAttributes = {
+					A10000000000000000000040 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+					B10000000000000000000040 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = A10000000000000000000040;
+					};
+					C10000000000000000000040 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = A10000000000000000000040;
+					};
+				};
+			};
+			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXProject "Dokumentum" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				de,
+				Base,
+			);
+			mainGroup = A10000000000000000000030;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A10000000000000000000031 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000040 /* Dokumentum */,
+				B10000000000000000000040 /* DokumentumTests */,
+				C10000000000000000000040 /* DokumentumUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C10000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B10000000000000000000043 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000040 /* Dokumentum */;
+			targetProxy = B10000000000000000000044 /* PBXContainerItemProxy */;
+		};
+		C10000000000000000000043 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000040 /* Dokumentum */;
+			targetProxy = C10000000000000000000044 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A10000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+			};
+			name = Debug;
+		};
+		A10000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+			};
+			name = Release;
+		};
+		A10000000000000000000071 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000003 /* Project.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A10000000000000000000072 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000003 /* Project.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		B10000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dokumentum.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Dokumentum";
+			};
+			name = Debug;
+		};
+		B10000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dokumentum.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Dokumentum";
+			};
+			name = Release;
+		};
+		C10000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				TEST_TARGET_NAME = Dokumentum;
+			};
+			name = Debug;
+		};
+		C10000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				TEST_TARGET_NAME = Dokumentum;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000000000000000000060 /* Build configuration list for PBXNativeTarget "Dokumentum" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000061 /* Debug */,
+				A10000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000070 /* Build configuration list for PBXProject "Dokumentum" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000071 /* Debug */,
+				A10000000000000000000072 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000000000000000000061 /* Debug */,
+				B10000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000061 /* Debug */,
+				C10000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D10000000000000000000011 /* DokumentumKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DokumentumKit;
+		};
+		D10000000000000000000012 /* DokumentumTestSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DokumentumTestSupport;
+		};
+		D10000000000000000000021 /* DokumentumCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DokumentumCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A10000000000000000000050 /* Project object */;
+}

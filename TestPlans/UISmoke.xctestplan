@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "7A93D2C4-18BE-4F06-A2D1-5E6C0B3F9A17",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Dokumentum.xcodeproj",
+        "identifier" : "C10000000000000000000040",
+        "name" : "DokumentumUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
