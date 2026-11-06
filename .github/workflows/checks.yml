@@ -24,6 +24,37 @@ jobs:
         with:
           persist-credentials: false
       - name: Script self-tests
-        run: python3 scripts/check-labels.py --self-test
+        run: |
+          python3 scripts/check-labels.py --self-test
+          python3 scripts/check-project.py --self-test
+          python3 scripts/check-localization.py --self-test
       - name: Labels file
         run: python3 scripts/check-labels.py
+      - name: Xcode project
+        run: python3 scripts/check-project.py
+
+  localization:
+    name: localization
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: String Catalog
+        run: python3 scripts/check-localization.py --catalog
+
+  # The only job with the Swift toolchain (one download per run, no cache).
+  kit-linux:
+    name: kit-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-swift
+      - name: swift format lint
+        run: swift format lint --strict --recursive --configuration .swift-format Dokumentum*/ Packages/
+      - name: DokumentumKit tests
+        run: swift test --package-path Packages/DokumentumKit

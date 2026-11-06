@@ -44,7 +44,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | Item | Value |
 |---|---|
 | Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3) |
-| Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked in step 0 against the Xcode on GitHub's macOS runners; if the runners lag behind, the minimum stays at the newest SDK they offer until they catch up |
+| Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked against the Xcode that Xcode Cloud offers (`ci_scripts/ci_post_clone.sh`, pinned in `.xcode-version`); if Xcode Cloud lags behind, the minimum stays at the newest SDK it offers until it catches up |
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (app and share extension) |
@@ -54,6 +54,16 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 Because only current systems are supported, nothing is weak-linked and there
 are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 
+Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
+| Where | macOS | Xcode | SDKs | Simulator runtimes |
+|---|---|---|---|---|
+| Development VM (2026-11-06) | 27.2 (26B123) | 27.1 (27A9275), Swift 6.4 | iOS 27.1, iOS Simulator 27.1, macOS 27.0 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
+| Xcode Cloud | pending | pending | pending | pending |
+
+The Xcode Cloud row is filled from the first `ci_post_clone.sh` output after the
+onboarding. `.xcode-version` holds the VM's 27.1; whether Xcode Cloud offers that
+version is not verified yet.
+
 ## 3. Architecture
 
 ### 3.1 Layers
@@ -61,13 +71,13 @@ are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 Dokumentum (app target, SwiftUI)
   App/        entry point, scenes, commands (Mac menu), routing
   Features/   one folder per feature: Library, Detail, Import, Scan, Metadata, Search, Settings
-  Core/       pure Swift, no SwiftUI: model, processing pipeline, OCR, PDF, search, classification
   Platform/   thin wrappers around PDFKit, VisionKit, Vision, FoundationModels, CloudKit status
 DokumentumShare (iOS share extension)
 DokumentumTests (Swift Testing), DokumentumUITests (a small smoke suite)
 ```
-Two local Swift packages, so their tests run with `swift test` on macOS
-without a simulator:
+The app target has no `Core/` folder: model, processing pipeline, OCR, PDF,
+search and classification live in two local Swift packages, so their tests run
+with `swift test` on macOS without a simulator:
 - `DokumentumKit`: pure logic, Foundation only (search normalisation, date
   and field detection, tag hierarchy, archive folder format, classifier
   prompts and limits).
@@ -187,9 +197,9 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   | Where | Check | Content |
   |---|---|---|
   | Xcode Cloud, workflow `PR` (and `Main` on pushes to `main`) | one Test action per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The exact check names are copied from the first `PR` run before the ruleset is set |
-  | GitHub Actions `checks.yml` | `lint` | Python check scripts and their self-tests (labels file; more scripts arrive with the steps that need them) |
-  | GitHub Actions `checks.yml` | `localization` | the String Catalog check (added with the Xcode project) |
-  | GitHub Actions `checks.yml` | `kit-linux` | `swift format lint` and the `DokumentumKit` tests with the pinned Swift for Linux toolchain (added with the packages) |
+  | GitHub Actions `checks.yml` | `lint` | Python check scripts and their self-tests (labels file, project invariants; more scripts arrive with the steps that need them) |
+  | GitHub Actions `checks.yml` | `localization` | the String Catalog check |
+  | GitHub Actions `checks.yml` | `kit-linux` | `swift format lint` and the `DokumentumKit` tests with the pinned Swift for Linux toolchain |
   | GitHub Actions `secrets.yml` | `secret-scan` | gitleaks (pinned binary, SHA-256) over the commits a PR adds |
 
   swift-format, the formatter bundled with the Swift toolchain, replaces
