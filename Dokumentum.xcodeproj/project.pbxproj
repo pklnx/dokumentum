@@ -9,10 +9,18 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000021 /* DokumentumCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000021 /* DokumentumCore */; };
 		A10000000000000000000022 /* DokumentumKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000011 /* DokumentumKit */; };
+		A10000000000000000000023 /* DokumentumShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* DokumentumShare.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B10000000000000000000021 /* DokumentumTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000012 /* DokumentumTestSupport */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A10000000000000000000045 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E10000000000000000000040;
+			remoteInfo = DokumentumShare;
+		};
 		B10000000000000000000044 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A10000000000000000000050 /* Project object */;
@@ -29,13 +37,33 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000043 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000023 /* DokumentumShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* Dokumentum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dokumentum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000003 /* Project.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Project.xcconfig; sourceTree = "<group>"; };
+		A10000000000000000000004 /* Dokumentum-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Dokumentum-iOS.entitlements"; sourceTree = "<group>"; };
+		A10000000000000000000005 /* Dokumentum-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Dokumentum-macOS.entitlements"; sourceTree = "<group>"; };
+		A10000000000000000000006 /* DokumentumShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DokumentumShare.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000007 /* Info-iOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-iOS.plist"; sourceTree = "<group>"; };
+		A10000000000000000000008 /* DokumentumShare-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "DokumentumShare-Info.plist"; sourceTree = "<group>"; };
 		B10000000000000000000001 /* DokumentumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000001 /* DokumentumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D10000000000000000000001 /* DokumentumKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = DokumentumKit; path = Packages/DokumentumKit; sourceTree = "<group>"; };
 		D10000000000000000000002 /* DokumentumCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = DokumentumCore; path = Packages/DokumentumCore; sourceTree = "<group>"; };
+		E10000000000000000000001 /* DokumentumShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DokumentumShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +80,11 @@
 		C10000000000000000000010 /* DokumentumUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DokumentumUITests;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000010 /* DokumentumShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DokumentumShare;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -81,6 +114,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E10000000000000000000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -88,6 +128,11 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000003 /* Project.xcconfig */,
+				A10000000000000000000004 /* Dokumentum-iOS.entitlements */,
+				A10000000000000000000005 /* Dokumentum-macOS.entitlements */,
+				A10000000000000000000006 /* DokumentumShare.entitlements */,
+				A10000000000000000000007 /* Info-iOS.plist */,
+				A10000000000000000000008 /* DokumentumShare-Info.plist */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -96,6 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000010 /* Dokumentum */,
+				E10000000000000000000010 /* DokumentumShare */,
 				B10000000000000000000010 /* DokumentumTests */,
 				C10000000000000000000010 /* DokumentumUITests */,
 				A10000000000000000000002 /* Config */,
@@ -111,6 +157,7 @@
 				A10000000000000000000001 /* Dokumentum.app */,
 				B10000000000000000000001 /* DokumentumTests.xctest */,
 				C10000000000000000000001 /* DokumentumUITests.xctest */,
+				E10000000000000000000001 /* DokumentumShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -125,10 +172,12 @@
 				A10000000000000000000041 /* Sources */,
 				A10000000000000000000020 /* Frameworks */,
 				A10000000000000000000042 /* Resources */,
+				A10000000000000000000043 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10000000000000000000044 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000010 /* Dokumentum */,
@@ -187,6 +236,26 @@
 			productReference = C10000000000000000000001 /* DokumentumUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		E10000000000000000000040 /* DokumentumShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumShare" */;
+			buildPhases = (
+				E10000000000000000000041 /* Sources */,
+				E10000000000000000000020 /* Frameworks */,
+				E10000000000000000000042 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				E10000000000000000000010 /* DokumentumShare */,
+			);
+			name = DokumentumShare;
+			productName = DokumentumShare;
+			productReference = E10000000000000000000001 /* DokumentumShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -208,6 +277,9 @@
 						CreatedOnToolsVersion = 27.1;
 						TestTargetID = A10000000000000000000040;
 					};
+					E10000000000000000000040 = {
+						CreatedOnToolsVersion = 27.1;
+					};
 				};
 			};
 			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXProject "Dokumentum" */;
@@ -228,6 +300,7 @@
 				A10000000000000000000040 /* Dokumentum */,
 				B10000000000000000000040 /* DokumentumTests */,
 				C10000000000000000000040 /* DokumentumUITests */,
+				E10000000000000000000040 /* DokumentumShare */,
 			);
 		};
 /* End PBXProject section */
@@ -248,6 +321,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C10000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E10000000000000000000042 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -278,9 +358,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E10000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A10000000000000000000044 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilters = (ios, );
+			target = E10000000000000000000040 /* DokumentumShare */;
+			targetProxy = A10000000000000000000045 /* PBXContainerItemProxy */;
+		};
 		B10000000000000000000043 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A10000000000000000000040 /* Dokumentum */;
@@ -361,6 +454,22 @@
 			};
 			name = Release;
 		};
+		E10000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		E10000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -396,6 +505,15 @@
 			buildConfigurations = (
 				C10000000000000000000061 /* Debug */,
 				C10000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E10000000000000000000060 /* Build configuration list for PBXNativeTarget "DokumentumShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000061 /* Debug */,
+				E10000000000000000000062 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

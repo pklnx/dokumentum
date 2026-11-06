@@ -1,0 +1,16 @@
+// The unsigned path for machines without a signing identity (the development VM). Never part of the
+// project: it applies only through the environment variable, as a prefix on a command run from the
+// repository root (the path is resolved against the current directory):
+//
+//     XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild ...
+//
+// Do not export the variable in a profile, and do not #include this file: scripts/check-project.py
+// fails `lint` on any include in Project.xcconfig other than Local.xcconfig. Commands and what a wrong
+// path does: docs/development/index.md.
+//
+// macOS only, so the simulator keeps the real team and keys in its *-Simulated.xcent files. An
+// unconditional CODE_SIGN_ENTITLEMENTS line would empty those as well. scripts/check-project.py holds
+// this file to exactly these three keys.
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
+DEVELOPMENT_TEAM[sdk=macosx*] =
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] =

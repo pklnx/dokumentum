@@ -11,16 +11,19 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 
 | Where | Used for |
 |---|---|
-| The maintainer's MacBook Pro: a macOS VM or a separate macOS user (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code. |
+| A macOS VM on the maintainer's MacBook Pro (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code. It has no signing identity and builds unsigned, see "Build and test". |
+| The MacBook Pro itself, with the maintainer's Apple Account | Signed builds and runs on the iPhone and the Mac. |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
-## Setup on the development machine (VM or separate macOS user)
+## Setup in the development VM
 
-1. macOS 27 (on the host and, if used, in the VM), Xcode 27.x installed and selected
+1. macOS 27 (on the host and in the VM), Xcode 27.x installed and selected
    (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
-   Accounts. Selecting Xcode with `xcode-select -s` needs `sudo`; without it, set
+   Accounts. That account has no signing access: the team is enrolled as an
+   individual, so only the Account Holder gets Certificates, Identifiers & Profiles.
+   Selecting Xcode with `xcode-select -s` needs `sudo`; without it, set
    `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (in
    `~/.zprofile` for login shells).
 2. `gh auth status` is OK.
@@ -34,34 +37,47 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 ## The project
 
 `Dokumentum.xcodeproj` has one multiplatform app target (`Dokumentum`: iOS and native
-macOS, iPhone only), `DokumentumTests` (Swift Testing, hosted by the app) and
-`DokumentumUITests`. Two local packages live in `Packages/`.
+macOS, iPhone only), the share extension `DokumentumShare` (iOS only, a placeholder until
+step 3, embedded through platform filters), `DokumentumTests` (Swift Testing, hosted by the
+app) and `DokumentumUITests`. Two local packages live in `Packages/`.
 
 - **Folders are synchronized** (`objectVersion = 77`, `PBXFileSystemSynchronizedRootGroup`):
-  adding a file to `Dokumentum/`, `DokumentumTests/` or `DokumentumUITests/` does not change
-  `project.pbxproj`.
+  adding a file to `Dokumentum/`, `DokumentumShare/`, `DokumentumTests/` or `DokumentumUITests/`
+  does not change `project.pbxproj`. An `Info.plist` must stay out of them ("Multiple commands
+  produce"), so those files live in `Config/`.
 - **Settings live in `Config/Project.xcconfig`**, the project's base configuration. A setting in the
   `.pbxproj` overrides it unseen, so `scripts/check-project.py` fails `lint` when the project or a
-  target sets a key from that file. Xcode's capability editor writes such settings: strip them
-  afterwards. Personal overrides go into `Config/Local.xcconfig` (not in git).
+  target sets a key from that file. What differs per target goes through a variable named after the
+  target (`DOKUMENTUM_ENTITLEMENTS_$(TARGET_NAME)` and the like), and the script asserts what each
+  target resolves to; a new target needs a row in its `TARGETS`. Personal overrides go into
+  `Config/Local.xcconfig` (not in git), the only include `Project.xcconfig` may have.
+- **Capabilities change by editing the entitlements files in `Config/`**, which the script pins key by
+  key, so an unreviewed capability fails `lint`. Do not use Xcode's Signing & Capabilities editor; strip
+  whatever it writes into the `.pbxproj`. The settings of Xcode's "App Sandbox & Hardened Runtime"
+  category inject entitlements past these files, so the script rejects them all, except
+  `ENABLE_HARDENED_RUNTIME = NO` until step 8.
 - **Each package is a folder reference in the project**, not an
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
-- **Builds are signed ad hoc** until part 3 (`CODE_SIGN_IDENTITY = -`, no team), which needs no
-  identity or provisioning profile on the simulator and on this Mac.
+- **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine and
+  in Xcode Cloud; the VM builds unsigned.
 
 ## Build and test
 
-From the repository root (`-derivedDataPath build` keeps a build in the ignored `build/` folder):
+From the repository root (`-derivedDataPath build` keeps a build in the ignored `build/` folder). These
+are the VM's commands. A machine with a signing identity leaves out the `XCODE_XCCONFIG_FILE` prefix.
 
 ```sh
 # Test plan Default: DokumentumTests, DokumentumKitTests, DokumentumTestSupportTests, DokumentumCoreTests
-xcodebuild -scheme Dokumentum -destination 'platform=macOS' test
-xcodebuild -scheme Dokumentum -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
+XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild -scheme Dokumentum -destination 'platform=macOS' test
+XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild -scheme Dokumentum -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
 
 # Test plan UISmoke: DokumentumUITests
-xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=macOS' test
-xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
+XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=macOS' test
+XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild -scheme Dokumentum -testPlan UISmoke -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' test
+
+# A build for a device, compiled and embedded but not signed
+xcodebuild -scheme Dokumentum -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 
 # The packages alone, without a simulator
 swift test --package-path Packages/DokumentumKit
@@ -70,6 +86,23 @@ swift test --package-path Packages/DokumentumCore
 # Formatting: the same command as `kit-linux`
 swift format lint --strict --recursive --configuration .swift-format Dokumentum*/ Packages/
 ```
+
+**The unsigned path.** With the team and the entitlements in the project, a macOS build without a
+signing identity exits 65 (`No profiles for 'space.pklnx.Dokumentum'`, `No signing certificate "Mac
+Development"`); simulator builds and `swift test` do not need one. `Config/Unsigned.xcconfig` makes the
+macOS build ad hoc, without a team and without entitlements. It sets only macOS-conditioned keys, so
+the simulator keeps the real team and keys, which a build shows in its `*-Simulated.xcent` files. The
+project does not reference the file: it reaches a build only through this variable.
+
+- Use the variable as a prefix on a command run from the repository root, and do not export it in a
+  profile. Its path is resolved against the current directory. Exported, it would break every build from
+  another directory and on every commit without the file.
+- A wrong path fails a build loudly (exit 65, `Unable to open file ... referenced by
+  XCODE_XCCONFIG_FILE`), but `-showBuildSettings` exits 0 and silently shows the override absent. Do not
+  take its output as proof that the override applies.
+- A device build (`generic/platform=iOS`) has no ad hoc form: it needs `CODE_SIGNING_ALLOWED=NO`, as
+  above. Nothing in the VM ever creates a certificate, a profile or a device registration, or passes
+  `-allowProvisioningUpdates`.
 
 The iPhone 18 Pro exists only on the iOS 27.0 simulator runtime, so the destination names the OS.
 UI tests on macOS need Automation Mode: without it the run ends with "Timed out while enabling
