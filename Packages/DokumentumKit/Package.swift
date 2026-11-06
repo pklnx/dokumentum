@@ -13,6 +13,7 @@ let package = Package(
         .target(name: "DokumentumKit"),
         .target(name: "DokumentumTestSupport"),
         .testTarget(name: "DokumentumKitTests", dependencies: ["DokumentumKit", "DokumentumTestSupport"]),
+        .testTarget(name: "DokumentumTestSupportTests", dependencies: ["DokumentumTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )

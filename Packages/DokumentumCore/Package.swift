@@ -14,7 +14,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "DokumentumCore", dependencies: ["DokumentumKit"]),
-        .testTarget(name: "DokumentumCoreTests", dependencies: ["DokumentumCore"]),
+        .testTarget(
+            name: "DokumentumCoreTests",
+            dependencies: ["DokumentumCore", .product(name: "DokumentumTestSupport", package: "DokumentumKit")]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
