@@ -13,8 +13,17 @@ protocol LibrarySource: Sendable {
     var changes: AsyncStream<Void> { get }
     /// The PDF of one document. Runs off the main actor.
     func loadPDF(instanceID: UUID) async -> PDFLoadState
+    /// Writes edits to the documents (plan of #3, part 3); `nil` for a source that cannot be edited.
+    @MainActor var editor: DocumentEditor? { get }
+}
+
+extension LibrarySource {
+    @MainActor var editor: DocumentEditor? { nil }
 }
 
 /// The store's library: Debug and Release builds alike. In a Debug build the store of a `-UITestSeed`
 /// launch holds the sample documents (`FixtureSeeder`).
-extension StoreLibrarySource: LibrarySource {}
+/// Edits go through `DocumentEditor` in the main context, which the library reads; its save fires `changes`.
+extension StoreLibrarySource: LibrarySource {
+    @MainActor var editor: DocumentEditor? { DocumentEditor(context: container.mainContext) }
+}
