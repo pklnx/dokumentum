@@ -102,6 +102,52 @@ final class EditingSmokeTests: XCTestCase {
         ui.attachWindowScreenshot("3-row-updated", to: self)
     }
 
+    /// A title whose save fails (`-UITestFailingSaves YES`: every save of the editor fails and is rolled back) says
+    /// so under the field, the field shows the stored title again, and typing ends the line (maintainer decision on
+    /// #74).
+    @MainActor
+    func testATitleThatCannotBeSavedSaysSo() {
+        let ui = UITestApp()
+        ui.launch(extraArguments: ["-UITestFailingSaves", "YES"])
+        defer { ui.app.terminate() }
+        XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch")
+        ui.activate(Self.electricityBill)
+        XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        ui.activate("documentDetail.showInfo")
+        let title = ui.element("documentInfo.title")
+        XCTAssertTrue(title.waitForExistence(timeout: 20), "no info panel")
+        let storedTitle = title.value as? String ?? ""
+        let notSaved = ui.element("documentInfo.titleNotSaved")
+        XCTAssertFalse(notSaved.exists, "the line shows before any edit")
+
+        #if os(macOS)
+            title.click()
+            title.typeKey("a", modifierFlags: .command)
+            title.typeText(Self.newTitle + "\r")
+        #else
+            title.tap()
+            let length = (title.value as? String)?.count ?? 0
+            title.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: length + 5))
+            title.typeText(Self.newTitle + "\n")
+        #endif
+        XCTAssertTrue(notSaved.waitForExistence(timeout: 10), "no “could not be saved” line")
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", storedTitle), object: title)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [restored], timeout: 10), .completed,
+            "the field does not show the stored title: \(String(describing: title.value))")
+        ui.attachWindowScreenshot("4-title-not-saved", to: self)
+
+        // Typing again ends the line.
+        #if os(macOS)
+            title.click()
+        #else
+            title.tap()
+        #endif
+        title.typeText("X")
+        XCTAssertTrue(notSaved.waitForNonExistence(timeout: 10), "the line stayed while typing")
+    }
+
     #if os(iOS)
         /// The navigation bar's back button.
         @MainActor

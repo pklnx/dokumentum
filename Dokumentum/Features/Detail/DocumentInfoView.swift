@@ -70,6 +70,17 @@ private struct DocumentInfoForm: View {
                     .focused($titleFocused)
                     .onSubmit(commitTitle)
                     .accessibilityIdentifier(AccessibilityID.infoTitle)
+                if model.titleSaveFailure == document.instanceID {
+                    Label {
+                        Text("The title could not be saved.")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(AccessibilityID.infoTitleNotSaved)
+                }
                 DatePicker("Date", selection: dateBinding, displayedComponents: .date)
                     .accessibilityIdentifier(AccessibilityID.infoDate)
                 Toggle("In Inbox", isOn: inboxBinding)
@@ -102,6 +113,10 @@ private struct DocumentInfoForm: View {
         }
         .onChange(of: document.title) { _, title in
             titleDraft.titleChanged(to: title)
+        }
+        .onChange(of: titleDraft.text) { _, _ in
+            // Typing ends the "could not be saved" line; showing the stored title again (text equals base) does not.
+            if titleDraft.text != titleDraft.base { model.titleEditStarted() }
         }
         .onChange(of: titleFocused) { _, focused in
             if !focused { commitTitle() }

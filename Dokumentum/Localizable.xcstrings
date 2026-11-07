@@ -849,6 +849,17 @@
         }
       }
     },
+    "The title could not be saved." : {
+      "comment" : "Info panel: shown under the title field when saving the title failed and it was rolled back.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht gesichert werden."
+          }
+        }
+      }
+    },
     "This PDF cannot be shown" : {
       "comment" : "The detail column: the file is not a readable PDF.",
       "localizations" : {
