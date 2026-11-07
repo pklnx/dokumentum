@@ -220,6 +220,23 @@ struct RepairPlannerTests {
         #expect(after.document(111).modifiedAt == at(0), "its reference did not change")
     }
 
+    /// Pass 2 alone: every loser goes into the group's oldest, not into its predecessor (which a later
+    /// round would only fix through the repeat loop, after a refused operation).
+    @Test func aGroupOfThreeMergesIntoItsMinimumInOnePass() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(12, "Stadtwerke", created: 3), correspondent(10, "stadtwerke", created: 1),
+            correspondent(11, "STADTWERKE", created: 2),
+        ])
+        let pass = RepairPlanner.mergeSameNames(in: state)
+        #expect(
+            pass.operations == [
+                .mergeMetadata(kind: .correspondent, loser: uuid(11), into: uuid(10)),
+                .mergeMetadata(kind: .correspondent, loser: uuid(12), into: uuid(10)),
+            ]
+        )
+        #expect(pass.apply(to: state, now: planningTime).skipped.isEmpty)
+    }
+
     @Test func equalDatesMergeIntoTheSmallestInstanceID() {
         let state = RepairSnapshot(metadata: [correspondent(11, "A", created: 5), correspondent(10, "a", created: 5)])
         #expect(
@@ -298,6 +315,16 @@ struct RepairPlannerTests {
                 .mergeMetadata(kind: .tag, loser: uuid(21), into: uuid(11)),
             ]
         )
+    }
+
+    /// The parent is part of the tag key: an older same-name tag under another parent does not head the
+    /// group of two siblings and so block their merge.
+    @Test func anOlderSameNameTagUnderAnotherParentDoesNotBlockSiblings() {
+        let state = RepairSnapshot(metadata: [
+            tag(1, "Golf", created: 10), tag(2, "Polo", created: 11), tag(3, "Werkstatt", created: 1, parent: 2),
+            tag(4, "werkstatt", created: 20, parent: 1), tag(5, "WERKSTATT", created: 21, parent: 1),
+        ])
+        #expect(planned(state).plan.operations == [.mergeMetadata(kind: .tag, loser: uuid(5), into: uuid(4))])
     }
 
     /// Ported.
@@ -590,6 +617,15 @@ struct RepairPlannerTests {
         #expect(after.record(10).mergedAt == nil)
     }
 
+    /// The grace is read from the chain's last tombstone, the one that would be revived.
+    @Test func theGraceIsReadFromTheLastTombstoneOfTheChain() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(10, "X", mergedInto: 11, mergedAt: planningTime - TimeInterval(400 * days)),
+            correspondent(11, "Y", mergedInto: 99, mergedAt: planningTime - TimeInterval(1 * days)),
+        ])
+        #expect(planned(state).plan.isEmpty)
+    }
+
     @Test func aTombstoneWithoutAMergeDateIsNotRevived() {
         var state = missingEnd(mergedDaysAgo: 400)
         state.metadata[0].mergedAt = nil
@@ -806,6 +842,20 @@ struct RepairPlannerTests {
     @Test func aReviveSkipsARecordThatIsLiveAgain() {
         let state = RepairSnapshot(metadata: [correspondent(10, "X")])
         #expect(RepairPlan([.revive(tombstone: uuid(10))]).apply(to: state, now: planningTime).applied.isEmpty)
+    }
+
+    /// I6 for a revival: an import brings the missing chain end between plan and save.
+    @Test func aReviveSkipsWhenTheChainEndArrivedBeforeTheSave() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(2, "Stadtwerke", mergedInto: 1, mergedAt: planningTime - TimeInterval(400 * days))
+        ])
+        let plan = RepairPlanner.plan(state, context: settledContext)
+        #expect(plan.operations == [.revive(tombstone: uuid(2))])
+        var arrived = state
+        arrived.metadata.append(correspondent(1, "Stadtwerke"))
+        let application = plan.apply(to: arrived, now: planningTime)
+        #expect(application.applied.isEmpty)
+        #expect(!application.snapshot.record(2).isLive)
     }
 
     @Test func frozenValuesPassThroughAPlanUnchanged() {

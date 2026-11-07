@@ -55,6 +55,10 @@ struct SyncStatusTests {
         #expect(CloudErrorCategory.classify([link(134400, cocoa), link(2), link(4), link(25)]) == .storageFull)
     }
 
+    @Test func storageFullIsFoundInAPartialFailureWhereverItStands() {
+        #expect(CloudErrorCategory.classify([link(2), link(22), link(25), link(4)]) == .storageFull)
+    }
+
     @Test func aPartialFailureWithoutStorageFullTakesItsFirstCode() {
         #expect(CloudErrorCategory.classify([link(2), link(4), link(26)]) == .offline)
     }
