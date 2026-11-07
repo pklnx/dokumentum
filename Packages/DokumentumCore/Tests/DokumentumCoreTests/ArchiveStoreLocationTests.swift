@@ -40,7 +40,7 @@ struct ArchiveStoreLocationTests {
     /// group container. Only the paths are checked; nothing opens them.
     @Test func aTestRunRefusesTheLiveStorePaths() throws {
         let live = ArchiveStore.storeURL.deletingLastPathComponent()
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = URL.homeDirectory
         let refused = [
             ArchiveStore.storeURL, ArchiveStore.fallbackStoreURL, live,
             live.appending(path: "Dokumentum.store-wal"),
