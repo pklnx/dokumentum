@@ -15,39 +15,39 @@ struct PDFKitView: View {
 }
 
 #if os(macOS)
-private struct Representable: NSViewRepresentable {
-    let data: Data
-    let id: UUID
+    private struct Representable: NSViewRepresentable {
+        let data: Data
+        let id: UUID
 
-    func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
-        configure(view)
-        return view
+        func makeNSView(context: Context) -> PDFView {
+            let view = PDFView()
+            configure(view)
+            return view
+        }
+
+        func updateNSView(_ view: PDFView, context: Context) {
+            update(view, coordinator: context.coordinator)
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
     }
-
-    func updateNSView(_ view: PDFView, context: Context) {
-        update(view, coordinator: context.coordinator)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-}
 #else
-private struct Representable: UIViewRepresentable {
-    let data: Data
-    let id: UUID
+    private struct Representable: UIViewRepresentable {
+        let data: Data
+        let id: UUID
 
-    func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
-        configure(view)
-        return view
+        func makeUIView(context: Context) -> PDFView {
+            let view = PDFView()
+            configure(view)
+            return view
+        }
+
+        func updateUIView(_ view: PDFView, context: Context) {
+            update(view, coordinator: context.coordinator)
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
     }
-
-    func updateUIView(_ view: PDFView, context: Context) {
-        update(view, coordinator: context.coordinator)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-}
 #endif
 
 private final class Coordinator {
@@ -61,7 +61,7 @@ extension Representable {
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         #if os(iOS)
-        view.backgroundColor = .secondarySystemBackground
+            view.backgroundColor = .secondarySystemBackground
         #endif
     }
 

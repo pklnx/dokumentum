@@ -13,9 +13,9 @@ struct DokumentumApp: App {
             LibraryRootView(source: librarySourceForThisBuild())
         }
         #if os(macOS)
-        // The system default (900 × 450) cuts "All Documents" in the sidebar.
-        .defaultSize(width: 1100, height: 720)
-        .commands { LibraryCommands() }
+            // The system default (900 × 450) cuts "All Documents" in the sidebar.
+            .defaultSize(width: 1100, height: 720)
+            .commands { LibraryCommands() }
         #endif
     }
 }

@@ -30,12 +30,12 @@ private struct TagTreeRow: View {
     // its own taps (checked by `LibrarySmokeTests`).
     var body: some View {
         #if os(macOS)
-        content
-            .tag(LibrarySelection.tag(id))
-        #else
-        NavigationLink(value: LibrarySelection.tag(id)) {
             content
-        }
+                .tag(LibrarySelection.tag(id))
+        #else
+            NavigationLink(value: LibrarySelection.tag(id)) {
+                content
+            }
         #endif
     }
 
@@ -76,7 +76,8 @@ private struct TagTreeRow: View {
             // tint on a selected row.
             .buttonStyle(.plain)
             .accessibilityLabel(
-                isExpanded ? Text("Collapse \(row.tag.name)") : Text("Expand \(row.tag.name)"))
+                isExpanded ? Text("Collapse \(row.tag.name)") : Text("Expand \(row.tag.name)")
+            )
             .accessibilityValue(isExpanded ? Text("expanded") : Text("collapsed"))
             .accessibilityIdentifier(AccessibilityID.tagDisclosure(id))
         } else {

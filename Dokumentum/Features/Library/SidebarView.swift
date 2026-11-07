@@ -36,7 +36,7 @@ struct SidebarView: View {
         }
         .navigationTitle("Dokumentum")
         #if os(macOS)
-        .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         #endif
         .accessibilityIdentifier(AccessibilityID.sidebar)
     }

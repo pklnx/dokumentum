@@ -45,10 +45,10 @@ final class LibrarySmokeTests: XCTestCase {
         ui.attachWindowScreenshot("1-inbox", to: self)
 
         #if os(iOS)
-        // The iPhone opens on the Inbox list; back to the sidebar.
-        goBack(ui)
-        XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
-        ui.attachWindowScreenshot("2-sidebar", to: self)
+            // The iPhone opens on the Inbox list; back to the sidebar.
+            goBack(ui)
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
+            ui.attachWindowScreenshot("2-sidebar", to: self)
         #endif
 
         // A chevron expands the tag's nested tags and does not select the tag.
@@ -56,12 +56,12 @@ final class LibrarySmokeTests: XCTestCase {
         ui.activate(Self.tagDisclosure(Self.auto))
         XCTAssertTrue(ui.element(Self.tagRow(Self.golf)).waitForExistence(timeout: 10), "Golf did not appear")
         #if os(iOS)
-        XCTAssertTrue(ui.element("sidebar").exists, "the chevron left the sidebar")
-        XCTAssertFalse(ui.element(Self.documentRow(Self.carInsurance)).exists, "the chevron selected Auto")
-        XCTAssertFalse(ui.element("documentList").exists, "the chevron opened a list")
+            XCTAssertTrue(ui.element("sidebar").exists, "the chevron left the sidebar")
+            XCTAssertFalse(ui.element(Self.documentRow(Self.carInsurance)).exists, "the chevron selected Auto")
+            XCTAssertFalse(ui.element("documentList").exists, "the chevron opened a list")
         #else
-        XCTAssertTrue(ui.element(Self.documentRow(Self.electricityBill)).exists, "the chevron changed the list")
-        XCTAssertFalse(ui.element(Self.documentRow(Self.carInsurance)).exists, "the chevron selected Auto")
+            XCTAssertTrue(ui.element(Self.documentRow(Self.electricityBill)).exists, "the chevron changed the list")
+            XCTAssertFalse(ui.element(Self.documentRow(Self.carInsurance)).exists, "the chevron selected Auto")
         #endif
         ui.attachWindowScreenshot("3-tags-expanded", to: self)
 
@@ -80,7 +80,7 @@ final class LibrarySmokeTests: XCTestCase {
         ui.attachWindowScreenshot("5-pdf", to: self)
 
         #if os(iOS)
-        goBack(ui)
+            goBack(ui)
         #endif
 
         // A document without a file says it is still downloading.
@@ -92,12 +92,12 @@ final class LibrarySmokeTests: XCTestCase {
     }
 
     #if os(iOS)
-    /// The navigation bar's back button.
-    @MainActor
-    private func goBack(_ ui: UITestApp) {
-        let back = ui.app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "no back button")
-        back.tap()
-    }
+        /// The navigation bar's back button.
+        @MainActor
+        private func goBack(_ ui: UITestApp) {
+            let back = ui.app.navigationBars.buttons.element(boundBy: 0)
+            XCTAssertTrue(back.waitForExistence(timeout: 10), "no back button")
+            back.tap()
+        }
     #endif
 }

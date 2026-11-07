@@ -10,7 +10,7 @@ struct DocumentDetailView: View {
         content
             .navigationTitle(title)
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.inline)
             #endif
             .task(id: model.selectedDocumentID) {
                 await model.loadDetail(for: model.selectedDocumentID)
@@ -30,13 +30,15 @@ struct DocumentDetailView: View {
         case .stillDownloading:
             ContentUnavailableView(
                 "Still downloading", systemImage: "icloud.and.arrow.down",
-                description: Text("The file is being downloaded from iCloud."))
-                .accessibilityIdentifier(AccessibilityID.detailStillDownloading)
+                description: Text("The file is being downloaded from iCloud.")
+            )
+            .accessibilityIdentifier(AccessibilityID.detailStillDownloading)
         case .unreadable:
             ContentUnavailableView(
                 "This PDF cannot be shown", systemImage: "exclamationmark.triangle",
-                description: Text("The file is damaged or not a PDF."))
-                .accessibilityIdentifier(AccessibilityID.detailUnreadable)
+                description: Text("The file is damaged or not a PDF.")
+            )
+            .accessibilityIdentifier(AccessibilityID.detailUnreadable)
         case .pdf(let instanceID, let data):
             // The identifier goes on a SwiftUI container: on macOS XCUITest does not find one on the
             // representable itself.

@@ -48,8 +48,8 @@ struct EmptyLibrarySource: LibrarySource {
 /// builds.
 func librarySourceForThisBuild() -> any LibrarySource {
     #if DEBUG
-    FixtureLibrarySource()
+        FixtureLibrarySource()
     #else
-    EmptyLibrarySource()
+        EmptyLibrarySource()
     #endif
 }

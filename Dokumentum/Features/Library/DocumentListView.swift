@@ -23,7 +23,7 @@ struct DocumentListView: View {
         }
         .navigationTitle(title)
         #if os(macOS)
-        .navigationSplitViewColumnWidth(min: 260, ideal: 320)
+            .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         #endif
         .accessibilityIdentifier(AccessibilityID.documentList)
     }

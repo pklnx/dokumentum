@@ -42,9 +42,9 @@ struct UITestApp {
         let element = element(identifier)
         XCTAssertTrue(element.waitForExistence(timeout: 20), "\(identifier) did not appear", file: file, line: line)
         #if os(macOS)
-        element.click()
+            element.click()
         #else
-        element.tap()
+            element.tap()
         #endif
     }
 
