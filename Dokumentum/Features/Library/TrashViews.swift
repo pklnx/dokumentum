@@ -91,15 +91,17 @@ struct EmptyTrashButton: View {
     }
 }
 
-/// Asks before Empty Trash deletes for good (PQ9): the count the confirmation shows is the set it deletes.
+/// Asks before Empty Trash deletes for good (PQ9), in an alert: the count the confirmation shows is the set it deletes.
 struct EmptyTrashConfirmation: ViewModifier {
     @Bindable var trash: LibraryTrash
 
     func body(content: Content) -> some View {
         content
-            .confirmationDialog(
+            // An alert, not a confirmation dialog: on the iPhone a dialog showed no Cancel button (measured on
+            // iOS 27.0, #46), and an alert is the usual form for a delete that cannot be undone.
+            .alert(
                 Text("Permanently delete \(trash.pendingEmptyTrash?.count ?? 0) documents?"),
-                isPresented: $trash.isConfirmingEmptyTrash, titleVisibility: .visible
+                isPresented: $trash.isConfirmingEmptyTrash
             ) {
                 Button(role: .destructive) {
                     trash.confirmEmptyTrash()

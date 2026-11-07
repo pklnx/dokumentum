@@ -28,7 +28,7 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         goToSidebar(ui)
         XCTAssertTrue(waitForCount(0, of: "sidebar.trash", in: ui), "the trash is not empty at the start")
-        ui.activate("sidebar.inbox")
+        openSidebarRow("sidebar.inbox", ui)
 
         moveToTrash(Self.electricityBill, ui)
         waitForDisappearance(of: row, "the document stayed in the Inbox")
@@ -36,7 +36,7 @@ final class TrashSmokeTests: XCTestCase {
 
         goToSidebar(ui)
         XCTAssertTrue(waitForCount(1, of: "sidebar.trash", in: ui), "the Trash count did not go up")
-        ui.activate("sidebar.trash")
+        openSidebarRow("sidebar.trash", ui)
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the document is not in the trash")
         ui.attachWindowScreenshot("2-trash", to: self)
 
@@ -51,7 +51,7 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element("documentList.empty").waitForExistence(timeout: 20), "the trash is not empty")
         goToSidebar(ui)
         XCTAssertTrue(waitForCount(0, of: "sidebar.trash", in: ui), "the Trash count did not go down")
-        ui.activate("sidebar.inbox")
+        openSidebarRow("sidebar.inbox", ui)
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the restored document is not back in the Inbox")
         ui.attachWindowScreenshot("4-restored", to: self)
     }
@@ -69,7 +69,7 @@ final class TrashSmokeTests: XCTestCase {
         waitForDisappearance(of: ui.element(Self.documentRow(Self.medicalInvoice)), "not moved")
 
         goToSidebar(ui)
-        ui.activate("sidebar.trash")
+        openSidebarRow("sidebar.trash", ui)
         XCTAssertTrue(ui.element(Self.documentRow(Self.electricityBill)).waitForExistence(timeout: 10))
         XCTAssertTrue(ui.element(Self.documentRow(Self.medicalInvoice)).exists)
 
@@ -92,7 +92,7 @@ final class TrashSmokeTests: XCTestCase {
         // The other documents remain.
         goToSidebar(ui)
         XCTAssertTrue(waitForCount(0, of: "sidebar.trash", in: ui), "the Trash count did not go to 0")
-        ui.activate("sidebar.all")
+        openSidebarRow("sidebar.all", ui)
         XCTAssertTrue(
             ui.element(Self.documentRow(Self.accountStatement)).waitForExistence(timeout: 10), "a document is gone")
         XCTAssertFalse(ui.element(Self.documentRow(Self.electricityBill)).exists, "a deleted document is listed")
@@ -127,6 +127,42 @@ final class TrashSmokeTests: XCTestCase {
         #endif
     }
 
+    /// Scrolls the sidebar row into view: on the iPhone the list creates Trash, its last row, only once it is
+    /// scrolled into view, and Inbox and All Documents leave the view when it is. A bounded number of swipes.
+    @MainActor
+    private func revealSidebarRow(_ identifier: String, _ ui: UITestApp) {
+        #if os(iOS)
+            let row = ui.element(identifier)
+            for _ in 0..<5 where !(row.exists && row.isHittable) {
+                // Slow, so the list does not keep scrolling: a tap on a list that still moves only stops it.
+                if identifier == "sidebar.trash" {
+                    ui.element("sidebar").swipeUp(velocity: .slow)
+                } else {
+                    ui.element("sidebar").swipeDown(velocity: .slow)
+                }
+            }
+            let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: row)
+            XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed, "\(identifier) is not in view")
+        #endif
+    }
+
+    /// Selects a sidebar row, scrolled into view first; on the iPhone that opens its list.
+    @MainActor
+    private func openSidebarRow(_ identifier: String, _ ui: UITestApp) {
+        revealSidebarRow(identifier, ui)
+        #if os(iOS)
+            // A tap on a list that still moves after a swipe only stops it (measured on iOS 27.0, #46): a second
+            // tap, at most, selects the row.
+            for _ in 0..<2 where !ui.element("documentList").exists {
+                ui.activate(identifier)
+                _ = ui.element("documentList").waitForExistence(timeout: 5)
+            }
+            XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 10), "\(identifier) opened no list")
+        #else
+            ui.activate(identifier)
+        #endif
+    }
+
     /// Waits until the sidebar row's VoiceOver value ("3 documents", "1 Dokument") starts with `count`. iOS only:
     /// on the Mac the row's button exposes its title but no value (measured on #46, also with the value set on the
     /// link itself), so there the test checks the Trash list's rows instead; `LibraryTrashTests` checks the counts.
@@ -135,6 +171,7 @@ final class TrashSmokeTests: XCTestCase {
         #if os(macOS)
             return true
         #else
+            revealSidebarRow(identifier, ui)
             let element = ui.element(identifier)
             let predicate = NSPredicate { object, _ in
                 guard let element = object as? XCUIElement, element.exists else { return false }
