@@ -294,8 +294,10 @@ public enum RepairPlanner {
     }
 }
 
-/// The metadata of one snapshot, indexed for following `mergedIntoID`.
-struct MetadataChains {
+/// The metadata of one snapshot, indexed for following `mergedIntoID`. Build it once and ask it for many
+/// records: the library's read-only mapping of references to tombstones uses it too (plan of #3, part 2), so
+/// a row and the repair's pass 1 agree on where a chain ends.
+public struct MetadataChains: Sendable {
     private struct TargetKey: Hashable {
         let kind: MetadataKind
         let id: UUID
@@ -304,7 +306,7 @@ struct MetadataChains {
     private let byInstance: [UUID: MetadataSnapshot]
     private let byTarget: [TargetKey: [MetadataSnapshot]]
 
-    init(_ snapshot: RepairSnapshot) {
+    public init(_ snapshot: RepairSnapshot) {
         byInstance = Dictionary(snapshot.metadata.map { ($0.instanceID, $0) }, uniquingKeysWith: { first, _ in first })
         byTarget = Dictionary(grouping: RepairPlanner.keeperOrder(snapshot.metadata)) {
             TargetKey(kind: $0.kind, id: $0.id)
@@ -315,8 +317,8 @@ struct MetadataChains {
         byInstance[instanceID]
     }
 
-    /// `nil` if the record is not here or is live.
-    func end(of instanceID: UUID) -> RepairChainEnd? {
+    /// Where the chain of the tombstone `instanceID` ends; `nil` if the record is not here or is live.
+    public func end(of instanceID: UUID) -> RepairChainEnd? {
         guard let start = byInstance[instanceID], !start.isLive else { return nil }
         var path: [MetadataSnapshot] = []
         var position: [UUID: Int] = [:]

@@ -35,6 +35,37 @@ struct DocumentListQuerySQLTests {
         }
     }
 
+    /// The library's whole read (plan of #3, part 2): the list query for the list and the trash, and every
+    /// tag, correspondent and type, tombstones included. The same proof: no statement names a large table.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theLibraryReadReadsNoLargeTable() throws {
+        let container = try TestSupport.makeContainerOnDisk()
+        try Self.seed(container)
+        let context = ModelContext(container)
+        let merged = Correspondent(name: "stadtwerke")
+        merged.mergedIntoID = UUID()
+        context.insert(merged)
+        let child = DokumentumCore.Tag(name: "Strom")
+        context.insert(child)
+        child.parent = try context.fetch(FetchDescriptor<DokumentumCore.Tag>()).first { $0.name == "Haus" }
+        try context.save()
+
+        let recording = try SQLLog.Recording()
+        let snapshot = try StoreLibrarySource.read(in: ModelContext(container))
+        let statements = try recording.statements()
+
+        #expect(snapshot.documents.count == 3)
+        #expect(snapshot.correspondents.map(\.name) == ["Stadtwerke"])
+        #expect(snapshot.tags.count == 2)
+        #expect(statements.contains { $0.contains("FROM ZDOCUMENT t0") }, "no SELECT on ZDOCUMENT: \(statements)")
+        #expect(statements.contains { SQLLog.statement($0, names: "ZTAG") }, "no SELECT on ZTAG: \(statements)")
+        for statement in statements {
+            for table in Self.largeTables {
+                #expect(!SQLLog.statement(statement, names: table), "\(statement)")
+            }
+        }
+    }
+
     @Test func theTableMatchIsAWholeWord() {
         #expect(SQLLog.statement("SELECT 0 FROM ZDOCUMENTTEXT t0", names: "ZDOCUMENTTEXT"))
         #expect(!SQLLog.statement("SELECT 0 FROM ZDOCUMENTTEXT t0", names: "ZDOCUMENT"))
