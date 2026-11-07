@@ -85,8 +85,8 @@ struct FrozenEnumModelTests {
     }
 
     /// Every repair pass on a store holding such a document: the plan made from the store's snapshot changes
-    /// its references and links but never a raw value (I8). The SwiftData passes arrive with #2's part 3, which
-    /// reruns this on the store; here the Kit planner and applier run on a snapshot read from the store.
+    /// its references and links but never a raw value (I8). Here the Kit planner and applier run on a snapshot
+    /// read from the store; `noSwiftDataRepairPassWritesAFallbackBack` runs the SwiftData passes.
     @Test func noRepairPassWritesAFallbackBack() throws {
         let container = try TestSupport.makeContainer()
         let context = ModelContext(container)
@@ -113,49 +113,33 @@ struct FrozenEnumModelTests {
         #expect(
             [repaired.sourceRaw, repaired.processingStateRaw, repaired.textSourceRaw] == ["fax", "queued", "braille"])
     }
-}
 
-/// Builds the repair's full snapshot (every blob listed) from a store, for tests.
-enum RepairSnapshotReader {
-    static func full(of context: ModelContext) throws -> RepairSnapshot {
-        let documents = try context.fetch(FetchDescriptor<Document>()).map { document in
-            DocumentSnapshot(
-                instanceID: document.instanceID, id: document.id, createdAt: document.createdAt,
-                modifiedAt: document.modifiedAt, correspondent: document.correspondent?.instanceID,
-                documentType: document.documentType?.instanceID,
-                tags: Set((document.tags ?? []).map(\.instanceID)), sourceRaw: document.sourceRaw,
-                textSourceRaw: document.textSourceRaw, processingStateRaw: document.processingStateRaw)
-        }
-        var metadata = try context.fetch(FetchDescriptor<Correspondent>()).map {
-            MetadataSnapshot(
-                kind: .correspondent, instanceID: $0.instanceID, id: $0.id, createdAt: $0.createdAt,
-                mergedAt: $0.mergedAt, name: $0.name, mergedIntoID: $0.mergedIntoID)
-        }
-        metadata += try context.fetch(FetchDescriptor<DocumentType>()).map {
-            MetadataSnapshot(
-                kind: .documentType, instanceID: $0.instanceID, id: $0.id, createdAt: $0.createdAt,
-                mergedAt: $0.mergedAt, name: $0.name, mergedIntoID: $0.mergedIntoID)
-        }
-        metadata += try context.fetch(FetchDescriptor<DokumentumCore.Tag>()).map {
-            MetadataSnapshot(
-                kind: .tag, instanceID: $0.instanceID, id: $0.id, createdAt: $0.createdAt, mergedAt: $0.mergedAt,
-                name: $0.name, parentInstanceID: $0.parent?.instanceID, mergedIntoID: $0.mergedIntoID)
-        }
-        var blobs = try context.fetch(FetchDescriptor<DocumentFile>()).map {
-            BlobSnapshot(
-                kind: .file, instanceID: $0.instanceID, createdAt: $0.createdAt, documentID: $0.documentID,
-                linkedDocumentInstanceID: $0.document?.instanceID)
-        }
-        blobs += try context.fetch(FetchDescriptor<DocumentThumbnail>()).map {
-            BlobSnapshot(
-                kind: .thumbnail, instanceID: $0.instanceID, createdAt: $0.createdAt, documentID: $0.documentID,
-                linkedDocumentInstanceID: $0.document?.instanceID)
-        }
-        blobs += try context.fetch(FetchDescriptor<DocumentText>()).map {
-            BlobSnapshot(
-                kind: .text, instanceID: $0.instanceID, createdAt: $0.createdAt, documentID: $0.documentID,
-                linkedDocumentInstanceID: $0.document?.instanceID)
-        }
-        return RepairSnapshot(documents: documents, metadata: metadata, blobs: blobs)
+    /// The same on the store, rerun on the SwiftData passes (#30): every one of the five passes changes a
+    /// document holding unknown raw values, which are still in the store afterwards, read from a fresh context.
+    @Test func noSwiftDataRepairPassWritesAFallbackBack() async throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        var unknown = document(1, correspondent: 10, tags: [20, 21, 23])
+        (unknown.sourceRaw, unknown.processingStateRaw, unknown.textSourceRaw) = ("fax", "queued", "braille")
+        try store.seed(
+            RepairSnapshot(
+                documents: [unknown],
+                metadata: [
+                    // Pass 1: a tombstone reference. Pass 2: two tags named "Tax". Pass 3: a cycle 22 ↔ 23.
+                    correspondent(10, "Old", mergedInto: 11), correspondent(11, "New"),
+                    tag(20, "Tax"), tag(21, "tax"), tag(22, "A", parent: 23), tag(23, "B", parent: 22),
+                    // Pass 5: a loop of tombstones, also referenced by the document.
+                    metadata(.documentType, 30, "X", mergedInto: 31), metadata(.documentType, 31, "Y", mergedInto: 30),
+                ],
+                blobs: [blob(.text, 40, documentID: 1)]))
+
+        let repair = try await CheckedRepair.run(store)
+        let passes = Set(repair.report.passes.filter { !$0.applied.isEmpty }.map(\.pass))
+        #expect(passes == Set(RepairPass.allCases), "every pass changed something: \(repair.report.passes)")
+        let stored = try #require(
+            try ModelContext(store.container).fetch(FetchDescriptor<Document>()).first { $0.instanceID == uuid(1) })
+        #expect(stored.correspondent?.instanceID == uuid(11))
+        #expect(stored.text?.instanceID == uuid(40))
+        #expect([stored.sourceRaw, stored.processingStateRaw, stored.textSourceRaw] == ["fax", "queued", "braille"])
     }
 }

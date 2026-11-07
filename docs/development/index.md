@@ -254,6 +254,16 @@ changes. Deploying the schema to Production is the maintainer's.
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
 from tests or the VM).
 
+**The repair.** `RepairPlanner` (DokumentumKit) decides, `DokumentumCore/Repair/` carries it out on the store:
+re-point references to tombstones, merge same-name metadata into tombstones, break tag cycles, relink early
+blobs, revive tombstones; it never deletes (plan of #2, "Repair passes"). `RepairScheduler` runs it at launch,
+after debounced store changes (`StoreChangeObserver`) and at the end of a CloudKit import, only for stores on
+disk. A run reads a light snapshot (no linked blob is loaded; `RepairSQLTests` checks the SQL under `swift
+test`), saves once per pass that changed something and never otherwise, and re-checks every operation on a
+fresh read right before its save. Repair tests seed a `RepairSnapshot` into a store on disk
+(`RepairStoreFixtures.swift`) and check `RepairInvariants` and that the store ends where the planner's
+simulation ends (`CheckedRepair`).
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, subsystem

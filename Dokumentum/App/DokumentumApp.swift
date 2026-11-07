@@ -12,6 +12,8 @@ struct DokumentumApp: App {
     let container: ModelContainer
     /// The launch's choice and the store that opened: the footer and the debug command read it.
     let launchStore: LaunchStore
+    /// Runs the repair passes; `nil` for an in-memory store.
+    let repair: RepairScheduler?
 
     init() {
         var choice = ArchiveStore.currentChoice()
@@ -34,6 +36,9 @@ struct DokumentumApp: App {
             container = ArchiveStore.openAtLaunch(choice)
         #endif
         launchStore = LaunchStore(choice: choice, opened: ArchiveStore.opened ?? .inMemory)
+        // The repair (#2, part 3) for the stores on disk only: in-memory stores of tests and UI tests never start
+        // it. A launch run now, then after store changes and CloudKit imports.
+        repair = choice.isOnDisk ? RepairScheduler.start(for: container) : nil
     }
 
     var body: some Scene {
