@@ -66,7 +66,7 @@ public struct RepairReport: Sendable, Equatable {
 /// I6 then holds except for a save to one of those rows that commits between the check's read and the pass's
 /// commit: it is overwritten in that row. The window is the check's read plus the save, bounded by the rows the
 /// pass writes, not by the archive: measured about 0.06 s for a merge moving 300 documents and 0.24 to 0.40 s for
-/// 1,500 on #56 (docs/development/index.md, "Concurrent saves", with the setup and the other residual: records
+/// 1,500 (2026-11-07, #56; docs/development/index.md, "Concurrent saves", with the setup and the other residual: records
 /// inserted in the window are not re-checked).
 ///
 /// A pass that applies nothing does not save, so a run on repaired data writes nothing and its own save does not

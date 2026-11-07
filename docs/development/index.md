@@ -20,9 +20,9 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 ## Setup on the development Mac
 
 1. macOS 27, Xcode 27.x installed and selected
-   (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
-   Accounts. That account has no signing access: the team is enrolled as an
-   individual, so only the Account Holder gets Certificates, Identifiers & Profiles.
+   (`xcode-select -p`). Agents have no signing identity and never create a
+   certificate, a profile or a device registration; signed builds are the
+   maintainer's (the Account Holder of the individually enrolled team).
    Selecting Xcode with `xcode-select -s` needs `sudo`; without it, set
    `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (in
    `~/.zprofile` for login shells).
@@ -294,7 +294,7 @@ writes over a row state it has not read: right before a pass saves, it reads the
 rows included) and the records its operations name in another context and compares every field with what it
 read. If one differs, the pass writes nothing and the next run, which that save triggers, plans again. Nothing
 is ever written to undo. Residual window: a save to one of those rows that commits between that check and the
-pass's commit is overwritten in that row. Measured on #56 (`swift test` debug build, from the check's start
+pass's commit is overwritten in that row. Measured on 2026-11-07 in #56's review (`swift test` debug build, from the check's start
 to the pass's `didSave`, 3,000 documents in two correspondents' halves): about 0.06 s for a merge moving 300
 documents, and 0.24 to 0.40 s for one moving 1,500, with one to five tags per document, depending on the data
 and the machine's load (review A measured 0.40 s). It grows with the rows the pass writes, never with the archive.

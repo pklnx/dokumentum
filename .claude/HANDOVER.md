@@ -3,8 +3,10 @@
 ## State (2026-11-07)
 - Dokumentum (`pklnx/dokumentum`, private) replaces pklnx/document-archive and pklnx/paperless-go; both are frozen, no data migration. Plan: `docs/development/plan.md`.
 - Coordinator state, open PRs and the order of the next tickets: issue #76 (coordinator handover). Read it first.
-- Step 0 (#1, `ready`): parts 1, 2, 4 merged (#24, #33, #37), part 3 merged as #39. #1 stays open for maintainer step 9 (device check and signed output on the iPhone and the MacBook Pro), deferred until signed or iCloud work relies on it.
-- Step 1 (#2): parts merged up to #30 (PR #56); #31 open. Step 2 (#3): parts 1–4 merged, part 5 (#47) open. Step 3 (#4): parts 2 and 3 merged, #61 and #62 open.
+- Issue #1 (repository and skeleton, `ready`): parts 1, 2, 4 merged (#24, #33, #37), part 3 merged as #39. #1 stays open for maintainer step 9 (device check and signed output on the iPhone and the MacBook Pro), deferred until signed or iCloud work relies on it.
+- Issue #2 (data model and sync): parts merged up to #30 (PR #56); #31 open.
+- Issue #3 (library UI): parts 1–4 merged; part 5 (#47) open.
+- Issue #4 (import): parts 2 and 3 merged; #61 and #62 open.
 - Apple: enrolment done, Team ID `88GY2V9C2A`; iCloud container, app group and both App IDs registered; App Store Connect record "Dokumentum" (primary language German, store metadata only).
 - Xcode Cloud is onboarded and is the PR check; the ruleset `main` with the required checks is active.
 
