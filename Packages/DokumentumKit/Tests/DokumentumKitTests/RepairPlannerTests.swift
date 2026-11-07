@@ -678,13 +678,16 @@ struct RepairPlannerTests {
                 blob(.file, 24, documentID: 2, linkedTo: 2),
                 blob(.thumbnail, 25, documentID: 4, linkedTo: 4),
                 blob(.thumbnail, 26, documentID: 4),
+                // Two thumbnails for document 2 too, so the two kinds count differently.
+                blob(.thumbnail, 27, documentID: 2, linkedTo: 2),
+                blob(.thumbnail, 28, documentID: 2, linkedTo: 2),
             ]
         )
         var expected = RepairCounts()
         expected.orphanFiles = 2
         expected.orphanThumbnails = 1
         expected.documentsWithTwoFiles = 1
-        expected.documentsWithTwoThumbnails = 1
+        expected.documentsWithTwoThumbnails = 2
         expected.idGroupsWithSeveralRecords = 3
         expected.tombstones = 2
         #expect(RepairPlanner.counts(in: state) == expected)
