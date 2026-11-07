@@ -102,16 +102,21 @@ extension imports neither store nor model (see 3.4).
   accept: no unique constraints (duplicates by id must be merged on read),
   last writer wins per field, and once the schema is deployed to Production
   only additive changes are possible.
-- **Large data in its own models.** `Document` holds metadata and the
-  extracted text; `DocumentFile` (one per document) holds the PDF and
-  `DocumentThumbnail` the thumbnail, each as `@Attribute(.externalStorage)`.
-  The old app kept both blobs on `Document`, so every list query could fault
-  them in. Separating them keeps lists and search light. The three records sync
-independently and arrive in any order: `file` and `thumbnail` are optional,
-the UI shows "still downloading", the delete rule is cascade, and the
-repair pass removes orphans. List queries fetch without `extractedText`
-(`propertiesToFetch`); if that is not enough, the text moves to its own
-model too (decided in step 1 by measurement).
+- **Large data in its own models.** `Document` holds metadata only;
+  `DocumentFile` (the PDF), `DocumentThumbnail` (the thumbnail, both
+  `@Attribute(.externalStorage)`) and `DocumentText` (the extracted text) are
+  one each per document. Measured in step 1 (#29): SwiftData on 27 ignores
+  `propertiesToFetch` and selects every column of a fetched entity, so a large
+  field on `Document` would load with every list. The old app kept both blobs
+  on `Document`, so every list query could fault them in. The four records sync
+  independently and arrive in any order: `file`, `thumbnail` and `text` are
+  optional, the UI shows "still downloading", the delete rule is cascade, and
+  the repair relinks early arrivals and counts orphans.
+- **The list query.** `DocumentListQuery` is the only list fetch of
+  documents. It prefetches correspondent, type and tags, never the file, the
+  thumbnail or the text, and returns `DocumentSummary` values without text or
+  blob fields. An automated SQL test (`DocumentListQuerySQLTests`) checks that
+  it never reads those tables.
 - **Schema versions from day one** (`VersionedSchema`, `SchemaMigrationPlan`),
   with a rule: a CloudKit schema change is additive, and deploying to
   Production is a maintainer step (it cannot be undone).
@@ -123,12 +128,17 @@ model too (decided in step 1 by measurement).
   value is unknown, so an older TestFlight build on the other device never
   fails to decode a newer case (lesson from the old app).
 - **Repair passes after sync**, run after launch and after every CloudKit
-  import event, with deterministic winners (`createdAt`, then id): dedupe
-  by id, merge tags/correspondents/types with the same name (created
-  offline on both devices), repair tag cycles (concurrent moves), remove
-  orphaned files and thumbnails. Ported from the old app
-  (`TagHierarchy.mergeDuplicates`, `TagCycleRepair`, `StoreChangeObserver`,
-  `SyncMonitor`).
+  import event, with deterministic winners (`createdAt`, then `instanceID`).
+  As built in step 1, they never delete a record or a blob: re-point
+  references through merge tombstones, merge tags, correspondents and types
+  with the same name (created offline on both devices; the merged-away record
+  stays as a hidden tombstone), repair tag cycles (concurrent moves), relink
+  files, thumbnails and texts that arrived before their document, and revive
+  tombstones whose chain loops or whose end stays missing. Dedupe by id comes
+  with step 16; orphaned files, thumbnails and texts and old tombstones are
+  only counted until a later cleanup step (#32). Ported from the old app
+  (`MetadataMaintenance.mergeDuplicates`, `TagHierarchy.breakCycles`,
+  `TagCycleRepair`, `StoreChangeObserver`, `SyncMonitor`).
 - **Conflicts:** the field-level behaviour of `NSPersistentCloudKitContainer`
   is proven with a two-device test in step 1, not assumed. Automatic writes
   (classification) check the field again right before saving and save in
@@ -136,8 +146,11 @@ model too (decided in step 1 by measurement).
 - **Migrations:** with CloudKit only lightweight stages are possible;
   conversions of synced data are one-time, flagged passes. Every schema
   version has a migration test.
-- **Store location** is decided in step 1 (app container vs. app group);
-  moving it later is a migration.
+- **Store location** (decided in step 1): `Application Support/Dokumentum/Dokumentum.store`
+  in the app's own container, not the app group. The share extension never
+  opens the store, the app group exists only on iOS, and a second process
+  would bring its memory limit to the CloudKit mirror. CloudKit and the local
+  fallback use the same file. Moving it later is a migration.
 - Fallback: should SwiftData + CloudKit hit a wall we cannot work around
   (performance with the PDFs, conflicts), the store sits behind one
   `ArchiveStore` boundary in `Core`, so a move to `CKSyncEngine` with SQLite
@@ -146,12 +159,29 @@ model too (decided in step 1 by measurement).
 ### 3.3 Model (v1)
 | Entity | Fields (all with defaults, as CloudKit requires) |
 |---|---|
-| `Document` | id, title, createdAt, modifiedAt, documentDate, isInbox, pageCount, fileSize, extractedText, textSource, processingState, processingDeviceID, processingClaimedAt, contentHash (SHA-256 of the original bytes), originalFileName, source, deletedAt (trash), correspondent, documentType, tags, file, thumbnail |
-| `DocumentFile` | id, pdfData (external storage), document |
-| `DocumentThumbnail` | id, imageData (external storage), document |
-| `Tag` | id, name, color, parent (nested tags), documents |
-| `Correspondent` | id, name, documents |
-| `DocumentType` | id, name, documents |
+| `Document` | id, instanceID, title, createdAt, modifiedAt, documentDate, isInbox, pageCount, fileSize, textSourceRaw, processingStateRaw, processingDeviceID, processingClaimedAt, contentHash (SHA-256 of the original bytes), originalFileName, sourceRaw, deletedAt (trash), correspondent, documentType, tags, file, thumbnail, text |
+| `DocumentFile` | id, instanceID, createdAt, documentID, pdfData (external storage), document |
+| `DocumentThumbnail` | id, instanceID, createdAt, documentID, imageData (external storage), document |
+| `DocumentText` | id, instanceID, createdAt, documentID, extractedText, document |
+| `Tag` | id, instanceID, name, colorHex, createdAt, mergedIntoID, mergedAt, parent (nested tags), children, documents |
+| `Correspondent` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, documents |
+| `DocumentType` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, documents |
+
+Built in step 1 as `DokumentumSchemaV1` (#29). Names beyond the first draft:
+- `instanceID` on every entity: set at insert, never changed or copied. It is
+  the second key of every repair winner (after `createdAt`) and the handle of
+  one record, because records can share an `id` until step 16. It is in V1
+  because a migration cannot add it deterministically: each device would
+  generate its own value.
+- `createdAt` on metadata and blobs (the winner rule), `mergedIntoID` and
+  `mergedAt` on metadata (tombstones of a same-name merge), `documentID` on
+  blobs (relinking an early arrival).
+- `colorHex` (the old app's and the folder format's name) instead of `color`;
+  the frozen enums are stored as `textSourceRaw`, `processingStateRaw` and
+  `sourceRaw` and read through typed accessors with a fallback.
+- `DocumentText` instead of `Document.extractedText` (see 3.2). A document's
+  file and text are created once, at import, in the importer's save; later
+  steps write them in place.
 
 Later steps add fields additively (notes, favorite, ASN, deadlines, matching
 rules, saved views, trash retention). Names follow the old app where they fit, so the
@@ -179,7 +209,8 @@ queue with one Vision job and one model job at a time (the old app's
   added (a layered PDF has a different hash).
 
 ### 3.5 Search
-v1: an in-memory index over title, correspondent, type, tags and text, built
+v1: an in-memory index over title, correspondent, type, tags and text (read
+from `DocumentText`; a text that arrives after its document is added then), built
 off the main actor (`ModelActor`) at launch and updated incrementally from
 local changes and remote imports, with German/English
 normalisation (case, diacritics, simple prefix matching). Target: under
@@ -256,7 +287,7 @@ M ≈ 2-3 PRs, L ≈ 4+ PRs.
 | 5 | OCR and text layer | Vision OCR (de/en), text from existing PDFs, invisible text layer, thumbnails, page count, resume after quit | M |
 | 6 | Search | Index and query of 3.5, search field in the library, filter by tag/correspondent/type/inbox | M |
 | 7 | On-device classification | Foundation Models suggest title, correspondent, type, tags and date; suggestions are applied only to empty fields; a switch in settings; unavailable without Apple Intelligence, with the reason shown | M |
-| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of real use on Development) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, the hardened-runtime decision, a check list on both devices. Step 8 decides hardened runtime: `ENABLE_HARDENED_RUNTIME` stays `NO` until then (`Config/Project.xcconfig`), and `scripts/check-project.py` allows only that value, so the decision changes that rule too | S |
+| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of use on Development, with synthetic documents only: maintainer decision 2026-11-02) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, the hardened-runtime decision, a check list on both devices. Step 8 decides hardened runtime: `ENABLE_HARDENED_RUNTIME` stays `NO` until then (`Config/Project.xcconfig`), and `scripts/check-project.py` allows only that value, so the decision changes that rule too | S |
 
 Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 6 and 7 in parallel → 8.
@@ -279,7 +310,7 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 | 13 | Notes, favorites, ASN | Markdown notes, favorites, archive serial number | M |
 | 14 | Saved views | Saved filters in the sidebar | S |
 | 15 | Full trash | Retention (30 days), automatic purge, an undo notice after a delete | S |
-| 16 | Backup export | The archive folder format (PDF + JSON per document) to a folder in iCloud Drive or on the Mac | M |
+| 16 | Backup export | The archive folder format (PDF + JSON per document) to a folder in iCloud Drive or on the Mac; dedupe by id (with files, thumbnails and texts) for id-preserving imports | M |
 
 ### Without a milestone (backlog)
 | # | Step | Content | Size |
@@ -296,8 +327,6 @@ Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
    Actions on Linux runners for lint, the localisation check, the
    `DokumentumKit` tests and the secret scan. Section 4 lists the checks.
 
-To settle inside the steps: store location
-(step 1), whether `extractedText` gets its own model (step 1, by
-measurement), the minimum OS against the CI runners' Xcode (step 0), what
+To settle inside the steps: the minimum OS against the CI runners' Xcode (step 0), what
 `pklnx/design-system` offers for a native app (step 8; it may only have web
 tokens, then the colours and the icon are derived from it).
