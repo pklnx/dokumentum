@@ -7,11 +7,9 @@ final class LaunchSmokeTests: XCTestCase {
 
     @MainActor
     func testTheAppLaunchesAndShowsItsRootView() {
-        let app = XCUIApplication()
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(
-            app.descendants(matching: .any)[rootIdentifier].waitForExistence(timeout: 60),
-            "The root view did not appear")
+        let launched = UITestApp()
+        launched.launch()
+        defer { launched.app.terminate() }
+        XCTAssertTrue(launched.element(rootIdentifier).waitForExistence(timeout: 60), "The root view did not appear")
     }
 }
