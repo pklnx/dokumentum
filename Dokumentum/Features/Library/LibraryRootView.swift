@@ -27,6 +27,14 @@ struct LibraryRootView: View {
         } detail: {
             DocumentDetailView(model: model)
         }
+        #if os(macOS)
+            // The info panel, a trailing column of the whole window (plan of #3, part 3). Not on the detail
+            // column: there the inspector's split view sometimes did not lay out the detail's next state, and
+            // "Still downloading" stayed at a zero frame (measured in the German `UISmoke` runs of #57).
+            .inspector(isPresented: $model.isInfoPresented) {
+                DocumentInfoView(model: model)
+            }
+        #endif
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)

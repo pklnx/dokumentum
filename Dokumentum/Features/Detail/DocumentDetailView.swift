@@ -30,15 +30,11 @@ struct DocumentDetailView: View {
                     .accessibilityIdentifier(AccessibilityID.detailShowInfo)
                 }
             }
-            #if os(macOS)
-                // A trailing column on the Mac (plan of #3, part 3).
-                .inspector(isPresented: $model.isInfoPresented) {
-                    DocumentInfoView(model: model)
-                }
-            #else
+            #if os(iOS)
                 // A sheet on the iPhone. Not `.inspector`, which also becomes a sheet here: it put the panel's
                 // toolbar ("Done") into the detail's bar beneath the sheet, where it cannot be reached
-                // (measured on iOS 27.0).
+                // (measured on iOS 27.0). On the Mac the inspector is on the window's split view
+                // (`LibraryRootView`).
                 .sheet(isPresented: $model.isInfoPresented) {
                     DocumentInfoView(model: model)
                 }
