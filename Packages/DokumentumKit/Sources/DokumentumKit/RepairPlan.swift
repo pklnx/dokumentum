@@ -52,8 +52,9 @@ extension RepairPlan {
     /// This also defines the precondition of each operation (I6), which the SwiftData layer re-checks
     /// before its save: an operation applies only if the reference it changes still holds the planned
     /// value, source and target are present and as live as planned, a merge's two records still have
-    /// the same name (and for tags the same parent), and a relink's blob is unlinked and its document
-    /// has no blob of that kind. Otherwise it is skipped.
+    /// the same name (and for tags the same parent), a relink's blob is unlinked and its document
+    /// has no blob of that kind, and a revived tombstone is still a loop's minimum or the last of a
+    /// chain with a missing end. Otherwise it is skipped.
     public func apply(to snapshot: RepairSnapshot, now: Date) -> RepairApplication {
         var workspace = RepairWorkspace(state: snapshot, now: now)
         var applied: [RepairOperation] = []
@@ -195,8 +196,15 @@ private struct RepairWorkspace {
         return true
     }
 
+    /// Only while the reason for the revival holds: the tombstone is still a loop's minimum or the last
+    /// of a chain whose end is missing. A chain end that arrived meanwhile (an import) skips it.
     private mutating func revive(_ tombstone: UUID) -> Bool {
         guard let index = metadataIndex[tombstone], !state.metadata[index].isLive else { return false }
+        switch MetadataChains(state).end(of: tombstone) {
+        case .loop(let minimum) where minimum == tombstone: break
+        case .missing(let last) where last == tombstone: break
+        default: return false
+        }
         state.metadata[index].mergedIntoID = nil
         state.metadata[index].mergedAt = nil
         return true

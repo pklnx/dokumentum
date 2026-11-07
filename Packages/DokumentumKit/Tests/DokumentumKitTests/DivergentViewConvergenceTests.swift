@@ -125,9 +125,9 @@ struct DivergentViewConvergenceTests {
         let withoutTarget = view(of: state, droppingMetadata: [11])
         #expect(plan(withoutTarget).operations == [.revive(tombstone: uuid(10))])
         let after = checkedUnion(of: state, plans: [plan(withoutTarget)])
-        #expect(after.record(10).isLive)
+        #expect(!after.record(10).isLive, "the chain end is here, so the revival is skipped")
         let end = after.settled()
-        #expect(end?.record(10).isLive == false, "the same-name merge takes it back")
+        #expect(end?.record(10).isLive == false)
         #expect(end?.document(1).correspondent == uuid(11))
     }
 
