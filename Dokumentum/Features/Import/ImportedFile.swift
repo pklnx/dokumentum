@@ -2,15 +2,16 @@ import CoreTransferable
 import Foundation
 import UniformTypeIdentifiers
 
-/// A PDF dropped onto the library window (Mac). The system gives the file only for the duration of the
+/// A PDF or an image dropped onto the library window (Mac). The system gives the file only for the duration of the
 /// transfer, so it is copied into a folder of its own in the temporary directory, under its own name (the
 /// name becomes the title); `remove()` deletes that folder after the import. Ported from the predecessor's
-/// `ImportedFile` (pklnx/document-archive `ec5c71d`), PDF only in this part.
+/// `ImportedFile` (pklnx/document-archive `ec5c71d`).
 struct ImportedFile: Transferable {
     let url: URL
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .pdf) { try ImportedFile(copying: $0.file) }
+        FileRepresentation(importedContentType: .image) { try ImportedFile(copying: $0.file) }
     }
 
     /// `<tmp>/DroppedFiles`; each drop gets a folder `<UUID>` in it.
