@@ -15,7 +15,13 @@ public enum TestEnvironment {
             || processName == "swiftpm-testing-helper" || processName == "xctest"
     }
 
-    /// Whether this run stays away from real data. Today that is a unit test run; step 1 adds the app
-    /// launched by a UI test, which has none of the variables above and needs a launch argument.
-    public static var isIsolated: Bool { isRunningTests }
+    /// Whether this run stays away from real data: a unit test run, or the app launched by a UI test with
+    /// an in-memory store (`-UITestSeed` or `-UITestEmptyStore`, DEBUG builds only), which has none of the
+    /// variables above.
+    public static let isIsolated = isIsolated(
+        isRunningTests: isRunningTests, arguments: ProcessInfo.processInfo.arguments)
+
+    public static func isIsolated(isRunningTests: Bool, arguments: [String]) -> Bool {
+        isRunningTests || StoreChoice.isUITestLaunch(arguments: arguments)
+    }
 }
