@@ -4,12 +4,15 @@ import Foundation
 import SwiftData
 import Synchronization
 
+/// Every container helper turns on `SQLLog` first: Core Data reads that setting once per process, when the
+/// first store opens, so a test that opens a store another way calls `SQLLog.enable()` before it.
 extension TestSupport {
     /// A fresh in-memory archive with the app's schema and migration plan, never synced. It lives until the
     /// end of the test run (`ContainerKeeper`).
     @discardableResult
     public static func makeContainer() throws -> ModelContainer {
-        try keepAlive(ArchiveStore.open(ArchiveStore.configuration(for: .inMemory(seed: false))))
+        SQLLog.enable()
+        return try keepAlive(ArchiveStore.open(ArchiveStore.configuration(for: .inMemory(seed: false))))
     }
 
     /// A fresh archive in a new temporary folder, never synced. For tests that need a file: store change
@@ -21,7 +24,8 @@ extension TestSupport {
     /// The archive in the store file at `url` (created if missing), never synced. For tests that open the
     /// same file again. It lives until the end of the test run (`ContainerKeeper`).
     public static func makeContainerOnDisk(at url: URL) throws -> ModelContainer {
-        try keepAlive(ArchiveStore.open(ArchiveStore.configuration(for: .local, at: url)))
+        SQLLog.enable()
+        return try keepAlive(ArchiveStore.open(ArchiveStore.configuration(for: .local, at: url)))
     }
 
     /// Keeps a container that a test got from elsewhere (`ArchiveStore.makeContainer`) alive until the end
