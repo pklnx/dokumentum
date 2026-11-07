@@ -190,7 +190,8 @@ private struct RepairWorkspace {
             state.blobs[index].documentID == state.documents[documentIndex].id
         else { return false }
         let kind = state.blobs[index].kind
-        guard !state.blobs.contains(where: { $0.kind == kind && $0.linkedDocumentInstanceID == document })
+        guard !state.documents[documentIndex].linkedBlobs.contains(kind),
+            !state.blobs.contains(where: { $0.kind == kind && $0.linkedDocumentInstanceID == document })
         else { return false }
         state.blobs[index].linkedDocumentInstanceID = document
         return true

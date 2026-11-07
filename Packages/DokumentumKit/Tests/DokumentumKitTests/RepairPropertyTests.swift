@@ -3,7 +3,8 @@ import Foundation
 import Testing
 
 /// Random states with tombstones and merge chains (loops and missing ends included), shared `id`s, cycles,
-/// missing records and relationships, and files and thumbnails (orphans, early arrivals, doubles).
+/// missing records and relationships, and files, thumbnails and texts (orphans, early arrivals, doubles). Like
+/// the store, a document links at most one blob of each kind.
 private struct StateGenerator {
     var random: SeededGenerator
     private var nextInstance = 1
@@ -92,13 +93,15 @@ private struct StateGenerator {
         for _ in 0..<Int.random(in: 0...6, using: &random) {
             let owner = pick(documents)
             var blob = BlobSnapshot(
-                kind: chance(50) ? .file : .thumbnail,
+                kind: pick(BlobKind.allCases) ?? .file,
                 instanceID: instance(),
                 createdAt: date(),
                 documentID: chance(70) ? owner?.id : (chance(50) ? uuid(998_000) : nil)
             )
-            if chance(40), blob.documentID == owner?.id {
-                blob.linkedDocumentInstanceID = owner?.instanceID
+            if chance(40), let owner, blob.documentID == owner.id,
+                !blobs.contains(where: { $0.kind == blob.kind && $0.linkedDocumentInstanceID == owner.instanceID })
+            {
+                blob.linkedDocumentInstanceID = owner.instanceID
             }
             blobs.append(blob)
         }
@@ -155,6 +158,8 @@ struct RepairPropertyTests {
             counts.orphanThumbnails += found.orphanThumbnails
             counts.documentsWithTwoFiles += found.documentsWithTwoFiles
             counts.documentsWithTwoThumbnails += found.documentsWithTwoThumbnails
+            counts.orphanTexts += found.orphanTexts
+            counts.documentsWithTwoTexts += found.documentsWithTwoTexts
             counts.idGroupsWithSeveralRecords += found.idGroupsWithSeveralRecords
             counts.tombstones += found.tombstones
         }
@@ -164,8 +169,44 @@ struct RepairPropertyTests {
         #expect(counts.orphanThumbnails > 0)
         #expect(counts.documentsWithTwoFiles > 0)
         #expect(counts.documentsWithTwoThumbnails > 0)
+        #expect(counts.orphanTexts > 0)
+        #expect(counts.documentsWithTwoTexts > 0)
         #expect(counts.idGroupsWithSeveralRecords > 0)
         #expect(counts.tombstones > 0)
+    }
+
+    /// Every generated state is one the store can hold, so the light form below is defined for all of them.
+    @Test func theGeneratorLinksAtMostOneBlobPerKindAndDocument() {
+        var linked = 0
+        for seed in seeds {
+            var generator = StateGenerator(seed: seed)
+            let state = generator.state()
+            #expect(state.holdsAtMostOneLinkedBlobPerKind, "seed \(seed)")
+            linked += state.blobs.count { $0.linkedDocumentInstanceID != nil }
+        }
+        #expect(linked > 0)
+    }
+
+    /// A repair run in the store never loads a linked blob: it reads the kinds from the document row
+    /// (`linkedBlobs`). Planned on that light form, every state gives the same plan and the same counts as on
+    /// the full snapshot that lists every blob, and the plan applies to both.
+    @Test func theLightFormPlansAndCountsLikeTheFullSnapshot() {
+        var folded = 0
+        for seed in seeds {
+            var generator = StateGenerator(seed: seed)
+            let state = generator.state()
+            let light = state.lightForm
+            folded += state.blobs.count - light.blobs.count
+            let plan = RepairPlanner.plan(state, context: settledContext)
+            #expect(RepairPlanner.plan(light, context: settledContext) == plan, "seed \(seed)")
+            #expect(RepairPlanner.counts(in: light) == RepairPlanner.counts(in: state), "seed \(seed)")
+            let application = plan.apply(to: light, now: planningTime)
+            #expect(application.skipped.isEmpty, "seed \(seed)")
+            #expect(
+                RepairInvariants.violations(before: light, plan: plan, after: application.snapshot).isEmpty,
+                "seed \(seed)")
+        }
+        #expect(folded > 0, "no seed had a linked blob to fold")
     }
 
     @Test func everyPlanKeepsTheInvariants() {

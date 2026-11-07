@@ -80,7 +80,8 @@ func document(
     modified: Int = 0,
     correspondent: Int? = nil,
     type: Int? = nil,
-    tags: [Int] = []
+    tags: [Int] = [],
+    linkedBlobs: Set<BlobKind> = []
 ) -> DocumentSnapshot {
     DocumentSnapshot(
         instanceID: uuid(instance),
@@ -89,8 +90,39 @@ func document(
         modifiedAt: at(modified),
         correspondent: correspondent.map(uuid),
         documentType: type.map(uuid),
-        tags: Set(tags.map(uuid))
+        tags: Set(tags.map(uuid)),
+        linkedBlobs: linkedBlobs
     )
+}
+
+extension RepairSnapshot {
+    /// The light form a repair run in the store builds: every listed blob that is linked to a present document
+    /// becomes a kind in that document's `linkedBlobs` and leaves `blobs`. Defined only for states the store
+    /// can hold, with at most one linked blob per kind per document (`holdsAtMostOneLinkedBlobPerKind`).
+    var lightForm: RepairSnapshot {
+        var result = self
+        let present = Set(documents.map(\.instanceID))
+        let folded = blobs.filter { $0.linkedDocumentInstanceID.map(present.contains) ?? false }
+        for index in result.documents.indices {
+            let instance = result.documents[index].instanceID
+            result.documents[index].linkedBlobs.formUnion(
+                folded.filter { $0.linkedDocumentInstanceID == instance }.map(\.kind))
+        }
+        let foldedIDs = Set(folded.map(\.instanceID))
+        result.blobs.removeAll { foldedIDs.contains($0.instanceID) }
+        return result
+    }
+
+    /// Whether the store could hold this state: a to-one link holds one blob of a kind per document.
+    var holdsAtMostOneLinkedBlobPerKind: Bool {
+        let links = blobs.compactMap { blob in blob.linkedDocumentInstanceID.map { "\(blob.kind) \($0)" } }
+        return Set(links).count == links.count
+            && documents.allSatisfy { document in
+                document.linkedBlobs.allSatisfy { kind in
+                    !blobs.contains { $0.kind == kind && $0.linkedDocumentInstanceID == document.instanceID }
+                }
+            }
+    }
 }
 
 func blob(
