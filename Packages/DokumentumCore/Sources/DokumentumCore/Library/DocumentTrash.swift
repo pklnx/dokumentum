@@ -61,8 +61,10 @@ public struct DocumentTrash {
     /// Deletes for good the documents of `confirmed` that are still in the trash, with their linked file,
     /// thumbnail and text. Returns the `instanceID`s it deleted.
     ///
-    /// The documents are read again in a new context, so the check sees the store as it is now, not values the
-    /// main context may still hold from before a save of another context.
+    /// The documents are read again in a new context, so the check sees the store as it is now and does not rely
+    /// on the main context having merged another context's save. (Measured on this part: the main context's
+    /// fetch did see another context's saved restore in tests; the own context keeps the check independent of
+    /// that, e.g. of when a CloudKit import is merged.)
     @discardableResult
     public func emptyTrash(confirmed: Set<UUID>) throws -> Set<UUID> {
         guard !confirmed.isEmpty else { return [] }

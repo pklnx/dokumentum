@@ -127,16 +127,22 @@ final class TrashSmokeTests: XCTestCase {
         #endif
     }
 
-    /// Waits until the sidebar row's VoiceOver value ("3 documents", "1 Dokument") starts with `count`.
+    /// Waits until the sidebar row's VoiceOver value ("3 documents", "1 Dokument") starts with `count`. iOS only:
+    /// on the Mac the row's button exposes its title but no value (measured on #46, also with the value set on the
+    /// link itself), so there the test checks the Trash list's rows instead; `LibraryTrashTests` checks the counts.
     @MainActor
     private func waitForCount(_ count: Int, of identifier: String, in ui: UITestApp) -> Bool {
-        let element = ui.element(identifier)
-        let predicate = NSPredicate { object, _ in
-            guard let element = object as? XCUIElement, element.exists else { return false }
-            return (element.value as? String)?.hasPrefix("\(count) ") == true
-        }
-        return XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: 20) == .completed
+        #if os(macOS)
+            return true
+        #else
+            let element = ui.element(identifier)
+            let predicate = NSPredicate { object, _ in
+                guard let element = object as? XCUIElement, element.exists else { return false }
+                return (element.value as? String)?.hasPrefix("\(count) ") == true
+            }
+            return XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: 20) == .completed
+        #endif
     }
 
     @MainActor
