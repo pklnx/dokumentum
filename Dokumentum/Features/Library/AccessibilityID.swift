@@ -34,4 +34,11 @@ enum AccessibilityID {
     static let detailUnreadable = "documentDetail.unreadable"
     static let detailNoSelection = "documentDetail.noSelection"
     static let detailLoading = "documentDetail.loading"
+
+    /// The sidebar footer's "Sync off" line.
+    static let syncOffLine = "sidebar.syncOff"
+
+    /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
+    static let debugMenu = "debug.menu"
+    static let debugAddSampleDocuments = "debug.addSampleDocuments"
 }

@@ -1,3 +1,4 @@
+import DokumentumCore
 import SwiftUI
 
 /// The library window: sidebar, list and detail in one `NavigationSplitView`. The Mac shows three
@@ -8,25 +9,43 @@ import SwiftUI
 /// the root's type, because the Mac's saved window state names the root's type (plan of #3, T5).
 struct LibraryRootView: View {
     @State private var model: LibraryModel
+    /// The footer's reason and the debug command's confirmation come from it.
+    let launchStore: LaunchStore
 
-    init(source: any LibrarySource) {
-        _model = State(initialValue: LibraryModel(source: source))
+    /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
+    /// the first model. The library is read when the window appears (`loadIfNeeded`).
+    init(source: any LibrarySource, launchStore: LaunchStore) {
+        _model = State(initialValue: LibraryModel(source: source, loadNow: false))
+        self.launchStore = launchStore
     }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(model: model)
+            SidebarView(model: model, syncOff: launchStore.syncOffReason)
         } content: {
             DocumentListView(model: model)
         } detail: {
             DocumentDetailView(model: model)
         }
+        .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)
+        #if DEBUG
+            .modifier(sampleDocumentsCommand)
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(DokumentumApp.rootIdentifier)
     }
 }
+
+#if DEBUG
+    extension LibraryRootView {
+        /// The debug command of this window; it asks first for every store on disk (`LaunchStore`).
+        var sampleDocumentsCommand: SampleDocumentsCommand {
+            SampleDocumentsCommand(asksFirst: launchStore.asksBeforeAddingSampleDocuments)
+        }
+    }
+#endif
 
 extension FocusedValues {
     /// The library of the focused window, for the menu commands.

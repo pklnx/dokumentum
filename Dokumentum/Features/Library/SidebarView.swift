@@ -1,3 +1,4 @@
+import DokumentumCore
 import DokumentumKit
 import SwiftUI
 
@@ -5,6 +6,8 @@ import SwiftUI
 /// each row with its count. Trash joins at the bottom in part 4 of #3.
 struct SidebarView: View {
     @Bindable var model: LibraryModel
+    /// The footer's "Sync off" reason; no footer for `nil`.
+    var syncOff: StoreSyncOffReason?
 
     var body: some View {
         List(selection: $model.selection) {
@@ -34,11 +37,25 @@ struct SidebarView: View {
                 }
             }
         }
+        // On the list itself, before the footer: an identifier after it would also replace the footer's
+        // own (measured on macOS, #44).
+        .accessibilityIdentifier(AccessibilityID.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            if let syncOff {
+                SyncOffLine(reason: syncOff)
+            }
+        }
+        #if DEBUG && os(iOS)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    DebugToolbarMenu()
+                }
+            }
+        #endif
         .navigationTitle("Dokumentum")
         #if os(macOS)
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         #endif
-        .accessibilityIdentifier(AccessibilityID.sidebar)
     }
 
     private func row(_ selection: LibrarySelection, title: Text, symbol: String) -> some View {
@@ -83,5 +100,38 @@ struct SidebarRowLabel: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? title)
         .accessibilityValue(Text("\(count) documents"))
+    }
+}
+
+/// The sidebar footer while the store does not sync (#2's P1 text "Sync off: <reason>"; reasons PQ13).
+/// A CloudKit store shows nothing here until #31's sync status takes this place.
+struct SyncOffLine: View {
+    let reason: StoreSyncOffReason
+
+    var body: some View {
+        Label {
+            Text("Sync off: \(reasonText)")
+        } icon: {
+            Image(systemName: "icloud.slash")
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(AccessibilityID.syncOffLine)
+    }
+
+    private var reasonText: Text { Text(Self.reasonText(reason)) }
+
+    /// The reason's words, from the catalog.
+    static func reasonText(_ reason: StoreSyncOffReason) -> LocalizedStringResource {
+        switch reason {
+        case .noICloudAccess: "this build has no iCloud access"
+        case .sampleData: "sample data, not saved"
+        case .cloudKitStoreFailed: "the iCloud store could not be opened"
+        case .archiveFailed: "the archive could not be opened"
+        }
     }
 }

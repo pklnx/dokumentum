@@ -15,9 +15,13 @@ struct DocumentListView: View {
                 .accessibilityIdentifier(AccessibilityID.documentRow(document.instanceID))
             }
         }
+        // On the list itself, before the overlay: an identifier after it would also replace the empty
+        // state's own (measured on macOS, #44).
+        .accessibilityIdentifier(AccessibilityID.documentList)
         .overlay {
             if model.documents.isEmpty {
                 emptyState
+                    .accessibilityElement(children: .combine)
                     .accessibilityIdentifier(AccessibilityID.documentListEmpty)
             }
         }
@@ -25,7 +29,6 @@ struct DocumentListView: View {
         #if os(macOS)
             .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         #endif
-        .accessibilityIdentifier(AccessibilityID.documentList)
     }
 
     @ViewBuilder

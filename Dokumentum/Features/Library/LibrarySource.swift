@@ -1,29 +1,10 @@
+import DokumentumCore
 import DokumentumKit
 import Foundation
 
-/// Everything the sidebar and the list show, as plain values (plan of #3, T1).
-struct LibrarySnapshot: Sendable, Equatable {
-    var documents: [LibraryDocument] = []
-    var tags: [TagRecord] = []
-    var correspondents: [LibraryDocument.Reference] = []
-    var documentTypes: [LibraryDocument.Reference] = []
-
-    static let empty = LibrarySnapshot()
-}
-
-/// What loading one document's PDF found. Part 2 of #3 maps the store's states onto it.
-enum PDFLoadState: Sendable, Equatable {
-    /// No document with that `instanceID` (deleted meanwhile).
-    case noDocument
-    /// The document has no file yet: it is still arriving by sync.
-    case noFile
-    /// The file record exists, but its data has not arrived yet.
-    case noData
-    case data(Data)
-}
-
-/// Where the library's values come from: fixtures in part 1 of #3, the store from part 2 on. The
-/// views read it only through `LibraryModel`.
+/// Where the library's values come from: the store from part 2 of #3 on (`StoreLibrarySource`), fixtures
+/// in Debug unit tests (`FixtureLibrarySource`). The views read it only through `LibraryModel`.
+/// `LibrarySnapshot` and `PDFLoadState` are Kit values, so Core can produce them.
 protocol LibrarySource: Sendable {
     /// The current values; cheap, without file data.
     @MainActor func snapshot() -> LibrarySnapshot
@@ -34,22 +15,6 @@ protocol LibrarySource: Sendable {
     func loadPDF(instanceID: UUID) async -> PDFLoadState
 }
 
-/// No documents at all: the source of a Release build until the store arrives (part 2 of #3), so a
-/// Release build never contains fixtures.
-struct EmptyLibrarySource: LibrarySource {
-    let changes = AsyncStream<Void> { $0.finish() }
-
-    @MainActor func snapshot() -> LibrarySnapshot { .empty }
-
-    func loadPDF(instanceID: UUID) async -> PDFLoadState { .noDocument }
-}
-
-/// The source the app starts with: generated sample documents in Debug builds, nothing in Release
-/// builds.
-func librarySourceForThisBuild() -> any LibrarySource {
-    #if DEBUG
-        FixtureLibrarySource()
-    #else
-        EmptyLibrarySource()
-    #endif
-}
+/// The store's library: Debug and Release builds alike. In a Debug build the store of a `-UITestSeed`
+/// launch holds the sample documents (`FixtureSeeder`).
+extension StoreLibrarySource: LibrarySource {}
