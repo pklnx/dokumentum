@@ -36,7 +36,10 @@ struct DuplicateCheckMeasurement {
                 times.append(clock.now - start)
             }
             times.sort()
-            print("Duplicate check, 5,000 documents, \(label) hash: median \(times[10]), max \(times[20])")
+            let line = "Duplicate check, 5,000 documents, \(label) hash: median \(times[10]), max \(times[20])"
+            print(line)
+            // The simulator's test output does not reach `xcodebuild`'s log; the result bundle keeps this.
+            Attachment.record(line, named: "duplicate-check-\(label).txt")
         }
         #expect(try ModelContext(container).fetchCount(FetchDescriptor<Document>()) == 5_000)
     }

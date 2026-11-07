@@ -99,6 +99,7 @@ struct ImportControllerTests {
         await controller.importFiles([Self.url("a.pdf")])
 
         #expect(library.selection == .inbox)
+        #expect(library.documents.map(\.instanceID) == [id], "the list shows the new document")
         #expect(library.selectedDocumentID == id)
         #expect(controller.notices.shown == nil, "nothing to report (PQ4)")
     }
@@ -209,8 +210,10 @@ struct ImportControllerTests {
         let report = await controller.importDropped([dropped])
 
         #expect(report.entries.map(\.outcome) == [.imported(instanceID: id)])
-        #expect(!FileManager.default.fileExists(atPath: dropped.url.deletingLastPathComponent().path()))
-        #expect(FileManager.default.fileExists(atPath: original.path()), "the original stays")
+        #expect(
+            !FileManager.default.fileExists(atPath: dropped.url.deletingLastPathComponent().path(percentEncoded: false))
+        )
+        #expect(FileManager.default.fileExists(atPath: original.path(percentEncoded: false)), "the original stays")
     }
 
     @Test func theCoordinatedReaderReadsAFileAndFailsForAMissingOne() async throws {
