@@ -196,6 +196,59 @@ struct RepairConcurrentSaveTests {
         #expect(try Self.fetch(Document.self, 1, in: ModelContext(store.container)).title == "From the main context")
     }
 
+    /// A blob another save links to a document the pass moves (review A's D2): the link is on the document's row
+    /// as far as the pass can see, so the pass skips and the link stays.
+    @Test(arguments: BlobKind.allCases)
+    func aBlobLinkedDuringAMergeStays(kind: BlobKind) async throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        // Its `documentID` names another document, so pass 4 never links it to document 1 itself.
+        try store.seed(
+            RepairSnapshot(
+                documents: [document(1, correspondent: 11)],
+                metadata: [correspondent(10, "Telekom"), correspondent(11, "Telekom")],
+                blobs: [blob(kind, 30, documentID: 999)]))
+
+        let (report, afterEdit) = try repair(
+            store,
+            editingInTheWindow: Self.saving { context in
+                let target = try Self.fetch(Document.self, 1, in: context)
+                switch kind {
+                case .file: try Self.fetch(DocumentFile.self, 30, in: context).document = target
+                case .thumbnail: try Self.fetch(DocumentThumbnail.self, 30, in: context).document = target
+                case .text: try Self.fetch(DocumentText.self, 30, in: context).document = target
+                }
+            })
+        try expectSkipped(store, report, afterEdit: afterEdit)
+        #expect(try store.full().blob(30)?.linkedDocumentInstanceID == uuid(1))
+        let next = try await CheckedRepair.run(store)
+        #expect(next.after.blob(30)?.linkedDocumentInstanceID == uuid(1), "and stays after the merge")
+        #expect(next.after.document(1)?.correspondent == uuid(10))
+    }
+
+    /// Another save links a second text to the document the relink pass is linking a text to: that link stays,
+    /// and the pass's text stays unlinked (counted as a double).
+    @Test func aTextLinkedDuringARelinkStays() throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        try store.seed(
+            RepairSnapshot(
+                documents: [document(1)],
+                blobs: [blob(.text, 10, documentID: 1), blob(.text, 11, created: 50, documentID: 1)]))
+
+        let (report, afterEdit) = try repair(
+            store,
+            editingInTheWindow: Self.saving { context in
+                try Self.fetch(DocumentText.self, 11, in: context).document = try Self.fetch(
+                    Document.self, 1, in: context)
+            })
+        try expectSkipped(store, report, afterEdit: afterEdit)
+        let after = try store.full()
+        #expect(after.blob(11)?.linkedDocumentInstanceID == uuid(1))
+        #expect(after.blob(10)?.linkedDocumentInstanceID == nil)
+        #expect(RepairPlanner.counts(in: after).documentsWithTwoTexts == 1)
+    }
+
     /// A save to a row the pass neither writes nor names leaves the pass alone.
     @Test func aSaveElsewhereLeavesThePassAlone() throws {
         let store = try TemporaryStore()

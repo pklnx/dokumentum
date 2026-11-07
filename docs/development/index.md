@@ -269,9 +269,15 @@ writes over a row state it has not read: right before a pass saves, it reads the
 rows included) and the records its operations name in another context and compares every field with what it
 read. If one differs, the pass writes nothing and the next run, which that save triggers, plans again. Nothing
 is ever written to undo. Residual window: a save to one of those rows that commits between that check and the
-pass's commit is overwritten in that row. Measured on the VM (`swift test`): 0.06 s for a merge moving 300
-documents, 0.24 s for one moving 1,500 (debug and release alike); it grows with the rows the pass writes, never
-with the archive. The external-storage data of a relinked blob is not compared.
+pass's commit is overwritten in that row. Measured on the VM (`swift test` debug build, from the check's start
+to the pass's `didSave`, 3,000 documents in two correspondents' halves): about 0.06 s for a merge moving 300
+documents, and 0.24 to 0.40 s for one moving 1,500, with one to five tags per document, depending on the data
+and the VM's load (review A measured 0.40 s). It grows with the rows the pass writes, never with the archive.
+A document's file, thumbnail and text links are part of its row (by identifier, without loading the blob), so a
+link another save makes in the window is seen. The external-storage data of a relinked blob is not compared.
+Also not re-checked: records inserted in the window. A revived tombstone whose chain end arrives just then, or a
+document that newly points at a merge's loser, is left for the next run, which merges or re-points it; nothing
+is lost, but the keeper can differ from the one another device chose until both converge.
 
 Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.swift`) and check
 `RepairInvariants` and that the store ends where the planner's simulation ends (`CheckedRepair`).

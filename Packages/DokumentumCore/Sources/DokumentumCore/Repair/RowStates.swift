@@ -41,6 +41,11 @@ enum RowState: Equatable, Sendable {
         var correspondent: UUID?
         var documentType: UUID?
         var tags: Set<UUID>
+        /// The linked blobs, by identifier: read from the document row without loading the blob, so a link, an
+        /// unlink or a swap saved by another context shows here (review A of #56, D2).
+        var file: PersistentIdentifier?
+        var thumbnail: PersistentIdentifier?
+        var text: PersistentIdentifier?
     }
 
     struct TagRow: Equatable, Sendable {
@@ -80,11 +85,12 @@ enum RowState: Equatable, Sendable {
     case blob(BlobRow)
 
     /// What a row state leaves out, per entity, and why: to-many relationships are inverses whose other side is
-    /// captured (`Document.correspondent`, `Document.tags`, `Tag.parent`, the blob's `document`), the document's
-    /// to-one blob links are captured on the blob's side, and the external-storage data is not compared (the
-    /// repair only links an unlinked blob, whose data nothing writes; a stale write of it remains a residual).
+    /// captured (`Document.correspondent`, `Document.tags`, `Tag.parent`), and the external-storage data is not
+    /// compared (the repair only links an unlinked blob, whose data nothing writes; a stale write of it remains a
+    /// residual). A blob link is captured on both sides: another save that links a blob the pass never read
+    /// changes only the document's row as far as the pass can see.
     static let excluded: [String: Set<String>] = [
-        "Document": ["file", "thumbnail", "text"],
+        "Document": [],
         "Tag": ["children", "documents"],
         "Correspondent": ["documents"],
         "DocumentType": ["documents"],
@@ -105,7 +111,9 @@ enum RowState: Equatable, Sendable {
                 processingClaimedAt: document.processingClaimedAt, contentHash: document.contentHash,
                 originalFileName: document.originalFileName, sourceRaw: document.sourceRaw,
                 deletedAt: document.deletedAt, correspondent: document.correspondent?.instanceID,
-                documentType: document.documentType?.instanceID, tags: Set((document.tags ?? []).map(\.instanceID))))
+                documentType: document.documentType?.instanceID, tags: Set((document.tags ?? []).map(\.instanceID)),
+                file: document.file?.persistentModelID, thumbnail: document.thumbnail?.persistentModelID,
+                text: document.text?.persistentModelID))
     }
 
     static func capture(_ tag: Tag) -> RowState {

@@ -103,4 +103,35 @@ struct RepairSQLTests {
             #expect(statement.hasSuffix("IN  (?)"), "one document, not more: \(statement)")
         }
     }
+
+    /// The check before a save reads the documents a merge moves, and with them their links, by identifier
+    /// only: no linked file, thumbnail or text row is selected (review A of #56, D2).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theCheckReadsBlobLinksWithoutTheBlobs() throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        try store.seed(
+            RepairSnapshot(
+                documents: [document(1, correspondent: 11), document(2, correspondent: 11)],
+                metadata: [correspondent(10, "Telekom"), correspondent(11, "Telekom")],
+                blobs: [.file, .thumbnail, .text].enumerated().flatMap { index, kind in
+                    [
+                        blob(kind, 20 + index, documentID: 1, linkedTo: 1),
+                        blob(kind, 30 + index, documentID: 2, linkedTo: 2),
+                    ]
+                }))
+
+        let recording = try SQLLog.Recording()
+        let report = try RepairRun.perform(in: store.container, now: Date(), hasCompletedImport: true)
+        let statements = try recording.statements()
+
+        #expect(report.plan.operations.count == 1, "\(report.plan)")
+        #expect(report.saves == 1)
+        for table in Self.blobTables {
+            let selects = statements.filter { $0.hasPrefix("SELECT") && SQLLog.statement($0, names: table) }
+            for select in selects {
+                #expect(select.contains("t0.ZDOCUMENT IS NULL"), "a linked row was read: \(select)")
+            }
+        }
+    }
 }

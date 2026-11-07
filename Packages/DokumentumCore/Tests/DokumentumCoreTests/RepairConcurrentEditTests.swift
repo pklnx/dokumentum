@@ -116,3 +116,5 @@ extension Document: HasInstanceID {}
 extension Correspondent: HasInstanceID {}
 extension DokumentumCore.Tag: HasInstanceID {}
 extension DocumentText: HasInstanceID {}
+extension DocumentFile: HasInstanceID {}
+extension DocumentThumbnail: HasInstanceID {}
