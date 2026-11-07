@@ -24,7 +24,15 @@ final class ImportSmokeTests: XCTestCase {
         let text = [notice.label, notice.value as? String ?? ""].joined(separator: " ")
         XCTAssertTrue(text.contains("Rechnung Stadtwerke"), "the notice does not name the existing document: \(text)")
         ui.attachWindowScreenshot("3-duplicate-notice", to: self)
-        ui.activate("import.notice.ok")
+        // The OK button by its identifier; an alert may not pass the identifier on, then its only button.
+        let ok = ui.element("import.notice.ok")
+        let button = ok.waitForExistence(timeout: 5) ? ok : ui.app.alerts.buttons.firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 10), "no OK button on the notice")
+        #if os(macOS)
+            button.click()
+        #else
+            button.tap()
+        #endif
         XCTAssertTrue(
             notice.waitForNonExistence(timeout: 10), "the notice stayed after OK")
 
