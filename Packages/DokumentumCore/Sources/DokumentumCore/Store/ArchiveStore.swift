@@ -105,9 +105,15 @@ public enum ArchiveStore {
 
     /// Opens the store of the app's launch: the only place that records it in `opened` and `current`. Only
     /// the app's `init` calls it.
-    /// - Parameter seed: fills an `.inMemory(seed: true)` store; unused otherwise.
-    public static func openAtLaunch(_ choice: StoreChoice, seed: (ModelContext) -> Void = { _ in }) -> ModelContainer {
-        let result = makeContainer(for: choice, seed: seed)
+    /// - Parameters:
+    ///   - url: the store file; only a DEBUG UI test launch passes a temporary one (`-UITestLocalStore`).
+    ///   - fallbackURL: the second fallback's file, likewise.
+    ///   - seed: fills an `.inMemory(seed: true)` store; unused otherwise.
+    public static func openAtLaunch(
+        _ choice: StoreChoice, at url: URL = storeURL, fallbackURL: URL = fallbackStoreURL,
+        seed: (ModelContext) -> Void = { _ in }
+    ) -> ModelContainer {
+        let result = makeContainer(for: choice, at: url, fallbackURL: fallbackURL, seed: seed)
         opened = result.store
         current = result.container
         Log.store.notice("Store opened: \(result.store.rawValue, privacy: .public)")

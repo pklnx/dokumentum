@@ -42,10 +42,18 @@ final class SampleDocumentsSmokeTests: XCTestCase {
         #if os(iOS)
             ui.activate("sidebar.inbox")
         #endif
-        // The Inbox lists the samples that are in it, each once.
+        // The Inbox lists the samples that are in it, each once. The accessibility tree fills the rows over
+        // several passes, so the test waits until all of them are there (review B of #53).
         let rows = ui.app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "documentList.row."))
-        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 20), "no sample document in the list")
+        let allRows = XCTNSPredicateExpectation(
+            predicate: NSPredicate { query, _ in
+                guard let query = query as? XCUIElementQuery else { return false }
+                return Set(query.allElementsBoundByIndex.map(\.identifier)).count == Self.inboxSamples
+            }, object: rows)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [allRows], timeout: 30), .completed,
+            "the Inbox did not list \(Self.inboxSamples) samples")
         XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)).count, Self.inboxSamples)
         XCTAssertFalse(ui.element("documentList.empty").exists, "the list still says it is empty")
         ui.attachWindowScreenshot("2-samples-added", to: self)

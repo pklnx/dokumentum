@@ -73,8 +73,9 @@ public final class StoreLibrarySource: Sendable {
     }
 }
 
-/// Calls `onSave` after every save of a context of one container, until cancelled or released.
-private final class SaveObservation: Sendable {
+/// Calls `onSave` after every save of a context of one container, until cancelled or released. `onSave` runs
+/// synchronously on the saving thread, inside `save()`.
+final class SaveObservation: Sendable {
     private let token: Token
 
     init(container: ModelContainer, onSave: @escaping @Sendable () -> Void) {

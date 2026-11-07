@@ -12,6 +12,9 @@ struct UITestApp {
         case samples
         /// `-UITestEmptyStore`: an empty archive.
         case empty
+        /// `-UITestLocalStore <name>`: a new, empty local store on disk in the app's temporary directory,
+        /// never the archive's path.
+        case localOnDisk(name: String)
     }
 
     /// `-UITestSeed`: the sample library in an in-memory store (the predecessor's argument; `-UITestEmptyStore`
@@ -23,8 +26,13 @@ struct UITestApp {
     /// value, so in `-UITestSeed -ApplePersistenceIgnoreState YES` the `YES` is left over, macOS opens it
     /// as a document, and SwiftUI then opens no window at all (measured on macOS 27, #43).
     static func launchArguments(_ store: Store) -> [String] {
-        let storeArgument = store == .samples ? "-UITestSeed" : "-UITestEmptyStore"
-        return [storeArgument, "YES", "-ApplePersistenceIgnoreState", "YES"]
+        let storeArguments =
+            switch store {
+            case .samples: ["-UITestSeed", "YES"]
+            case .empty: ["-UITestEmptyStore", "YES"]
+            case .localOnDisk(let name): ["-UITestLocalStore", name]
+            }
+        return storeArguments + ["-ApplePersistenceIgnoreState", "YES"]
     }
 
     /// The language of this run: `TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de` on the `xcodebuild` command

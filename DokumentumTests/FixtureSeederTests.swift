@@ -78,6 +78,45 @@ struct FixtureSeederTests {
             #expect(tag.instanceID != tag.id)
             #expect(tag.createdAt == now)
         }
+        for record in try context.fetch(FetchDescriptor<Correspondent>()) {
+            #expect(record.instanceID != record.id)
+            #expect(record.createdAt == now)
+        }
+        for record in try context.fetch(FetchDescriptor<DocumentType>()) {
+            #expect(record.instanceID != record.id)
+            #expect(record.createdAt == now)
+        }
+        for text in try context.fetch(FetchDescriptor<DocumentText>()) { #expect(text.createdAt == now) }
+        for file in try context.fetch(FetchDescriptor<DocumentFile>()) { #expect(file.createdAt == now) }
+    }
+
+    /// Two live records with the same name, as two devices make before the repair's pass 2: the samples go
+    /// to the one that comes first in `keeperOrder` (oldest `createdAt`), the one pass 2 will keep.
+    @Test func theCommandReusesTheKeeperOrderMinimumOfSameNameRecords() throws {
+        let context = try makeContainer().mainContext
+        let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let newer = Correspondent(name: "Stadtwerke Musterstadt", createdAt: base.addingTimeInterval(60))
+        let older = Correspondent(name: "stadtwerke musterstadt", createdAt: base)
+        let newerType = DocumentType(name: "Invoice", createdAt: base.addingTimeInterval(60))
+        let olderType = DocumentType(name: "INVOICE", createdAt: base)
+        let newerTag = DokumentumCore.Tag(name: "Tax", createdAt: base.addingTimeInterval(60))
+        let olderTag = DokumentumCore.Tag(name: "tax", createdAt: base)
+        // Inserted newest first, so the store's order does not decide.
+        context.insert(newer)
+        context.insert(older)
+        context.insert(newerType)
+        context.insert(olderType)
+        context.insert(newerTag)
+        context.insert(olderTag)
+        try context.save()
+
+        try FixtureSeeder.addSampleDocuments(to: context)
+        let bill = try #require(
+            try context.fetch(FetchDescriptor<Document>()).first { $0.title == "Electricity bill October" })
+        #expect(bill.correspondent?.instanceID == older.instanceID)
+        #expect(bill.documentType?.instanceID == olderType.instanceID)
+        #expect(bill.tags?.map(\.instanceID) == [olderTag.instanceID])
+        #expect(newer.documents?.isEmpty ?? true)
     }
 
     /// The `-UITestSeed` store keeps the fixed `instanceID`s, so UI tests can address each row.

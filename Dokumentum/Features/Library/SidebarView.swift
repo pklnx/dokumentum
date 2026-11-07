@@ -123,11 +123,15 @@ struct SyncOffLine: View {
         .accessibilityIdentifier(AccessibilityID.syncOffLine)
     }
 
-    private var reasonText: Text {
+    private var reasonText: Text { Text(Self.reasonText(reason)) }
+
+    /// The reason's words, from the catalog.
+    static func reasonText(_ reason: StoreSyncOffReason) -> LocalizedStringResource {
         switch reason {
-        case .noICloudAccess: Text("this build has no iCloud access")
-        case .sampleData: Text("sample data, not saved")
-        case .cloudKitStoreFailed: Text("the iCloud store could not be opened")
+        case .noICloudAccess: "this build has no iCloud access"
+        case .sampleData: "sample data, not saved"
+        case .cloudKitStoreFailed: "the iCloud store could not be opened"
+        case .archiveFailed: "the archive could not be opened"
         }
     }
 }

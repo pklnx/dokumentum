@@ -1,10 +1,11 @@
-import DokumentumCore
 import DokumentumCoreTestSupport
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Testing
+
+@testable import DokumentumCore
 
 /// The library on the store (plan of #3, part 2): what the sidebar and the list read, the open document's
 /// file, and the change events.
@@ -79,6 +80,24 @@ struct StoreLibrarySourceTests {
         await saved.wait(for: 2)
     }
 
+    /// Saves of another container are not this library's changes. `onSave` runs inside `save()`, so the
+    /// count after each save is final without waiting.
+    @Test func aSaveOfAnotherContainerIsNotAChange() throws {
+        let own = try TestSupport.makeContainer()
+        let other = try TestSupport.makeContainer()
+        let saves = TestSignal()
+        let observation = SaveObservation(container: own) { saves.fire() }
+        defer { observation.cancel() }
+
+        other.mainContext.insert(Document(title: "Fremd"))
+        try other.mainContext.save()
+        #expect(saves.count == 0)
+
+        own.mainContext.insert(Document(title: "Eigen"))
+        try own.mainContext.save()
+        #expect(saves.count == 1)
+    }
+
     // MARK: The file of the open document
 
     @Test func theLoaderReportsEachState() async throws {
@@ -137,15 +156,33 @@ struct StoreLibrarySourceTests {
     }
 }
 
-/// The footer's "Sync off" reason comes from the store that opened, never from a guess.
+/// The footer's "Sync off" reason and the debug command's confirmation come from the launch's choice and the
+/// store that opened, never from a guess, over every pair that `ArchiveStore.makeContainer` can produce.
 struct StoreSyncOffReasonTests {
     @Test func eachOpenedStoreHasItsReason() {
         #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .cloudKit) == nil)
         #expect(StoreSyncOffReason.reason(choice: .local, opened: .local) == .noICloudAccess)
-        #expect(StoreSyncOffReason.reason(choice: .local, opened: .localFallback) == .noICloudAccess)
+        #expect(StoreSyncOffReason.reason(choice: .local, opened: .localFallback) == .archiveFailed)
         #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .local) == .cloudKitStoreFailed)
-        #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .localFallback) == .cloudKitStoreFailed)
+        #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .localFallback) == .archiveFailed)
         #expect(StoreSyncOffReason.reason(choice: .inMemory(seed: true), opened: .sampleData) == .sampleData)
         #expect(StoreSyncOffReason.reason(choice: .inMemory(seed: false), opened: .inMemory) == .sampleData)
+    }
+
+    /// Every store on disk asks before sample documents are written, also a CloudKit choice that fell back to
+    /// `.local` at the synced archive's file; only the in-memory stores do not.
+    @Test(arguments: [
+        (StoreChoice.cloudKit, ArchiveStore.OpenedStore.cloudKit, true),
+        (.cloudKit, .local, true),
+        (.cloudKit, .localFallback, true),
+        (.local, .local, true),
+        (.local, .localFallback, true),
+        (.inMemory(seed: true), .sampleData, false),
+        (.inMemory(seed: false), .inMemory, false),
+    ])
+    func theSampleCommandAsksForEveryStoreOnDisk(choice: StoreChoice, opened: ArchiveStore.OpenedStore, asks: Bool) {
+        let launch = LaunchStore(choice: choice, opened: opened)
+        #expect(launch.asksBeforeAddingSampleDocuments == asks)
+        #expect(launch.syncOffReason == StoreSyncOffReason.reason(choice: choice, opened: opened))
     }
 }

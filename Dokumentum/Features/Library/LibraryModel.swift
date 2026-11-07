@@ -45,13 +45,26 @@ final class LibraryModel {
     /// The tags whose nested tags are shown.
     var expandedTags: Set<UUID> = []
 
-    init(source: any LibrarySource) {
+    /// Whether the source has been read at least once.
+    private(set) var isLoaded = false
+    /// Counts `loadDetail` calls: only the newest one's result is shown.
+    private var detailGeneration = 0
+
+    /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
+    ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
+    init(source: any LibrarySource, loadNow: Bool = true) {
         self.source = source
-        reload()
+        if loadNow { reload() }
+    }
+
+    /// Reads the source unless it was read before.
+    func loadIfNeeded() {
+        if !isLoaded { reload() }
     }
 
     /// Reads the source again and refilters. A selected document that left the list is deselected.
     func reload() {
+        isLoaded = true
         snapshot = source.snapshot()
         tree = TagTree(snapshot.tags)
         counts = LibraryCounts(snapshot.documents, tree: tree)
@@ -68,6 +81,7 @@ final class LibraryModel {
     /// Re-reads the source on every `changes` event, and the open document with it, until the
     /// calling task is cancelled. The root view runs it in `.task`.
     func observeChanges() async {
+        loadIfNeeded()
         for await _ in source.changes {
             reload()
             if let selectedDocumentID { await loadDetail(for: selectedDocumentID) }
@@ -75,8 +89,11 @@ final class LibraryModel {
     }
 
     /// Loads the detail of `instanceID` (`nil`: nothing selected). The PDF is read and checked off
-    /// the main actor. A result that arrives after the selection moved on is dropped.
+    /// the main actor. A result that arrives after the selection moved on, or after a newer load of the
+    /// same document started, is dropped: an older read must not replace a newer one.
     func loadDetail(for instanceID: UUID?) async {
+        detailGeneration += 1
+        let generation = detailGeneration
         guard let instanceID else {
             detail = .noSelection
             return
@@ -94,7 +111,7 @@ final class LibraryModel {
         case .data(let data):
             next = await Self.isReadablePDF(data) ? .pdf(instanceID: instanceID, data: data) : .unreadable
         }
-        guard !Task.isCancelled, selectedDocumentID == instanceID else { return }
+        guard !Task.isCancelled, generation == detailGeneration, selectedDocumentID == instanceID else { return }
         detail = next
     }
 

@@ -339,6 +339,17 @@
         }
       }
     },
+    "the archive could not be opened" : {
+      "comment" : "Reason in “Sync off: %@”: the archive's file could not be opened, so a separate fallback store opened.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "das Archiv konnte nicht geöffnet werden"
+          }
+        }
+      }
+    },
     "the iCloud store could not be opened" : {
       "comment" : "Reason in “Sync off: %@”: the CloudKit store failed to open and a local store opened instead.",
       "localizations" : {
