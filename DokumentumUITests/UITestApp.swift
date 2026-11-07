@@ -6,15 +6,26 @@ import XCTest
 struct UITestApp {
     let app = XCUIApplication()
 
-    /// `-UITestSeed`: the sample library (the predecessor's argument; part 2 of #3 maps it to an
-    /// in-memory store). `-ApplePersistenceIgnoreState YES`: the development VM keeps stale window
+    /// The store a UI test launches with; both are in memory and never saved.
+    enum Store {
+        /// `-UITestSeed`: the sample documents, with the catalog's fixed `instanceID`s.
+        case samples
+        /// `-UITestEmptyStore`: an empty archive.
+        case empty
+    }
+
+    /// `-UITestSeed`: the sample library in an in-memory store (the predecessor's argument; `-UITestEmptyStore`
+    /// for an empty one). `-ApplePersistenceIgnoreState YES`: the development VM keeps stale window
     /// state for the app's bundle ID, under which a build with a different root view type opens no
     /// window (plan of #3, T5).
     ///
     /// Every argument comes as a `-key value` pair. A bare `-UITestSeed` takes the next argument as its
     /// value, so in `-UITestSeed -ApplePersistenceIgnoreState YES` the `YES` is left over, macOS opens it
     /// as a document, and SwiftUI then opens no window at all (measured on macOS 27, #43).
-    static let launchArguments = ["-UITestSeed", "YES", "-ApplePersistenceIgnoreState", "YES"]
+    static func launchArguments(_ store: Store) -> [String] {
+        let storeArgument = store == .samples ? "-UITestSeed" : "-UITestEmptyStore"
+        return [storeArgument, "YES", "-ApplePersistenceIgnoreState", "YES"]
+    }
 
     /// The language of this run: `TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de` on the `xcodebuild` command
     /// line gives the German screenshots. Empty: the system's language.
@@ -22,8 +33,8 @@ struct UITestApp {
         ProcessInfo.processInfo.environment["DOKUMENTUM_UI_LANGUAGE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    func launch() {
-        var arguments = Self.launchArguments
+    func launch(_ store: Store = .samples) {
+        var arguments = Self.launchArguments(store)
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
         }

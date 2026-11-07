@@ -37,6 +37,9 @@ struct SidebarView: View {
                 }
             }
         }
+        // On the list itself, before the footer: an identifier after it would also replace the footer's
+        // own (measured on macOS, #44).
+        .accessibilityIdentifier(AccessibilityID.sidebar)
         .safeAreaInset(edge: .bottom) {
             if let syncOff {
                 SyncOffLine(reason: syncOff)
@@ -53,7 +56,6 @@ struct SidebarView: View {
         #if os(macOS)
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         #endif
-        .accessibilityIdentifier(AccessibilityID.sidebar)
     }
 
     private func row(_ selection: LibrarySelection, title: Text, symbol: String) -> some View {
