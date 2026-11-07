@@ -14,8 +14,12 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   fails `lint`. A signed build adds keys of its own beyond these files (for example
   application-identifier, the team identifier and get-task-allow).
 - The share extension is embedded in the iOS app only (both platform filters, in either form Xcode
-  and xcodebuild accept), into PlugIns. It links no package and imports neither the store nor the
-  model, and its Info.plist holds exactly the placeholder's keys and activation rule.
+  and xcodebuild accept), into PlugIns. It links no package, and its Info.plist holds exactly the
+  placeholder's keys and activation rule.
+- No .swift file under DokumentumShare/ contains the words SwiftData or DokumentumCore anywhere, as whole
+  words, in code, strings or comments: the extension must never touch the store. On purpose a plain word
+  search and no parser. It has no misses, where anything short of a real Swift lexer misreads raw strings,
+  regex literals or interpolation above an import. A false failure is loud, and rewording fixes it.
 - Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, SIGNING_OVERRIDES
   are not set in the project or a target, and Config/Unsigned.xcconfig holds exactly its three
   macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig, which is never committed, and
@@ -139,7 +143,7 @@ APP_TARGET = "Dokumentum"
 SHARE_TARGET = "DokumentumShare"
 SHARE_FOLDER = "DokumentumShare"
 # The store and the model stay out of the extension (CLAUDE.md, plan.md section 3.4).
-SHARE_FORBIDDEN_IMPORTS = {"DokumentumCore", "SwiftData"}
+SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
 # The placeholder's whole Info.plist file. Step 3 changes the rule here, on purpose.
 SHARE_INFO_CONTENT = {"NSExtension": {
     "NSExtensionAttributes": {
@@ -261,11 +265,12 @@ def parse_xcconfig(text):
     """The settings of an xcconfig: {key: [(condition, value)]}. The key has no [sdk=...] condition."""
     settings = {}
     for line in text.splitlines():
-        # Xcode also accepts a space before the condition: `KEY [sdk=*] = value`.
+        # Xcode also accepts a space before a condition: `KEY [sdk=*] = value`. A space inside the bracket
+        # stays, because Xcode reads it as part of the pattern, and such a condition fails check_xcconfig.
         match = re.match(r"\s*([A-Za-z_]\w*)((?:\s*\[[^\]]*\])*)\s*=\s*(.*?)\s*$", line)
         if match:
             value = re.sub(r"\s*//.*$", "", match.group(3))
-            settings.setdefault(match.group(1), []).append((re.sub(r"\s", "", match.group(2)), value))
+            settings.setdefault(match.group(1), []).append(("".join(re.findall(r"\[[^\]]*\]", match.group(2))), value))
     return settings
 
 
@@ -504,48 +509,16 @@ def check_local_xcconfig(root):
     return []
 
 
-def swift_code(text):
-    """Swift source without its comments (block comments nest) and string literals."""
-    token = re.compile(r'"""|"|//|/\*')
-    code = []
-    position = 0
-    while True:
-        match = token.search(text, position)
-        if not match:
-            code.append(text[position:])
-            return "".join(code)
-        code.append(text[position:match.start()] + " ")
-        position = match.end()
-        if match.group() == "//":
-            end = text.find("\n", position)
-            position = end if end != -1 else len(text)
-        elif match.group() == "/*":
-            depth = 1
-            while depth and position < len(text):
-                inner = re.compile(r"/\*|\*/").search(text, position)
-                if not inner:
-                    position = len(text)
-                    break
-                depth += 1 if inner.group() == "/*" else -1
-                position = inner.end()
-        elif match.group() == '"""':
-            end = text.find('"""', position)
-            position = end + 3 if end != -1 else len(text)
-        else:
-            position = re.compile(r'(?:\\.|[^"\\\n])*"?').match(text, position).end()
-
-
 def check_share_sources(root):
-    """The extension never opens the store: no import of the store's or the model's framework. Looks for
-    the keyword in the code, not for a line that starts with it: an import may follow an access level, an
-    attribute, a `;` or a comment, and it may span lines."""
+    """The words of SHARE_FORBIDDEN_WORDS, anywhere in the extension's Swift files (see the docstring)."""
     problems = []
-    pattern = re.compile(r"\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?`?(\w+)")
+    pattern = re.compile(r"\b(" + "|".join(sorted(SHARE_FORBIDDEN_WORDS)) + r")\b")
     for path in sorted((root / SHARE_FOLDER).rglob("*.swift")):
-        for module in pattern.findall(swift_code(path.read_text(encoding="utf-8"))):
-            if module in SHARE_FORBIDDEN_IMPORTS:
-                problems.append(f"{path.relative_to(root)}: imports {module}; the extension never opens the store "
-                                "(plan.md, section 3.4)")
+        lines = path.read_bytes().decode("utf-8", errors="replace").splitlines()
+        for number, line in enumerate(lines, start=1):
+            for word in pattern.findall(line):
+                problems.append(f"{path.relative_to(root)}:{number}: contains the word {word}; the extension never "
+                                "touches the store (plan.md, section 3.4). Reword it if it is only a comment")
     return problems
 
 
@@ -815,7 +788,7 @@ def write_fixture(root):
         XCCONFIG: FIXTURE_XCCONFIG,
         UNSIGNED_XCCONFIG: FIXTURE_UNSIGNED,
         SCHEME: FIXTURE_SCHEME,
-        f"{SHARE_FOLDER}/ShareViewController.swift": "import UIKit\n// import SwiftData\n",
+        f"{SHARE_FOLDER}/ShareViewController.swift": "import UIKit\n",
         "TestPlans/Default.xctestplan": FIXTURE_DEFAULT_PLAN,
         "TestPlans/UISmoke.xctestplan": fixture_plan(("container:Dokumentum.xcodeproj", "A8", "DokumentumUITests")),
         XCODE_VERSION: "27.1\n",
@@ -901,6 +874,10 @@ def self_test():
 
     def in_xcconfig_last(line):
         return edit(XCCONFIG, '#include? "Local.xcconfig"', f'{line}\n#include? "Local.xcconfig"')
+
+    def in_subfolder(root):
+        (root / SHARE_FOLDER / "Sub").mkdir()
+        (root / SHARE_FOLDER / "Sub" / "Store.swift").write_text("import SwiftData\n", encoding="utf-8")
 
     def committed_local(root):
         (root / LOCAL_XCCONFIG).write_text("// committed\n")
@@ -1153,12 +1130,6 @@ def self_test():
         ("a package linked in the extension's phase only", edit(PROJECT, "C5 = {isa = PBXFrameworksBuildPhase; files = ();};",
                                                                 "C5 = {isa = PBXFrameworksBuildPhase; files = (C6, );};\n\t\tC6 = {isa = PBXBuildFile; productRef = D0;};"),
          "links a package in a build phase"),
-        ("the extension imports SwiftData", write(f"{SHARE_FOLDER}/Store.swift", "import SwiftData\n"), "imports SwiftData"),
-        ("the extension imports the core", write(f"{SHARE_FOLDER}/Store.swift", "import DokumentumCore\n"), "imports DokumentumCore"),
-        ("an attributed import", write(f"{SHARE_FOLDER}/Store.swift", "@preconcurrency import SwiftData\n"), "imports SwiftData"),
-        ("a declaration import", write(f"{SHARE_FOLDER}/Store.swift", "import struct DokumentumCore.ProcessingEnvironment\n"),
-         "imports DokumentumCore"),
-        ("an indented import", write(f"{SHARE_FOLDER}/Store.swift", "#if DEBUG\n    import SwiftData\n#endif\n"), "imports SwiftData"),
         ("embedded into another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolderSpec = 10;"), "must copy DokumentumShare into PlugIns"),
         ("embedded without a destination", edit(PROJECT, "dstSubfolderSpec = 13;", ""), "must copy DokumentumShare into PlugIns"),
         ("embedded into a subfolder", edit(PROJECT, 'dstPath = "";', "dstPath = x;"), "must copy DokumentumShare into PlugIns"),
@@ -1194,21 +1165,43 @@ def self_test():
         (".xcode-version empty", edit(XCODE_VERSION, "27.1\n", "\n"), XCODE_VERSION),
         (".xcode-version missing", remove(XCODE_VERSION), XCODE_VERSION),
     ]
-    # Every way to write an import fails, for both modules; what is no import does not.
-    for module in sorted(SHARE_FORBIDDEN_IMPORTS):
-        for form in ("import {}", "internal import {}", "public import {}", "package import {}", "private import {}",
-                     "fileprivate import {}", "@preconcurrency import {}", "@preconcurrency internal import {}",
-                     "@testable import {}", "@_exported import {}", "@_spi(Foo) import {}", "@_spi(Foo) public import {}",
-                     "import UIKit; import {}", "import UIKit;import {}", "/* c */ import {}", "/* a /* b */ c */ import {}",
-                     "/** c */\nimport {}", "import /* c */ {}", "import\n{}", "internal\nimport {}", "    import {}",
-                     "import struct {}.X", "import {}.X", "import `{}`", "#if DEBUG\nimport {}\n#endif",
-                     'let a = "//"; import {}', 'let a = "/*"; import {}; let b = "*/"'):
-            source = form.format(module) + "\n"
-            cases.append((f"the extension: {source!r}", write(f"{SHARE_FOLDER}/Store.swift", source), f"imports {module}"))
-        for form in ("// import {}", "/* import {} */", "/* a /* b */ import {} */", "/// import {}", 'let a = "import {}"',
-                     'let a = """\nimport {}\n"""', "let importantValue = {}", "let imports = 1 // {}", "import UIKit // {}"):
-            source = form.format(module) + "\n"
-            cases.append((f"the extension, no import: {source!r}", write(f"{SHARE_FOLDER}/Store.swift", source), None))
+    # The words of the extension's rule: anywhere, for both, including what a lexer short of Swift's misreads.
+    # Written out, not read from the constant, so that dropping a word from the constant fails here.
+    for word in ("DokumentumCore", "SwiftData"):
+        for form in ("import {}", "internal import {}", "@_spi(Foo) import {}", "import UIKit; import {}",
+                     "import struct {}.X", "import `{}`", "#if canImport({})\n#endif", "let a = {}.self",
+                     "// {}", "/* {} */", "/// {}", 'let a = "{}"', 'let a = """\n{}\n"""',
+                     'let p = #"a"b/*c"#\nimport {}', 'let p = #"use "/*" here"#\nimport {}',
+                     '"""\nx \\""" y\n"""\nimport {}', '##"""\n"""#\n"""##\nimport {}',
+                     'let p = "\\(c ? "/*" : "")"\nimport {}', 'let p = "\\(b ?? "image/*")"\nimport {}',
+                     "func g() {{ _ = #/a/*b/# }}\nimport {}"):
+            source = form.format(word) + "\n"
+            cases.append((f"the extension: {source!r}", write(f"{SHARE_FOLDER}/Store.swift", source), f"contains the word {word}"))
+    for source in ("let importantValue = 1\n", "let SwiftDataX = 1\n", "let xSwiftData = 1\n", "let SwiftData_x = 1\n",
+                   "let DokumentumCoreTests = 1\n", "let swiftData = 1\n", "// the store and the model stay out\n",
+                   "import UIKit\nimport UniformTypeIdentifiers\n\nfinal class ShareViewController: UIViewController {\n"
+                   "    override func viewDidAppear(_ animated: Bool) {\n        super.viewDidAppear(animated)\n"
+                   "        extensionContext?.completeRequest(returningItems: nil)\n    }\n}\n"):
+        cases.append((f"the extension, no such word: {source[:30]!r}", write(f"{SHARE_FOLDER}/Store.swift", source), None))
+    cases += [
+        ("the message names the line", write(f"{SHARE_FOLDER}/Store.swift", "import UIKit\n// SwiftData\n"),
+         f"{SHARE_FOLDER}/Store.swift:2: contains the word SwiftData"),
+        ("a Swift file in a subfolder", in_subfolder, "Sub/Store.swift:1: contains the word SwiftData"),
+        ("a file that is not UTF-8", lambda root: (root / f"{SHARE_FOLDER}/Store.swift").write_bytes(b"// \xff\nimport SwiftData\n"),
+         "Store.swift:2: contains the word SwiftData"),
+        ("another kind of file is fine", write(f"{SHARE_FOLDER}/notes.txt", "SwiftData\n"), None),
+        # Xcode reads a space inside the bracket as part of the pattern, so these conditions match no SDK.
+        ("a space in a condition", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx *] = Config/x.plist"),
+         "[sdk=macosx *] uses a condition"),
+        ("a space after a pattern", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx* ] = Config/x.plist"),
+         "[sdk=macosx* ] uses a condition"),
+        ("a space before a pattern", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk= macosx*] = Config/x.plist"),
+         "[sdk= macosx*] uses a condition"),
+        ("a tab in a condition", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=\tmacosx*] = Config/x.plist"), "uses a condition"),
+        ("a space around the name", in_xcconfig_last("MY_SETTING[ sdk=macosx*] = x"), "[ sdk=macosx*] uses a condition"),
+        ("a space in the unsigned file's condition", edit(UNSIGNED_XCCONFIG, "IDENTITY[sdk=macosx*] = -", "IDENTITY[sdk=macosx *] = -"),
+         "must hold exactly"),
+    ]
     # Every setting of the category fails in the xcconfig, on a target and on the project.
     for name in sorted(CAPABILITY_SETTINGS - {"ENABLE_HARDENED_RUNTIME"}):
         cases += [
