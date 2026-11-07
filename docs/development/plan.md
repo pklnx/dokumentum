@@ -49,7 +49,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
 | Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; the development VM and Xcode Cloud's test workflows build macOS unsigned, section 4) |
-| Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; no app group, no network, no file access yet. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
+| Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; user-selected files, read only; no app group, no network. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
 

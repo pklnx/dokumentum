@@ -122,6 +122,7 @@ MAC_APP_ENTITLEMENTS = "Config/Dokumentum-macOS.entitlements"
 SHARE_ENTITLEMENTS = "Config/DokumentumShare.entitlements"
 IOS_APP_INFO = "Config/Info-iOS.plist"
 SHARE_INFO = "Config/DokumentumShare-Info.plist"
+USER_SELECTED_READ_ONLY = "com.apple.security.files.user-selected.read-only"
 ENTITLEMENTS = {
     IOS_APP_ENTITLEMENTS: {
         "aps-environment": "development",
@@ -134,6 +135,8 @@ ENTITLEMENTS = {
         "com.apple.developer.icloud-container-identifiers": [CONTAINER],
         "com.apple.developer.icloud-services": ["CloudKit"],
         "com.apple.security.app-sandbox": True,
+        # Files the user picks, read only: the import never writes back (#4). A drop received as a file needs no key.
+        USER_SELECTED_READ_ONLY: True,
     },
     SHARE_ENTITLEMENTS: {"com.apple.security.application-groups": [APP_GROUP]},
 }
@@ -891,6 +894,15 @@ def self_test():
             (root / name).write_bytes(plistlib.dumps(content))
         return apply
 
+    def replace_entitlement(name, key, new_key):
+        def apply(root):
+            content = plistlib.loads((root / name).read_bytes())
+            value = content.pop(key)
+            if new_key:
+                content[new_key] = value
+            (root / name).write_bytes(plistlib.dumps(content))
+        return apply
+
     def write(name, text):
         return lambda root: (root / name).write_text(text, encoding="utf-8")
 
@@ -1049,6 +1061,14 @@ def self_test():
         ("another group", set_entitlement(SHARE_ENTITLEMENTS, "com.apple.security.application-groups", ["group.other"]),
          "application-groups is ['group.other']"),
         ("the sandbox off", set_entitlement(MAC_APP_ENTITLEMENTS, "com.apple.security.app-sandbox", False), "app-sandbox is False"),
+        ("no user-selected files on the Mac", replace_entitlement(MAC_APP_ENTITLEMENTS, USER_SELECTED_READ_ONLY, None),
+         f"{USER_SELECTED_READ_ONLY} is missing"),
+        ("user-selected files read-write", replace_entitlement(MAC_APP_ENTITLEMENTS, USER_SELECTED_READ_ONLY,
+                                                               "com.apple.security.files.user-selected.read-write"),
+         "com.apple.security.files.user-selected.read-write is not a reviewed entitlement"),
+        ("user-selected files off", set_entitlement(MAC_APP_ENTITLEMENTS, USER_SELECTED_READ_ONLY, False), "read-only is False"),
+        ("user-selected files on iOS", set_entitlement(IOS_APP_ENTITLEMENTS, USER_SELECTED_READ_ONLY, True),
+         f"{IOS_APP_ENTITLEMENTS}: {USER_SELECTED_READ_ONLY} is not a reviewed entitlement"),
         ("a missing entitlement", write(SHARE_ENTITLEMENTS, plistlib.dumps({}).decode()), "application-groups is missing"),
         ("an entitlements file is gone", remove(MAC_APP_ENTITLEMENTS), f"{MAC_APP_ENTITLEMENTS} is missing"),
         ("an entitlements file is not a plist", write(IOS_APP_ENTITLEMENTS, "<plist"), "not a valid property list"),
