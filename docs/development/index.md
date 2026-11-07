@@ -290,7 +290,7 @@ Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.
 
 ## Logging
 
-Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, subsystem
+Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, subsystem
 `space.pklnx.Dokumentum`. Counts, enum states and error domain and code are `.public`; names, titles, paths,
 text and `localizedDescription` are `.private`. App code never prints, and a crash message is a fixed text.
 `scripts/check-logging.py` enforces this in the app, the share extension and the packages' library code.

@@ -9,13 +9,17 @@ import SwiftUI
 /// the root's type, because the Mac's saved window state names the root's type (plan of #3, T5).
 struct LibraryRootView: View {
     @State private var model: LibraryModel
+    /// The window's imports (#4, part 2), on the app's one importer.
+    @State private var importController: ImportController
     /// The footer's reason and the debug command's confirmation come from it.
     let launchStore: LaunchStore
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
-    init(source: any LibrarySource, launchStore: LaunchStore) {
-        _model = State(initialValue: LibraryModel(source: source, loadNow: false))
+    init(source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting) {
+        let model = LibraryModel(source: source, loadNow: false)
+        _model = State(initialValue: model)
+        _importController = State(initialValue: ImportController(importer: importer, library: model))
         self.launchStore = launchStore
     }
 
@@ -38,6 +42,7 @@ struct LibraryRootView: View {
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)
+        .modifier(ImportSupport(controller: importController, launchStore: launchStore))
         #if DEBUG
             .modifier(sampleDocumentsCommand)
         #endif

@@ -21,6 +21,8 @@ public enum Log {
     public static let sync = Logger(subsystem: subsystem, category: "sync")
     /// Repair runs and their reports (#2, part 3).
     public static let repair = Logger(subsystem: subsystem, category: "repair")
+    /// Imports: each file's outcome, with its byte count; file names `.private` (#4, part 2).
+    public static let importing = Logger(subsystem: subsystem, category: "import")
 
     /// An error's domain and code, such as "NSCocoaErrorDomain 134110": safe to log as `.public`. Log the
     /// `localizedDescription` separately, as `.private`.
