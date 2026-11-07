@@ -26,6 +26,7 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch")
         let row = ui.element(Self.documentRow(Self.electricityBill))
         XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(ui.element("import.menu").exists, "no Import menu in the Inbox")
         goToSidebar(ui)
         XCTAssertTrue(waitForCount(0, of: "sidebar.trash", in: ui), "the trash is not empty at the start")
         openSidebarRow("sidebar.inbox", ui)
@@ -38,6 +39,9 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(waitForCount(1, of: "sidebar.trash", in: ui), "the Trash count did not go up")
         openSidebarRow("sidebar.trash", ui)
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the document is not in the trash")
+        // The trash's toolbar has only Empty Trash, no Import (#70).
+        XCTAssertTrue(ui.element("trash.empty").waitForExistence(timeout: 10), "no Empty Trash in the trash")
+        XCTAssertFalse(ui.element("import.menu").exists, "the trash offers Import")
         ui.attachWindowScreenshot("2-trash", to: self)
 
         // A trashed document's detail is read only and offers Restore.
@@ -65,7 +69,20 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element(Self.documentRow(Self.electricityBill)).waitForExistence(timeout: 10))
         moveToTrash(Self.electricityBill, ui)
         waitForDisappearance(of: ui.element(Self.documentRow(Self.electricityBill)), "not moved")
-        moveToTrash(Self.medicalInvoice, ui)
+        #if os(iOS)
+            // The open document's menu trashes it, and the stack goes back to the list (#70).
+            ui.activate(Self.documentRow(Self.medicalInvoice))
+            XCTAssertTrue(ui.element("documentDetail.menu").waitForExistence(timeout: 20), "no menu on the document")
+            ui.activate("documentDetail.menu")
+            XCTAssertTrue(
+                ui.element("documentDetail.moveToTrash").waitForExistence(timeout: 10), "no Move to Trash in the menu")
+            ui.attachWindowScreenshot("5a-detail-menu", to: self)
+            ui.activate("documentDetail.moveToTrash")
+            XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 20), "not back on the list")
+            XCTAssertFalse(ui.element("documentDetail.menu").exists, "the trashed document stayed open")
+        #else
+            moveToTrash(Self.medicalInvoice, ui)
+        #endif
         waitForDisappearance(of: ui.element(Self.documentRow(Self.medicalInvoice)), "not moved")
 
         goToSidebar(ui)
@@ -163,23 +180,18 @@ final class TrashSmokeTests: XCTestCase {
         #endif
     }
 
-    /// Waits until the sidebar row's VoiceOver value ("3 documents", "1 Dokument") starts with `count`. iOS only:
-    /// on the Mac the row's button exposes its title but no value (measured on #46, also with the value set on the
-    /// link itself), so there the test checks the Trash list's rows instead; `LibraryTrashTests` checks the counts.
+    /// Waits until the sidebar row's VoiceOver value ("3 documents", "1 Dokument") starts with `count`. On both
+    /// devices since the Mac's sidebar rows are no longer links, which exposed no value there (#47).
     @MainActor
     private func waitForCount(_ count: Int, of identifier: String, in ui: UITestApp) -> Bool {
-        #if os(macOS)
-            return true
-        #else
-            revealSidebarRow(identifier, ui)
-            let element = ui.element(identifier)
-            let predicate = NSPredicate { object, _ in
-                guard let element = object as? XCUIElement, element.exists else { return false }
-                return (element.value as? String)?.hasPrefix("\(count) ") == true
-            }
-            return XCTWaiter.wait(
-                for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: 20) == .completed
-        #endif
+        revealSidebarRow(identifier, ui)
+        let element = ui.element(identifier)
+        let predicate = NSPredicate { object, _ in
+            guard let element = object as? XCUIElement, element.exists else { return false }
+            return (element.value as? String)?.hasPrefix("\(count) ") == true
+        }
+        return XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: 20) == .completed
     }
 
     @MainActor

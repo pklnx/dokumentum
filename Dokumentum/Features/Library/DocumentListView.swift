@@ -27,13 +27,15 @@ struct DocumentListView: View {
             }
         }
         .navigationTitle(title)
+        // The trash's toolbar has only Empty Trash: an import lands in the Inbox, not in the trash (#70).
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                ImportToolbarMenu()
-            }
             if model.selection == .trash {
                 ToolbarItem(placement: .primaryAction) {
                     EmptyTrashButton()
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    ImportToolbarMenu()
                 }
             }
         }

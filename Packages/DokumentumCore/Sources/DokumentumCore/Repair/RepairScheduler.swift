@@ -41,9 +41,13 @@ public final class RepairScheduler {
     /// The app's scheduler for `container`, started: the repair in the background, the debounced store
     /// changes, and the CloudKit import events. Only for stores on disk; test stores never start one, except
     /// in tests that do so on purpose.
-    public static func start(for container: ModelContainer) -> RepairScheduler {
+    ///
+    /// - Parameter observer: the app's shared store observer, which the library follows too; the end of a
+    ///   CloudKit import restarts its debounce, so the library reads what the import brought. A new one by default.
+    public static func start(for container: ModelContainer, observer: StoreChangeObserver? = nil) -> RepairScheduler {
         let scheduler = RepairScheduler(
-            runner: RepairRunner(modelContainer: container), observer: StoreChangeObserver(container: container),
+            runner: RepairRunner(modelContainer: container),
+            observer: observer ?? StoreChangeObserver(container: container),
             importEvents: CloudImportEvents.stream())
         scheduler.start()
         return scheduler

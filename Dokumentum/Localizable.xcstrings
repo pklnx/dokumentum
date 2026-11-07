@@ -501,6 +501,17 @@
         }
       }
     },
+    "More" : {
+      "comment" : "The open document's menu in the iPhone's detail bar.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr"
+          }
+        }
+      }
+    },
     "Move to Trash" : {
       "comment" : "Context menu, swipe action and Edit menu item: moves the document into the trash.",
       "localizations" : {
