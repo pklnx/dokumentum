@@ -141,7 +141,10 @@ struct LibrarySelectionTests {
         let document = Self.documents[3]
         let label = document.accessibilityLabel(
             displayTitle: "Electricity bill", tagPaths: ["Auto", "Auto › Golf › Werkstatt"], strings: Self.strings)
-        #expect(label == "Electricity bill, 9 May 2026, Musterbank AG, Invoice, tags: Auto and Auto › Golf › Werkstatt, in inbox")
+        #expect(
+            label
+                == "Electricity bill, 9 May 2026, Musterbank AG, Invoice, "
+                + "tags: Auto and Auto › Golf › Werkstatt, in inbox")
     }
 
     @Test func theVoiceOverLabelLeavesOutEmptyParts() {

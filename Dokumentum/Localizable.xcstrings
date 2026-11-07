@@ -1,13 +1,318 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld documents" : {
+      "comment" : "VoiceOver value of a sidebar row: how many documents it has.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Dokument"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dokumente"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 document"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld documents"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "All Documents" : {
+      "comment" : "Sidebar row, list title and Go menu item.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Dokumente"
+          }
+        }
+      }
+    },
+    "Collapse" : {
+      "comment" : "VoiceOver action on a tag with nested tags.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zuklappen"
+          }
+        }
+      }
+    },
+    "Collapse %@" : {
+      "comment" : "VoiceOver label of a tag's chevron button. %@ is the tag's name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ zuklappen"
+          }
+        }
+      }
+    },
+    "Correspondents" : {
+      "comment" : "Sidebar section.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korrespondenten"
+          }
+        }
+      }
+    },
+    "Document Types" : {
+      "comment" : "Sidebar section.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumenttypen"
+          }
+        }
+      }
+    },
     "Dokumentum" : {
-      "comment" : "The app's name, shown in its only window until the library exists.",
+      "comment" : "The app's name: the sidebar's title on the iPhone.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumentum"
+          }
+        }
+      }
+    },
+    "Expand" : {
+      "comment" : "VoiceOver action on a tag with nested tags.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aufklappen"
+          }
+        }
+      }
+    },
+    "Expand %@" : {
+      "comment" : "VoiceOver label of a tag's chevron button. %@ is the tag's name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ aufklappen"
+          }
+        }
+      }
+    },
+    "Go" : {
+      "comment" : "Mac menu with Inbox and All Documents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gehe zu"
+          }
+        }
+      }
+    },
+    "Inbox" : {
+      "comment" : "Sidebar row, list title and Go menu item: documents not filed yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Posteingang"
+          }
+        }
+      }
+    },
+    "Inbox empty" : {
+      "comment" : "The Inbox list without documents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Posteingang leer"
+          }
+        }
+      }
+    },
+    "Library" : {
+      "comment" : "Sidebar section with Inbox and All Documents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bibliothek"
+          }
+        }
+      }
+    },
+    "No document selected" : {
+      "comment" : "The detail column without an open document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Dokument ausgewählt"
+          }
+        }
+      }
+    },
+    "No documents" : {
+      "comment" : "A list without documents (not the Inbox).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Dokumente"
+          }
+        }
+      }
+    },
+    "Still downloading" : {
+      "comment" : "The detail column: the document's file has not arrived yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird noch geladen"
+          }
+        }
+      }
+    },
+    "Tags" : {
+      "comment" : "Sidebar section with the tag tree.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tags"
+          }
+        }
+      }
+    },
+    "The file is being downloaded from iCloud." : {
+      "comment" : "Below “Still downloading”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datei wird aus iCloud geladen."
+          }
+        }
+      }
+    },
+    "The file is damaged or not a PDF." : {
+      "comment" : "Below “This PDF cannot be shown”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datei ist beschädigt oder kein PDF."
+          }
+        }
+      }
+    },
+    "This PDF cannot be shown" : {
+      "comment" : "The detail column: the file is not a readable PDF.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses PDF kann nicht angezeigt werden"
+          }
+        }
+      }
+    },
+    "Trash" : {
+      "comment" : "List title of the trash.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb"
+          }
+        }
+      }
+    },
+    "Untitled document" : {
+      "comment" : "A document's title when it has none.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokument ohne Titel"
+          }
+        }
+      }
+    },
+    "collapsed" : {
+      "comment" : "VoiceOver value of a tag's chevron button.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "zugeklappt"
+          }
+        }
+      }
+    },
+    "expanded" : {
+      "comment" : "VoiceOver value of a tag's chevron button.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "aufgeklappt"
+          }
+        }
+      }
+    },
+    "in inbox" : {
+      "comment" : "Last part of a list row's VoiceOver label, e.g. “Water bill, 9 May 2026, in inbox”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "im Posteingang"
+          }
+        }
+      }
+    },
+    "tags: %@" : {
+      "comment" : "Part of a list row's VoiceOver label. %@ is the list of tag names, e.g. “Tax and Auto › Golf”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tags: %@"
           }
         }
       }
