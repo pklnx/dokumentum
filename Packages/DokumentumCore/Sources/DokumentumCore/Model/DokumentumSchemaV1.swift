@@ -22,11 +22,16 @@ public enum DokumentumSchemaV1: VersionedSchema {
     public static let versionIdentifier = Schema.Version(1, 0, 0)
 
     public static var models: [any PersistentModel.Type] {
-        [Document.self, DocumentFile.self, DocumentThumbnail.self, Tag.self, Correspondent.self, DocumentType.self]
+        [
+            Document.self, DocumentFile.self, DocumentThumbnail.self, DocumentText.self, Tag.self, Correspondent.self,
+            DocumentType.self,
+        ]
     }
 
-    /// One archived document: its metadata and its extracted text. The PDF and the thumbnail are records of
-    /// their own (`file`, `thumbnail`), so a list never loads them.
+    /// One archived document: its metadata only. The PDF, the thumbnail and the extracted text are records of
+    /// their own (`file`, `thumbnail`, `text`), so a list never loads them: SwiftData on 27 reads every column
+    /// of a fetched entity and ignores `propertiesToFetch` (measured on #29), so a large field here would load
+    /// with every list.
     @Model
     public final class Document {
         /// Not unique (CloudKit). Duplicates by `id` are counted by the repair, not merged, until step 16.
@@ -40,9 +45,8 @@ public enum DokumentumSchemaV1: VersionedSchema {
         public var isInbox: Bool = true
         public var pageCount: Int = 0
         public var fileSize: Int = 0
-        /// Never read by a list: `DocumentListQuery` leaves it out.
-        public var extractedText: String = ""
-        /// Frozen enum `TextSource`; read and write it through `textSource`.
+        /// Frozen enum `TextSource`; read and write it through `textSource`. On the document, not on its text
+        /// record, so a row shows it without loading the text.
         public var textSourceRaw: String = ""
         /// Frozen enum `ProcessingState`; read and write it through `processingState`.
         public var processingStateRaw: String = "pending"
@@ -68,6 +72,9 @@ public enum DokumentumSchemaV1: VersionedSchema {
         public var file: DocumentFile?
         @Relationship(deleteRule: .cascade, inverse: \DocumentThumbnail.document)
         public var thumbnail: DocumentThumbnail?
+        /// `nil` while the text record has not arrived through CloudKit yet.
+        @Relationship(deleteRule: .cascade, inverse: \DocumentText.document)
+        public var text: DocumentText?
 
         public init(id: UUID = UUID(), title: String = "", createdAt: Date = Date()) {
             self.id = id
@@ -119,6 +126,29 @@ public enum DokumentumSchemaV1: VersionedSchema {
             self.instanceID = UUID()
             self.documentID = documentID
             self.imageData = imageData
+            self.createdAt = createdAt
+        }
+    }
+
+    /// The extracted text of a document. Created once, at import, by the importing device, with an empty
+    /// `extractedText` and in the same save as its document; processing writes `extractedText` in place and
+    /// never inserts a second text (docs/development/index.md, "Data model and sync").
+    @Model
+    public final class DocumentText {
+        public var id: UUID = UUID()
+        public var instanceID: UUID = UUID()
+        public var createdAt: Date = Date()
+        /// The owning document's `id`, set at insert and never changed.
+        public var documentID: UUID?
+        /// A plain attribute: external storage applies to `Data` only.
+        public var extractedText: String = ""
+        /// `nil` until CloudKit links it.
+        public var document: Document?
+
+        public init(documentID: UUID?, extractedText: String = "", createdAt: Date = Date()) {
+            self.instanceID = UUID()
+            self.documentID = documentID
+            self.extractedText = extractedText
             self.createdAt = createdAt
         }
     }

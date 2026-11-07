@@ -14,7 +14,6 @@ attribute Document.createdAt type=date optional=no default=generated external=no
 attribute Document.deletedAt type=date optional=yes default=none external=no transient=no
 attribute Document.documentDate type=date optional=no default=generated external=no transient=no
 relationship Document.documentType to=DocumentType many=no optional=yes inverse=documents delete=nullify ordered=no
-attribute Document.extractedText type=string optional=no default="" external=no transient=no
 relationship Document.file to=DocumentFile many=no optional=yes inverse=document delete=cascade ordered=no
 attribute Document.fileSize type=int64 optional=no default=0 external=no transient=no
 attribute Document.id type=uuid optional=no default=generated external=no transient=no
@@ -28,6 +27,7 @@ attribute Document.processingDeviceID type=string optional=no default="" externa
 attribute Document.processingStateRaw type=string optional=no default="pending" external=no transient=no
 attribute Document.sourceRaw type=string optional=no default="file" external=no transient=no
 relationship Document.tags to=Tag many=yes optional=yes inverse=documents delete=nullify ordered=no
+relationship Document.text to=DocumentText many=no optional=yes inverse=document delete=cascade ordered=no
 attribute Document.textSourceRaw type=string optional=no default="" external=no transient=no
 relationship Document.thumbnail to=DocumentThumbnail many=no optional=yes inverse=document delete=cascade ordered=no
 attribute Document.title type=string optional=no default="" external=no transient=no
@@ -38,6 +38,13 @@ attribute DocumentFile.documentID type=uuid optional=yes default=none external=n
 attribute DocumentFile.id type=uuid optional=no default=generated external=no transient=no
 attribute DocumentFile.instanceID type=uuid optional=no default=generated external=no transient=no
 attribute DocumentFile.pdfData type=binary optional=yes default=none external=yes transient=no
+entity DocumentText uniqueness=none
+attribute DocumentText.createdAt type=date optional=no default=generated external=no transient=no
+relationship DocumentText.document to=Document many=no optional=yes inverse=text delete=nullify ordered=no
+attribute DocumentText.documentID type=uuid optional=yes default=none external=no transient=no
+attribute DocumentText.extractedText type=string optional=no default="" external=no transient=no
+attribute DocumentText.id type=uuid optional=no default=generated external=no transient=no
+attribute DocumentText.instanceID type=uuid optional=no default=generated external=no transient=no
 entity DocumentThumbnail uniqueness=none
 attribute DocumentThumbnail.createdAt type=date optional=no default=generated external=no transient=no
 relationship DocumentThumbnail.document to=Document many=no optional=yes inverse=thumbnail delete=nullify ordered=no

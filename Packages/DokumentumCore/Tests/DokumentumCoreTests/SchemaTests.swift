@@ -1,5 +1,6 @@
 import CoreData
 import DokumentumCore
+import DokumentumKit
 import Foundation
 import SwiftData
 import Testing
@@ -61,11 +62,42 @@ struct SchemaTests {
 
     /// (c) The entity names become the CloudKit record types (`CD_<name>`), so they are pinned. A nested
     /// model class (`DokumentumSchemaV1.Document`) still gives its plain name.
-    @Test func theEntityNamesAreTheSixRecordTypes() throws {
-        let names = try Self.model(of: DokumentumSchemaV1.self).entities.compactMap(\.name)
+    @Test func theEntityNamesAreTheSevenRecordTypes() throws {
+        let names = try Self.model(of: DokumentumSchemaV1.self).entities.compactMap { $0.name }
         #expect(
-            Set(names) == ["Document", "DocumentFile", "DocumentThumbnail", "Tag", "Correspondent", "DocumentType"])
-        #expect(names.count == 6)
+            Set(names) == [
+                "Document", "DocumentFile", "DocumentThumbnail", "DocumentText", "Tag", "Correspondent", "DocumentType",
+            ])
+        #expect(names.count == 7)
+    }
+
+    /// (d) Every blob kind of the repair has its entity, each the target of a to-one, cascade relationship of
+    /// `Document` with a to-one inverse, so a document holds at most one linked blob of each kind.
+    @Test func everyBlobKindHasItsEntityBehindAToOneCascade() throws {
+        let model = try Self.model(of: DokumentumSchemaV1.self)
+        let document = try #require(model.entitiesByName["Document"])
+        let expected: [BlobKind: (relationship: String, entity: String)] = [
+            .file: ("file", "DocumentFile"), .thumbnail: ("thumbnail", "DocumentThumbnail"),
+            .text: ("text", "DocumentText"),
+        ]
+        #expect(Set(expected.keys) == Set(BlobKind.allCases))
+        for (kind, names) in expected {
+            let relationship = try #require(document.relationshipsByName[names.relationship], "\(kind)")
+            #expect(relationship.destinationEntity?.name == names.entity, "\(kind)")
+            #expect(!relationship.isToMany, "\(kind)")
+            #expect(relationship.deleteRule == .cascadeDeleteRule, "\(kind)")
+            let inverse = try #require(relationship.inverseRelationship, "\(kind)")
+            #expect(inverse.name == "document" && !inverse.isToMany, "\(kind)")
+            #expect(inverse.deleteRule == .nullifyDeleteRule, "\(kind)")
+        }
+    }
+
+    /// `Document` holds no large field: no text beyond the row scalars, no binary data (DW4).
+    @Test func theDocumentHoldsNoLargeField() throws {
+        let document = try #require(try Self.model(of: DokumentumSchemaV1.self).entitiesByName["Document"])
+        let names = Set(document.attributesByName.keys)
+        #expect(!names.contains("extractedText"))
+        #expect(!document.attributesByName.values.contains { $0.attributeType == .binaryDataAttributeType })
     }
 
     /// The large data sits in its own records, as external storage; `Document` holds none.

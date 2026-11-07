@@ -83,8 +83,10 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
     }
 }
 
-/// The only list fetch of documents (plan.md, section 3.2, and #2's DW4): it reads the scalars a row shows
-/// and the names of correspondent, type and tags, never `extractedText`, the PDF or the thumbnail.
+/// The only list fetch of documents (plan.md, section 3.2, and #2's DW4): it reads the document rows and the
+/// names of correspondent, type and tags, never the text, the PDF or the thumbnail. That holds because of the
+/// model's shape: `Document` holds no large field, and the text, the PDF and the thumbnail are records of
+/// their own that are never prefetched. `DocumentListQuerySQLTests` checks the SQL.
 public enum DocumentListQuery {
     /// Which documents a list shows.
     public enum Filter: Hashable, Sendable {
@@ -96,14 +98,14 @@ public enum DocumentListQuery {
         case trash
     }
 
-    /// The scalars a row shows. `extractedText` is not among them; `SchemaTests` and
-    /// `DocumentListQueryTests` check that every other attribute a row needs is.
+    /// The scalars a row shows. **SwiftData on 27 ignores `propertiesToFetch`** and selects every column of
+    /// `Document` (measured on #29); it stays as documentation of what a row reads, and nothing relies on it.
     public nonisolated(unsafe) static let fetchedProperties: [PartialKeyPath<Document>] = [
         \.id, \.instanceID, \.title, \.createdAt, \.modifiedAt, \.documentDate, \.isInbox, \.deletedAt,
         \.pageCount, \.fileSize, \.originalFileName, \.sourceRaw, \.processingStateRaw,
     ]
 
-    /// The relationships a row shows. Never `file` or `thumbnail`.
+    /// The relationships a row shows. Never `file`, `thumbnail` or `text`.
     public nonisolated(unsafe) static let prefetchedRelationships: [PartialKeyPath<Document>] = [
         \.correspondent, \.documentType, \.tags,
     ]

@@ -7,6 +7,7 @@ import SwiftData
 public typealias Document = DokumentumSchemaV1.Document
 public typealias DocumentFile = DokumentumSchemaV1.DocumentFile
 public typealias DocumentThumbnail = DokumentumSchemaV1.DocumentThumbnail
+public typealias DocumentText = DokumentumSchemaV1.DocumentText
 public typealias Tag = DokumentumSchemaV1.Tag
 public typealias Correspondent = DokumentumSchemaV1.Correspondent
 public typealias DocumentType = DokumentumSchemaV1.DocumentType
