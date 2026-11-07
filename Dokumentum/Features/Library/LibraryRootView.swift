@@ -9,13 +9,17 @@ import SwiftUI
 /// the root's type, because the Mac's saved window state names the root's type (plan of #3, T5).
 struct LibraryRootView: View {
     @State private var model: LibraryModel
+    /// The window's trash actions (plan of #3, part 4).
+    @State private var trash: LibraryTrash
     /// The footer's reason and the debug command's confirmation come from it.
     let launchStore: LaunchStore
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
     init(source: any LibrarySource, launchStore: LaunchStore) {
-        _model = State(initialValue: LibraryModel(source: source, loadNow: false))
+        let model = LibraryModel(source: source, loadNow: false)
+        _model = State(initialValue: model)
+        _trash = State(initialValue: LibraryTrash(model: model))
         self.launchStore = launchStore
     }
 
@@ -26,10 +30,14 @@ struct LibraryRootView: View {
             DocumentListView(model: model)
         } detail: {
             DocumentDetailView(model: model)
+                .safeAreaInset(edge: .top, spacing: 0) { TrashedDocumentBar(trash: trash) }
         }
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)
+        .environment(trash)
+        .focusedSceneValue(\.libraryTrash, trash)
+        .modifier(EmptyTrashConfirmation(trash: trash))
         #if DEBUG
             .modifier(sampleDocumentsCommand)
         #endif

@@ -239,6 +239,15 @@ in `swift test --package-path Packages/DokumentumCore` and is skipped in Xcode. 
 setting once per process, at its first store: `SQLLog.enable()` comes before any store opens (the container
 helpers call it).
 
+**The trash.** `DocumentTrash` (DokumentumCore) is the only code outside DEBUG tools that deletes a `Document`
+(#3, part 4). Moving to the trash and restoring set or clear `deletedAt` and `touch()` the document; nothing else
+changes, so a restored document keeps its inbox state and metadata. Empty Trash deletes only the documents its
+confirmation counted, after reading them again in a context of its own: one restored or trashed meanwhile stays.
+A document's linked PDF, thumbnail and text go with it by the model's cascade; tags, correspondents and types
+stay. **A PDF or its text that is not linked to its document at that moment is not deleted** (it can still be
+arriving by sync, or arrive after the delete): it stays as a hidden orphan that the repair counts, until #32
+decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.md` once that file exists.
+
 **Adding schema version N** (only with a real model change: identical versions have the same checksum):
 1. Copy the models into `DokumentumSchemaV<N>` (version `N.0.0`) and change them additively: new attributes
    optional or defaulted, new relationships optional with an inverse.
