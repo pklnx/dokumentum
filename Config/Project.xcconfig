@@ -4,7 +4,9 @@
 // key that this file sets. Keep one commented block per topic.
 //
 // Only what is truly structural stays in the .pbxproj: the Debug/Release differences on the
-// project, and on the targets TEST_HOST, BUNDLE_LOADER, TEST_TARGET_NAME and the app's runpaths.
+// project, and on the targets TEST_HOST, BUNDLE_LOADER, TEST_TARGET_NAME and the runpaths. What
+// differs per target goes through a variable named after the target, because $(TARGET_NAME) is the
+// only way to tell the targets apart here; check-project.py asserts what each target resolves to.
 
 // Version. MARKETING_VERSION is what users see (CFBundleShortVersionString; TestFlight builds use
 // YY.MM.N from step 8 on, plan.md section 4). CURRENT_PROJECT_VERSION is the build number
@@ -12,10 +14,15 @@
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
 
-// One multiplatform target: iOS and native macOS, no Mac Catalyst, iPhone only (no iPad layout,
-// plan.md section 2).
+// One multiplatform app target: iOS and native macOS, no Mac Catalyst, iPhone only (no iPad layout,
+// plan.md section 2). The share extension is iOS only. One explicit variable per target: a
+// `$(...:default=...)` form looks right in -showBuildSettings, but a simulator build then exits 70.
 SDKROOT = auto
-SUPPORTED_PLATFORMS = iphoneos iphonesimulator macosx
+DOKUMENTUM_PLATFORMS_Dokumentum = iphoneos iphonesimulator macosx
+DOKUMENTUM_PLATFORMS_DokumentumShare = iphoneos iphonesimulator
+DOKUMENTUM_PLATFORMS_DokumentumTests = iphoneos iphonesimulator macosx
+DOKUMENTUM_PLATFORMS_DokumentumUITests = iphoneos iphonesimulator macosx
+SUPPORTED_PLATFORMS = $(DOKUMENTUM_PLATFORMS_$(TARGET_NAME))
 SUPPORTS_MACCATALYST = NO
 SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO
 SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO
@@ -38,12 +45,20 @@ SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated
 // Apple; they run only on the simulator and on this Mac.
 PRODUCT_NAME = $(TARGET_NAME)
 DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum =
+DOKUMENTUM_BUNDLE_ID_SUFFIX_DokumentumShare = .Share
 DOKUMENTUM_BUNDLE_ID_SUFFIX_DokumentumTests = .Tests
 DOKUMENTUM_BUNDLE_ID_SUFFIX_DokumentumUITests = .UITests
 PRODUCT_BUNDLE_IDENTIFIER = space.pklnx.Dokumentum$(DOKUMENTUM_BUNDLE_ID_SUFFIX_$(TARGET_NAME))
 
-// Info.plist: generated from the build settings; nothing here needs a file yet.
+// Info.plist: generated from the build settings. Only what has no setting comes from a file, merged
+// into the generated one: the app's background mode for CloudKit pushes (iOS only, none on macOS) and
+// the extension's NSExtension. These files live in Config/: a plist inside the synchronized
+// DokumentumShare/ folder fails with "Multiple commands produce".
 GENERATE_INFOPLIST_FILE = YES
+DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
+DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =
+DOKUMENTUM_INFOPLIST_DokumentumShare = Config/DokumentumShare-Info.plist
+INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))
 INFOPLIST_KEY_CFBundleDisplayName = Dokumentum
 INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
@@ -64,13 +79,27 @@ LOCALIZATION_PREFERS_STRING_CATALOGS = YES
 DOKUMENTUM_EMIT_LOC_STRINGS_Dokumentum = YES
 SWIFT_EMIT_LOC_STRINGS = $(DOKUMENTUM_EMIT_LOC_STRINGS_$(TARGET_NAME):default=NO)
 
-// Signing. Until part 3 (#22) no target has a team or an entitlement: "-" signs ad hoc ("Sign to
-// Run Locally"), which needs no identity, no team and no provisioning profile. That is enough for
-// the simulator and for this Mac, including hosted unit tests and the UI test runner. Device builds
-// need the team from part 3. Personal overrides go into Config/Local.xcconfig, not here.
+// Signing. Automatic with the team; signed builds run on the maintainer's machine. The development VM
+// and Xcode Cloud's test workflows build macOS through Config/Unsigned.xcconfig, see
+// docs/development/index.md. Never set CODE_SIGN_IDENTITY = - here: next to a team it gives an ad hoc
+// macOS build with exit 0, and check-project.py rejects it.
 CODE_SIGN_STYLE = Automatic
-CODE_SIGN_IDENTITY = -
-DEVELOPMENT_TEAM =
+DEVELOPMENT_TEAM = 88GY2V9C2A
+
+// Entitlements, one variable per target and SDK; the test targets have none. Literal paths here would
+// give the extension and both test bundles the app's entitlements. Capabilities change only by editing
+// these files, which check-project.py pins key by key. Whatever Xcode's Signing & Capabilities editor
+// writes into the .pbxproj is stripped again.
+DOKUMENTUM_ENTITLEMENTS_Dokumentum = Config/Dokumentum-iOS.entitlements
+DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx*] = Config/Dokumentum-macOS.entitlements
+DOKUMENTUM_ENTITLEMENTS_DokumentumShare = Config/DokumentumShare.entitlements
+CODE_SIGN_ENTITLEMENTS = $(DOKUMENTUM_ENTITLEMENTS_$(TARGET_NAME))
+
+// Hardened runtime stays off until step 8 decides it (plan.md section 5): nothing before distribution
+// needs it. The App Sandbox comes from the macOS entitlements file, not from ENABLE_APP_SANDBOX: the
+// settings of Xcode's "App Sandbox & Hardened Runtime" category inject entitlements past that file, so
+// check-project.py rejects all of them, except exactly this line.
+ENABLE_HARDENED_RUNTIME = NO
 
 // Optional local overrides. Keep this include last, so it overrides everything above.
 #include? "Local.xcconfig"

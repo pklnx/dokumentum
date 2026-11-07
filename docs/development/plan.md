@@ -43,11 +43,13 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 
 | Item | Value |
 |---|---|
-| Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3) |
+| Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (a placeholder until step 3) |
 | Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked against the Xcode that Xcode Cloud offers (`ci_scripts/ci_post_clone.sh`, pinned in `.xcode-version`); if Xcode Cloud lags behind, the minimum stays at the newest SDK it offers until it catches up |
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
-| App group | `group.space.pklnx.dokumentum` (app and share extension) |
+| App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
+| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; the development VM and Xcode Cloud's test workflows build macOS unsigned, section 4) |
+| Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; no app group, no network, no file access yet. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
 
@@ -57,15 +59,19 @@ are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 | Where | macOS | Xcode | SDKs | Simulator runtimes |
 |---|---|---|---|---|
-| Development VM (2026-11-06) | 27.2 (26B123) | 27.1 (27A9275), Swift 6.4 | iOS 27.1, iOS Simulator 27.1, macOS 27.0 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
-| Xcode Cloud (2026-11-06) | 27 (26A428) | 27.1 (27A9275) | not recorded | not recorded |
+| Development VM (2026-11-07) | 27.2 (26B123) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
+| Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
-The Xcode Cloud row comes from the maintainer's workflow settings and the checks
-of PR #37, not from reading the `ci_post_clone.sh` output: that log lives in App
-Store Connect. The gate in the script passed, because the actions that run it are
-green: it fails when the Xcode differs from `.xcode-version` (27.1) or when there
-is no SDK for the minimum OS. The checks are `Dokumentum | PR | Default - iOS`,
-`Dokumentum | PR | Default - macOS` and `Dokumentum | PR`.
+The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`
+fails when the Xcode differs from `.xcode-version` (27.2) or has no SDK for iOS 27
+and macOS 27, and both test actions passed on PR #41, which pinned 27.2. The exact
+builds and SDK versions are in the Xcode Cloud log, which was not read for this
+row. The last log read was PR #37's (build 4, action `Default - iOS`, commit
+`87cc89a`, recorded on #1), under Xcode 27.1 (27A9275): macOS 27.0 (26A428), SDKs
+iOS 27.1, iOS Simulator 27.1 and macOS 27.0. The script prints no simulator
+runtimes. The checks are
+`Dokumentum | PR | Default - iOS`, `Dokumentum | PR | Default - macOS` and
+`Dokumentum | PR`.
 
 ## 3. Architecture
 
@@ -207,10 +213,25 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 
   swift-format, the formatter bundled with the Swift toolchain, replaces
   SwiftFormat and SwiftLint, so no extra tool is needed.
-- Development setup: implementation (Xcode, simulators, `xcodebuild`, device
-  runs) happens on the maintainer's MacBook Pro, in a macOS VM or in a
-  separate macOS user (decided when the machine arrives), with Claude Code
-  there (local sessions, `gh` available). Cloud sessions (Linux) plan,
+- Signing in tests: Xcode Cloud's test actions sign ad hoc (`CODE_SIGN_IDENTITY=-`
+  in their log), whatever the project says, so the team in the project does not
+  decide how they sign (question T4 of #1, answered for tests; whether a
+  distribution build needs the team stays for step 8). macOS refuses to launch an ad
+  hoc test host with `com.apple.developer.*` keys, so `ci_scripts/ci_post_clone.sh`
+  applies `Config/Unsigned.xcconfig` in the workflows `PR` and `Main`, never in
+  step 8's `Release`. So macOS tests in Xcode Cloud and in the VM run without the
+  entitlements and outside the sandbox; only the maintainer's signed build
+  exercises them.
+- State of the signed check (2026-11-07, the maintainer's delegation window on
+  #1): part 3 of step 0 merges on VM evidence, Xcode Cloud and its reviews. Its
+  signed output and the device check (maintainer step 9 on #1) are deferred, not
+  dropped: they come before signed or iCloud work relies on them, and #1 stays
+  open until then. So no signed build has exercised the entitlements yet.
+- Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
+  in a macOS VM on the maintainer's MacBook Pro, with Claude Code there (local
+  sessions, `gh` available). The VM has no signing identity and builds
+  unsigned; signed builds and device runs happen on the MacBook Pro itself,
+  with the maintainer's account. Cloud sessions (Linux) plan,
   review plans and verify only what runs on Linux: scripts, workflows, docs,
   and `swift test` / `swift format lint` for `DokumentumKit`. Details:
   [index.md](./index.md).
@@ -235,7 +256,7 @@ M ≈ 2-3 PRs, L ≈ 4+ PRs.
 | 5 | OCR and text layer | Vision OCR (de/en), text from existing PDFs, invisible text layer, thumbnails, page count, resume after quit | M |
 | 6 | Search | Index and query of 3.5, search field in the library, filter by tag/correspondent/type/inbox | M |
 | 7 | On-device classification | Foundation Models suggest title, correspondent, type, tags and date; suggestions are applied only to empty fields; a switch in settings; unavailable without Apple Intelligence, with the reason shown | M |
-| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of real use on Development) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, a check list on both devices | S |
+| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of real use on Development) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, the hardened-runtime decision, a check list on both devices. Step 8 decides hardened runtime: `ENABLE_HARDENED_RUNTIME` stays `NO` until then (`Config/Project.xcconfig`), and `scripts/check-project.py` allows only that value, so the decision changes that rule too | S |
 
 Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 6 and 7 in parallel → 8.
