@@ -776,6 +776,18 @@ struct RepairPlannerTests {
         #expect(application.snapshot.record(1).parentInstanceID == uuid(3))
     }
 
+    @Test func aMakeRootSkipsWhenTheTagIsNoLongerLive() {
+        let state = RepairSnapshot(metadata: [tag(1, "A", parent: 2), tag(2, "B", parent: 1)])
+        let plan = RepairPlanner.plan(state, context: settledContext)
+        #expect(plan.operations == [.makeRoot(tag: uuid(1), expectedParent: uuid(2))])
+        var merged = state
+        merged.metadata[0].mergedIntoID = uuid(99)
+        merged.metadata[0].mergedAt = planningTime
+        let application = plan.apply(to: merged, now: planningTime)
+        #expect(application.applied.isEmpty)
+        #expect(application.snapshot.record(1).parentInstanceID == uuid(2))
+    }
+
     @Test func aRelinkSkipsWhenTheDocumentGotABlobOrTheBlobGotALink() {
         let state = RepairSnapshot(
             documents: [document(1), document(2)],
