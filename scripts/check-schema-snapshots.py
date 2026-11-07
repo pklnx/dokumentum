@@ -12,8 +12,11 @@ Linux in `lint`. It fails when:
 - version N drops or changes anything of version N-1: every entity line and every property line of N-1
   must be in N unchanged (same type, optionality, default, delete rule, inverse). Only additions pass;
 - a version listed in `production-versions.txt` (deployed to Production, step 8) differs from its file at
-  the base commit (`--base <sha>`), or is missing. Without `--base`, listed versions fail the check, so
-  CI always passes the base.
+  the base commit (`--base <sha>`), or is missing. The listed versions are the union of the file at the
+  base and at the head, so removing an entry in the same change does not lift the freeze; removing one
+  fails on its own. Only a version newly listed in this change and without a file at the base is not
+  compared. Without `--base`, listed versions fail the check, so CI always passes the base. A `--base`
+  that is not a commit of this repository, or a file that cannot be read there, is an error.
 
     python3 scripts/check-schema-snapshots.py                    # from the repository root
     python3 scripts/check-schema-snapshots.py --base <base sha>  # what CI runs
@@ -92,12 +95,31 @@ def additive_problems(old_lines, new_lines, old_label: str, new_label: str):
     return problems
 
 
+class BaseUnreadable(Exception):
+    """`--base` is not a commit of this repository, or a file cannot be read there."""
+
+
 def read_base(base: str, path: str):
-    """The file at `path` in commit `base`; None if it does not exist there."""
+    """The file at `path` in commit `base`; None if the commit has no such file. Raises `BaseUnreadable`
+    if `base` is not a commit here or the file cannot be read, so an unknown base never reads as "absent"."""
+    commit = subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True)
+    if commit.returncode != 0:
+        raise BaseUnreadable(f"--base {base!r} is not a commit of this repository")
+    exists = subprocess.run(["git", "cat-file", "-e", f"{base}:{path}"], capture_output=True)
+    if exists.returncode != 0:
+        return None
     result = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True)
     if result.returncode != 0:
-        return None
-    return result.stdout.decode("utf-8")
+        raise BaseUnreadable(f"{path} cannot be read at {base}")
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        raise BaseUnreadable(f"{path} at {base} is not UTF-8")
+
+
+def production_entries(text: str):
+    """The entries of a `production-versions.txt`: one per line, without comments and blank lines."""
+    return [line.strip() for line in text.split("\n") if line.strip() and not line.strip().startswith("#")]
 
 
 def check(schema_dir: str, base=None, read_at_base=read_base):
@@ -135,8 +157,19 @@ def check(schema_dir: str, base=None, read_at_base=read_base):
         problems.append(f"{production_path}: missing (empty until the first Production deploy)")
         return problems
     with open(production_path, encoding="utf-8") as handle:
-        entries = [line.strip() for line in handle if line.strip() and not line.strip().startswith("#")]
-    for entry in entries:
+        entries = production_entries(handle.read())
+    base_entries = []
+    if base is not None:
+        try:
+            base_production = read_at_base(base, f"{SCHEMA_DIR}/{PRODUCTION_FILE}")
+        except BaseUnreadable as error:
+            return problems + [str(error)]
+        base_entries = production_entries(base_production or "")
+    for entry in base_entries:
+        if entry not in entries:
+            problems.append(f"{PRODUCTION_FILE}: {entry!r} was listed at {base} and is gone; a version in "
+                            "Production stays listed")
+    for entry in sorted(set(entries) | set(base_entries)):
         if not entry.isdigit():
             problems.append(f"{PRODUCTION_FILE}: {entry!r} is not a version number")
             continue
@@ -148,8 +181,17 @@ def check(schema_dir: str, base=None, read_at_base=read_base):
         if base is None:
             problems.append(f"{PRODUCTION_FILE}: version {number} is in Production; pass --base <sha> to compare it")
             continue
-        at_base = read_at_base(base, f"{SCHEMA_DIR}/{label}")
-        if at_base is not None and at_base != texts[number]:
+        try:
+            at_base = read_at_base(base, f"{SCHEMA_DIR}/{label}")
+        except BaseUnreadable as error:
+            problems.append(str(error))
+            continue
+        if at_base is None:
+            if entry in base_entries:
+                problems.append(f"{label}: missing at {base}, but version {number} was listed in Production there")
+            # Otherwise listed in this change, with its file new here too: nothing to compare.
+            continue
+        if at_base != texts[number]:
             problems.append(f"{label}: changed against {base}, but version {number} is in Production; "
                             "add a new version instead")
     return problems
@@ -165,6 +207,7 @@ def self_test() -> None:
         "entity Tag uniqueness=none\n"
         "relationship Tag.documents to=Document many=yes optional=yes inverse=tags delete=nullify ordered=no\n"
     )
+    UNKNOWN_BASE, UNREADABLE_SNAPSHOT = "unknown base", "unreadable snapshot"
     v2 = v1 + "attribute Document.notes type=string optional=no default=\"\" external=no transient=no\n"
 
     def run(files, production="", base_files=None, base="BASE"):
@@ -179,6 +222,12 @@ def self_test() -> None:
                     handle.write(production)
 
             def at_base(_base, path):
+                if base_files == UNKNOWN_BASE:
+                    raise BaseUnreadable(f"--base {_base!r} is not a commit of this repository")
+                if base_files == UNREADABLE_SNAPSHOT and os.path.basename(path) != PRODUCTION_FILE:
+                    raise BaseUnreadable(f"{path} cannot be read at {_base}")
+                if base_files == UNREADABLE_SNAPSHOT:
+                    return production
                 return (base_files or {}).get(os.path.basename(path))
             return check(schema, base=base, read_at_base=at_base)
 
@@ -235,6 +284,22 @@ def self_test() -> None:
         ("a later version may change while V1 alone is in Production",
          {"schema-v1.txt": v1, "schema-v2.txt": v2}, "1\n", {"schema-v1.txt": v1, "schema-v2.txt": v1}, "BASE",
          None),
+        # The freeze holds the union of the base's and the head's list (reviews of #52).
+        ("production entry removed and its version changed in one change", {"schema-v1.txt": v2}, "",
+         {"schema-v1.txt": v1, PRODUCTION_FILE: "1\n"}, "BASE", "is in Production"),
+        ("production entry removed", {"schema-v1.txt": v1}, "",
+         {"schema-v1.txt": v1, PRODUCTION_FILE: "1\n"}, "BASE", "is gone"),
+        ("production entry kept, a comment added", {"schema-v1.txt": v1}, "# deployed\n1\n",
+         {"schema-v1.txt": v1, PRODUCTION_FILE: "1\n"}, "BASE", None),
+        ("production listed at base, its snapshot missing there", {"schema-v1.txt": v1}, "1\n",
+         {PRODUCTION_FILE: "1\n"}, "BASE", "missing at"),
+        # An unknown or unreadable base is an error, never "listed in this change".
+        ("production with an unknown base", {"schema-v1.txt": v2}, "1\n", UNKNOWN_BASE, "0" * 40,
+         "is not a commit"),
+        ("nothing in production, an unknown base", {"schema-v1.txt": v1}, "", UNKNOWN_BASE, "0" * 40,
+         "is not a commit"),
+        ("production with an unreadable snapshot at base", {"schema-v1.txt": v2}, "1\n", UNREADABLE_SNAPSHOT,
+         "BASE", "cannot be read"),
     ]
     for description, files, production, base_files, base, expected in cases:
         problems = run(files, production, base_files, base)
@@ -246,6 +311,14 @@ def self_test() -> None:
     # The committed snapshots pass on their own, so the cases above run against a format that exists.
     if os.path.isdir(SCHEMA_DIR):
         assert check(SCHEMA_DIR, base="HEAD") == [], "the committed snapshots fail the check"
+        # The real reader: a commit that does not exist is an error, a file the commit lacks is None.
+        try:
+            read_base("0" * 40, f"{SCHEMA_DIR}/{PRODUCTION_FILE}")
+            raise AssertionError("read_base accepted an unknown commit")
+        except BaseUnreadable:
+            pass
+        assert read_base("HEAD", f"{SCHEMA_DIR}/schema-v0.txt") is None, "read_base: a missing file is not None"
+        assert check(SCHEMA_DIR, base="0" * 40) != [], "an unknown --base passes the check"
     print(f"self-test passed ({len(cases)} cases)")
 
 
