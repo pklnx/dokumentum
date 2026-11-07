@@ -1,4 +1,4 @@
-// The unsigned path for machines without a signing identity (the development VM). Never part of the
+// The unsigned path for builds without a signing identity (agents' local builds). Never part of the
 // project: it applies through the environment variable, as a prefix on a command run from the
 // repository root (the path is resolved against the current directory):
 //

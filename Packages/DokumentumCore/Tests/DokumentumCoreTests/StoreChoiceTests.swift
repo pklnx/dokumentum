@@ -64,7 +64,7 @@ struct StoreChoiceTests {
         #expect(!ArchiveStore.cloudKitAvailable(iCloudServices: nil))
         #if os(macOS)
             // The test runner is not signed with the app's entitlements, so a macOS test process opens no CloudKit
-            // store (the development VM's unsigned path, Xcode Cloud's ad hoc tests).
+            // store (the unsigned path of local builds, Xcode Cloud's ad hoc tests).
             #expect(!ArchiveStore.cloudKitAvailable())
         #endif
     }
