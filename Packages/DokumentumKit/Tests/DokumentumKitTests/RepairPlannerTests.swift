@@ -858,6 +858,46 @@ struct RepairPlannerTests {
         #expect(!application.snapshot.record(2).isLive)
     }
 
+    /// I6 for a revival: an import re-routes the loop through an older record, which is now its minimum.
+    @Test func aReviveSkipsWhenTheLoopGotAnOlderMemberBeforeTheSave() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(11, "X", created: 6, mergedInto: 12, mergedAt: planningTime),
+            correspondent(12, "Y", created: 7, mergedInto: 11, mergedAt: planningTime),
+        ])
+        let plan = RepairPlanner.plan(state, context: settledContext)
+        #expect(plan.operations == [.revive(tombstone: uuid(11))])
+        var rerouted = state
+        rerouted.metadata[1].mergedIntoID = uuid(1010)
+        rerouted.metadata.append(correspondent(10, "Z", created: 5, mergedInto: 11, mergedAt: planningTime))
+        #expect(RepairPlanner.chainEnd(of: uuid(11), in: rerouted) == .loop(minimum: uuid(10)))
+        let application = plan.apply(to: rerouted, now: planningTime)
+        #expect(application.applied.isEmpty)
+        #expect(!application.snapshot.record(11).isLive)
+    }
+
+    /// I6 for a revival: the missing end arrives as a tombstone, so the planned record is no longer the last.
+    @Test func aReviveSkipsWhenTheChainGrewBeforeTheSave() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(10, "X", mergedInto: 11, mergedAt: planningTime - TimeInterval(400 * days))
+        ])
+        let plan = RepairPlanner.plan(state, context: settledContext)
+        #expect(plan.operations == [.revive(tombstone: uuid(10))])
+        var grown = state
+        grown.metadata.append(correspondent(11, "Y", mergedInto: 99, mergedAt: planningTime - TimeInterval(400 * days)))
+        let application = plan.apply(to: grown, now: planningTime)
+        #expect(application.applied.isEmpty)
+        #expect(!application.snapshot.record(10).isLive)
+    }
+
+    /// A revival planned on a view where 10 was still the chain's last applies nothing where 11 is here too.
+    @Test func aReviveOfATombstoneThatIsNotTheChainsLastAppliesNothing() {
+        let state = RepairSnapshot(metadata: [
+            correspondent(10, "X", mergedInto: 11, mergedAt: planningTime - TimeInterval(400 * days)),
+            correspondent(11, "Y", mergedInto: 99, mergedAt: planningTime - TimeInterval(400 * days)),
+        ])
+        #expect(RepairPlan([.revive(tombstone: uuid(10))]).apply(to: state, now: planningTime).applied.isEmpty)
+    }
+
     @Test func frozenValuesPassThroughAPlanUnchanged() {
         var state = chained
         state.documents[0].sourceRaw = "fax"
