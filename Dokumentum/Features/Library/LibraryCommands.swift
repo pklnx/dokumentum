@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The Mac's "Go" menu: Inbox (⌘1) and All Documents (⌘2) for the focused window. Later parts of #3
-/// add their commands where their actions are (PQ15).
+/// The Mac's "Go" menu: Inbox (⌘1) and All Documents (⌘2), and "Document": Show Info (⌘I), for the focused
+/// window. Later parts of #3 add their commands where their actions are (PQ15).
 struct LibraryCommands: Commands {
     @FocusedValue(\.libraryModel) private var model
 
@@ -13,6 +13,11 @@ struct LibraryCommands: Commands {
             Button("All Documents") { model?.selection = .all }
                 .keyboardShortcut("2")
                 .disabled(model == nil)
+        }
+        CommandMenu("Document") {
+            Button("Show Info") { model?.isInfoPresented.toggle() }
+                .keyboardShortcut("i")
+                .disabled(model?.selectedDocument == nil)
         }
     }
 }

@@ -2,9 +2,9 @@ import DokumentumCore
 import DokumentumKit
 import SwiftUI
 
-/// The detail column: the open document's PDF, or why there is none (PQ12).
+/// The detail column: the open document's PDF, or why there is none (PQ12), and its info panel.
 struct DocumentDetailView: View {
-    let model: LibraryModel
+    @Bindable var model: LibraryModel
 
     var body: some View {
         content
@@ -15,6 +15,30 @@ struct DocumentDetailView: View {
             .task(id: model.selectedDocumentID) {
                 await model.loadDetail(for: model.selectedDocumentID)
             }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        model.isInfoPresented.toggle()
+                    } label: {
+                        Label("Show Info", systemImage: "info.circle")
+                    }
+                    .disabled(model.selectedDocument == nil)
+                    .accessibilityIdentifier(AccessibilityID.detailShowInfo)
+                }
+            }
+            #if os(macOS)
+                // A trailing column on the Mac (plan of #3, part 3).
+                .inspector(isPresented: $model.isInfoPresented) {
+                    DocumentInfoView(model: model)
+                }
+            #else
+                // A sheet on the iPhone. Not `.inspector`, which also becomes a sheet here: it put the panel's
+                // toolbar ("Done") into the detail's bar beneath the sheet, where it cannot be reached
+                // (measured on iOS 27.0).
+                .sheet(isPresented: $model.isInfoPresented) {
+                    DocumentInfoView(model: model)
+                }
+            #endif
     }
 
     @ViewBuilder

@@ -42,6 +42,17 @@
         }
       }
     },
+    "Add" : {
+      "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinzufügen"
+          }
+        }
+      }
+    },
     "All Documents" : {
       "comment" : "Sidebar row, list title and Go menu item.",
       "localizations" : {
@@ -49,6 +60,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alle Dokumente"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen"
           }
         }
       }
@@ -75,6 +97,17 @@
         }
       }
     },
+    "Correspondent" : {
+      "comment" : "Info panel: the picker for the document's correspondent.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korrespondent"
+          }
+        }
+      }
+    },
     "Correspondents" : {
       "comment" : "Sidebar section.",
       "localizations" : {
@@ -82,6 +115,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Korrespondenten"
+          }
+        }
+      }
+    },
+    "Date" : {
+      "comment" : "Info panel: the document date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datum"
+          }
+        }
+      }
+    },
+    "Document" : {
+      "comment" : "Mac menu with the commands for the open document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokument"
+          }
+        }
+      }
+    },
+    "Document Type" : {
+      "comment" : "Info panel: the picker for the document's type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumenttyp"
           }
         }
       }
@@ -104,6 +170,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumentum"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "comment" : "iPhone: closes the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fertig"
           }
         }
       }
@@ -141,6 +218,17 @@
         }
       }
     },
+    "In Inbox" : {
+      "comment" : "Info panel: switch that keeps the document in the Inbox.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Posteingang"
+          }
+        }
+      }
+    },
     "Inbox" : {
       "comment" : "Sidebar row, list title and Go menu item: documents not filed yet.",
       "localizations" : {
@@ -163,6 +251,17 @@
         }
       }
     },
+    "Info" : {
+      "comment" : "iPhone: title of the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info"
+          }
+        }
+      }
+    },
     "Library" : {
       "comment" : "Sidebar section with Inbox and All Documents.",
       "localizations" : {
@@ -170,6 +269,72 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bibliothek"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "comment" : "Text field of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "New Correspondent" : {
+      "comment" : "Title of the dialog that names a new correspondent.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Korrespondent"
+          }
+        }
+      }
+    },
+    "New Document Type" : {
+      "comment" : "Title of the dialog that names a new document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Dokumenttyp"
+          }
+        }
+      }
+    },
+    "New Tag" : {
+      "comment" : "Title of the dialog that names a new tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Tag"
+          }
+        }
+      }
+    },
+    "New Tag…" : {
+      "comment" : "Info panel: button that creates a new tag for the document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Tag …"
+          }
+        }
+      }
+    },
+    "New…" : {
+      "comment" : "Info panel: the picker item that creates a new correspondent or document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neu …"
           }
         }
       }
@@ -192,6 +357,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keine Dokumente"
+          }
+        }
+      }
+    },
+    "None" : {
+      "comment" : "Info panel: the picker item for no correspondent or no document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keiner"
+          }
+        }
+      }
+    },
+    "Show Info" : {
+      "comment" : "Toolbar button and Mac menu item (Document › Show Info, ⌘I) that shows the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informationen anzeigen"
           }
         }
       }
@@ -258,6 +445,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dieses PDF kann nicht angezeigt werden"
+          }
+        }
+      }
+    },
+    "Title" : {
+      "comment" : "Info panel: the document's title field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titel"
           }
         }
       }
