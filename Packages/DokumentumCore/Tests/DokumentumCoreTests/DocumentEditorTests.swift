@@ -100,7 +100,7 @@ struct DocumentEditorTests {
 
     /// Each change writes its own field, `modifiedAt` and nothing else, with one save. The same value again
     /// writes nothing and does not save.
-    @Test(arguments: 0..<7)
+    @Test(arguments: 0..<8)
     func eachFieldWritesOnlyItself(field: Int) throws {
         let library = try makeLibrary()
         defer { NotificationCenter.default.removeObserver(library.observer) }
@@ -127,6 +127,10 @@ struct DocumentEditorTests {
         case 5:
             change = .tag(library.auto.instanceID, true)
             expected.tags = [library.tax.instanceID, library.auto.instanceID]
+        case 6:
+            // "None" in the picker.
+            change = .correspondent(nil)
+            expected.correspondent = nil
         default:
             change = .tag(library.tax.instanceID, false)
             expected.tags = []
@@ -275,16 +279,18 @@ struct DocumentEditorTests {
         defer { NotificationCenter.default.removeObserver(library.observer) }
         let merged = DokumentumCore.Tag(name: "Steuer", createdAt: Self.created)
         let lost = DokumentumCore.Tag(name: "Lost", createdAt: Self.created)
-        library.context.insert(merged)
-        library.context.insert(lost)
+        // Merged into Auto, so shown as Auto: unchecking Tax keeps it.
+        let kfz = DokumentumCore.Tag(name: "Kfz", createdAt: Self.created)
+        for tag in [merged, lost, kfz] { library.context.insert(tag) }
         merged.mergedIntoID = library.tax.id
         lost.mergedIntoID = UUID()
-        library.document.tags = [library.tax, merged, lost, library.auto]
+        kfz.mergedIntoID = library.auto.id
+        library.document.tags = [library.tax, merged, lost, kfz]
         try library.context.save()
 
         #expect(
             try library.editor.apply(.tag(library.tax.instanceID, false), to: library.document.instanceID) == .saved)
-        #expect(Set((library.document.tags ?? []).map(\.instanceID)) == [lost.instanceID, library.auto.instanceID])
+        #expect(Set((library.document.tags ?? []).map(\.instanceID)) == [lost.instanceID, kfz.instanceID])
 
         // Only the tombstone left, shown as Tax: unchecking Tax removes it.
         library.document.tags = [merged]
@@ -381,6 +387,54 @@ struct DocumentEditorTests {
         }
         #expect(library.saves.count == 0)
         #expect(!library.context.hasChanges)
+    }
+
+    /// A tag or type merged away keeps its name, but "New Tag…" and "New…" never return it: setting a tombstone
+    /// would be refused (`.noMetadata`), and the user's choice would do nothing.
+    @Test func aTombstoneTagOrTypeIsNotReused() throws {
+        let library = try makeLibrary()
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        let tagTombstone = DokumentumCore.Tag(name: "Steuer", createdAt: Self.created.addingTimeInterval(-100))
+        tagTombstone.mergedIntoID = library.tax.id
+        let typeTombstone = DocumentType(name: "Vertrag", createdAt: Self.created.addingTimeInterval(-100))
+        typeTombstone.mergedIntoID = library.invoice.id
+        library.context.insert(tagTombstone)
+        library.context.insert(typeTombstone)
+        try library.context.save()
+
+        let tag = try library.editor.createMetadata(kind: .tag, name: "steuer")
+        let type = try library.editor.createMetadata(kind: .documentType, name: "Vertrag")
+        #expect(tag != tagTombstone.instanceID)
+        #expect(type != typeTombstone.instanceID)
+        #expect(try library.editor.apply(.tag(tag, true), to: library.document.instanceID) == .saved)
+        #expect(try library.editor.apply(.documentType(type), to: library.document.instanceID) == .saved)
+    }
+
+    // MARK: Failed saves
+
+    private struct SaveFailed: Error {}
+
+    /// A save that fails is rolled back: the field keeps its committed value, nothing stays pending, and the next
+    /// edit's save writes only its own field.
+    @Test func aFailedSaveIsRolledBack() throws {
+        let library = try makeLibrary()
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        let instanceID = library.document.instanceID
+        let failing = DocumentEditor(context: library.context, now: { Self.edited }, save: { _ in throw SaveFailed() })
+        #expect(throws: SaveFailed.self) { try failing.apply(.title("Lost"), to: instanceID) }
+        #expect(throws: SaveFailed.self) { try failing.createMetadata(kind: .correspondent, name: "Neu") }
+        #expect(!library.context.hasChanges)
+        #expect(library.document.title == "Strom")
+        #expect(library.document.modifiedAt == Self.created)
+        #expect(try library.context.fetch(FetchDescriptor<Correspondent>()).allSatisfy { $0.name != "Neu" })
+
+        #expect(try library.editor.apply(.inbox(false), to: instanceID) == .saved)
+        let stored = try #require(
+            try ModelContext(library.container).fetch(FetchDescriptor<Document>()).first { $0.instanceID == instanceID }
+        )
+        #expect(stored.title == "Strom")
+        #expect(!stored.isInbox)
+        #expect(try ModelContext(library.container).fetch(FetchDescriptor<Correspondent>()).count == 2)
     }
 
     // MARK: Frozen enums

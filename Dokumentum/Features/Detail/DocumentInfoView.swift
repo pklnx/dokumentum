@@ -53,10 +53,9 @@ private struct DocumentInfoForm: View {
     let model: LibraryModel
     let document: LibraryDocument
 
-    /// The title as typed; saved on Return or when the field loses focus.
-    @State private var titleDraft = ""
-    /// The document the draft belongs to: a draft is saved to it even when the selection has moved on.
-    @State private var draftDocument: UUID?
+    /// The title as typed; saved on Return, when the field loses focus, when the selection moves on or when the
+    /// panel closes, and only if the user changed it (`TitleDraft`).
+    @State private var titleDraft = TitleDraft()
     @FocusState private var titleFocused: Bool
     /// The kind of record "New…" asks a name for.
     @State private var newKind: MetadataKind?
@@ -67,7 +66,7 @@ private struct DocumentInfoForm: View {
     var body: some View {
         Form {
             Section {
-                TextField("Title", text: $titleDraft, prompt: Text("Untitled document"))
+                TextField("Title", text: $titleDraft.text, prompt: Text("Untitled document"))
                     .focused($titleFocused)
                     .onSubmit(commitTitle)
                     .accessibilityIdentifier(AccessibilityID.infoTitle)
@@ -97,13 +96,12 @@ private struct DocumentInfoForm: View {
         .formStyle(.grouped)
         .disabled(!isEditable)
         .onChange(of: document.instanceID, initial: true) { _, _ in
-            // The selection moved on: the old draft is saved to its own document first.
+            // The selection moved on: a changed draft is saved to its own document first.
             commitTitle()
-            titleDraft = document.title
-            draftDocument = document.instanceID
+            titleDraft.show(document.instanceID, title: document.title)
         }
         .onChange(of: document.title) { _, title in
-            if !titleFocused { titleDraft = title }
+            titleDraft.titleChanged(to: title)
         }
         .onChange(of: titleFocused) { _, focused in
             if !focused { commitTitle() }
@@ -122,10 +120,10 @@ private struct DocumentInfoForm: View {
 
     // MARK: Title
 
-    /// Saves the draft to its document; the editor writes nothing when the title is the same.
+    /// Saves the draft to its document if the user changed it.
     private func commitTitle() {
-        guard let draftDocument else { return }
-        model.edit(.title(titleDraft), of: draftDocument)
+        guard let commit = titleDraft.commit() else { return }
+        model.edit(.title(commit.title), of: commit.document)
     }
 
     // MARK: Date and inbox
@@ -221,5 +219,40 @@ private struct DocumentInfoForm: View {
         case .documentType: Text("New Document Type")
         case .tag, nil: Text("New Tag")
         }
+    }
+}
+
+/// The info panel's title field: the text, the document it belongs to, and the title it started from.
+///
+/// Only a draft the user changed is saved. An untouched draft can be older than the store (a rename from the
+/// other device that the library has not read yet), and saving it would revert that rename (review A of #57).
+/// An untouched draft follows the document's title when the library reads a new one; a changed draft is kept.
+struct TitleDraft: Equatable {
+    /// The document the draft belongs to: a changed draft is saved to it even when the selection has moved on.
+    private(set) var document: UUID?
+    /// What the field shows and the user types.
+    var text = ""
+    /// The title the draft started from, or the one last saved from it.
+    private(set) var base = ""
+
+    /// The panel shows `document`: the draft starts from its title.
+    mutating func show(_ document: UUID, title: String) {
+        self.document = document
+        text = title
+        base = title
+    }
+
+    /// The library read a new title for the document: an untouched draft follows it.
+    mutating func titleChanged(to title: String) {
+        guard text == base else { return }
+        text = title
+        base = title
+    }
+
+    /// The title to save and its document, if the user changed the draft; the draft then counts as saved.
+    mutating func commit() -> (document: UUID, title: String)? {
+        guard let document, text != base else { return nil }
+        base = text
+        return (document, text)
     }
 }

@@ -20,7 +20,11 @@ struct DocumentDetailView: View {
                     Button {
                         model.isInfoPresented.toggle()
                     } label: {
-                        Label("Show Info", systemImage: "info.circle")
+                        Label {
+                            model.isInfoPresented ? Text("Hide Info") : Text("Show Info")
+                        } icon: {
+                            Image(systemName: "info.circle")
+                        }
                     }
                     .disabled(model.selectedDocument == nil)
                     .accessibilityIdentifier(AccessibilityID.detailShowInfo)

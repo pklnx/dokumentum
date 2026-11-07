@@ -40,8 +40,13 @@ final class LibraryModel {
         }
     }
 
-    /// The open document's `instanceID`. The detail column loads it with `loadDetail(for:)`.
-    var selectedDocumentID: UUID?
+    /// The open document's `instanceID`. The detail column loads it with `loadDetail(for:)`. When it clears (the
+    /// document left the list, or the iPhone went back), the info panel closes: it has nothing to show.
+    var selectedDocumentID: UUID? {
+        didSet {
+            if selectedDocumentID == nil { isInfoPresented = false }
+        }
+    }
 
     /// The tags whose nested tags are shown.
     var expandedTags: Set<UUID> = []

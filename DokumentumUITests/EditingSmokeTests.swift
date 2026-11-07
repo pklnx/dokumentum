@@ -23,9 +23,17 @@ final class EditingSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch")
         ui.activate(Self.electricityBill)
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        let showInfo = ui.element("documentDetail.showInfo")
+        XCTAssertTrue(showInfo.waitForExistence(timeout: 20), "no Show Info button")
+        let closedLabel = showInfo.label
         ui.activate("documentDetail.showInfo")
         let title = ui.element("documentInfo.title")
         XCTAssertTrue(title.waitForExistence(timeout: 20), "no info panel")
+        // The button now hides the panel and says so, also to VoiceOver ("Hide Info").
+        let relabelled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label != %@", closedLabel), object: showInfo)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [relabelled], timeout: 10), .completed, "the button still says \(closedLabel)")
         ui.attachWindowScreenshot("1-info", to: self)
 
         // The title: replaced, saved with Return.

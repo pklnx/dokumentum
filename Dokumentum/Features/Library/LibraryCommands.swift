@@ -15,9 +15,13 @@ struct LibraryCommands: Commands {
                 .disabled(model == nil)
         }
         CommandMenu("Document") {
-            Button("Show Info") { model?.isInfoPresented.toggle() }
-                .keyboardShortcut("i")
-                .disabled(model?.selectedDocument == nil)
+            Button {
+                model?.isInfoPresented.toggle()
+            } label: {
+                model?.isInfoPresented == true ? Text("Hide Info") : Text("Show Info")
+            }
+            .keyboardShortcut("i")
+            .disabled(model?.selectedDocument == nil)
         }
     }
 }

@@ -14,6 +14,8 @@ import SwiftData
 ///   `MetadataName.normalized` name, a tag only with the same parent and normalized name, the key of the
 ///   repair's pass 2. Among several such records the first in `keeperOrder` is used, the one pass 2 keeps.
 ///   So the editor creates none of the duplicates pass 2 would merge later.
+/// - **A failed save is rolled back.** Otherwise the change would stay pending in the main context, the library
+///   would show it as saved, and the next edit's save (or an autosave) would write it after all.
 @MainActor
 public struct DocumentEditor {
     /// One edit of one field.
@@ -52,13 +54,19 @@ public struct DocumentEditor {
 
     public let context: ModelContext
     private let now: () -> Date
+    private let saveContext: (ModelContext) throws -> Void
 
     /// - Parameters:
     ///   - context: the main context, so the library's read sees the edit at once.
     ///   - now: the clock for `modifiedAt` and a new record's `createdAt`.
-    public init(context: ModelContext, now: @escaping () -> Date = { Date() }) {
+    ///   - save: saves the context; tests pass one that fails.
+    public init(
+        context: ModelContext, now: @escaping () -> Date = { Date() },
+        save: @escaping (ModelContext) throws -> Void = { try $0.save() }
+    ) {
         self.context = context
         self.now = now
+        saveContext = save
     }
 
     /// Applies `change` to the document with `instanceID`.
@@ -105,7 +113,7 @@ public struct DocumentEditor {
             document.tags = tags.filter { !removed.contains($0.instanceID) }
         }
         document.touch(now())
-        try context.save()
+        try save()
         return .saved
     }
 
@@ -182,8 +190,19 @@ public struct DocumentEditor {
 
     private func insert(_ record: some PersistentModel & MetadataRecord) throws -> UUID {
         context.insert(record)
-        try context.save()
+        try save()
         return record.instanceID
+    }
+
+    /// Saves, or discards every unsaved change of the context and rethrows: nothing of a failed edit stays
+    /// pending for a later save. The editor's own changes are the only ones the main context holds unsaved.
+    private func save() throws {
+        do {
+            try saveContext(context)
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     /// The first record in `keeperOrder`: oldest `createdAt`, then the smallest `instanceID.uuidString`.

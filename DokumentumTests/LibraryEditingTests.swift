@@ -39,6 +39,25 @@ struct LibraryEditingTests {
         #expect(model.documents.first { $0.instanceID == Self.electricityBill }?.isInbox == false)
     }
 
+    /// Switching "In Inbox" off in the Inbox takes the document out of the list; the selection clears, and the
+    /// info panel closes with it instead of showing "No document selected" (reviews of #57).
+    @Test func theInfoPanelClosesWhenTheSelectionClears() throws {
+        let (model, _) = try makeModel()
+        model.selectedDocumentID = Self.electricityBill
+        model.isInfoPresented = true
+        #expect(model.edit(.inbox(false), of: Self.electricityBill) == .saved)
+        #expect(model.selectedDocumentID == nil)
+        #expect(!model.isInfoPresented)
+
+        // Another document keeps the panel open; going back (iPhone) closes it.
+        model.selectedDocumentID = FixtureCatalog.documentID(2)
+        model.isInfoPresented = true
+        model.selectedDocumentID = FixtureCatalog.documentID(5)
+        #expect(model.isInfoPresented)
+        model.selectedDocumentID = nil
+        #expect(!model.isInfoPresented)
+    }
+
     @Test func aNewCorrespondentIsCreatedOnceAndSet() throws {
         let (model, container) = try makeModel()
         let before = try container.mainContext.fetchCount(FetchDescriptor<Correspondent>())
