@@ -7,10 +7,11 @@
         import UIKit
     #endif
 
-    /// `-UITestImportSynthetic YES` (Debug builds only, plan of #4, part 2, N4): once the first library window
-    /// appears, the app writes three generated PDFs (`SyntheticPDF`) into a folder of its temporary directory
-    /// and imports them through the window's `ImportController`, as the files picker would: two different
-    /// ones, then the first one's bytes under another name. So a UI test imports without driving a system
+    /// `-UITestImportSynthetic YES` (Debug builds only, plan of #4, parts 2 and 3, N4): once the first library
+    /// window appears, the app writes generated files into a folder of its temporary directory and imports
+    /// them through the window's `ImportController`, as the files picker would: two different PDFs
+    /// (`SyntheticPDF`), a portrait photo stored with EXIF orientation 6 (`SyntheticImage`), then the first
+    /// PDF's bytes under another name. So a UI test imports without driving a system
     /// picker, and no folder is shared between the test runner and the app.
     ///
     /// Honoured only with an in-memory store (`-UITestEmptyStore`, `-UITestSeed`), never into an archive on
@@ -19,11 +20,22 @@
     enum UITestImportSynthetic {
         static let argument = "-UITestImportSynthetic"
 
-        /// The files in import order: name and the pages of its PDF; `nil` pages repeat the first file.
-        static let files: [(name: String, pages: [[String]]?)] = [
-            ("Rechnung Stadtwerke.pdf", [["Stadtwerke Musterstadt", "Rechnung Strom", "Betrag 84,20 EUR"]]),
-            ("Kontoauszug Oktober.pdf", [["Musterbank", "Kontoauszug Oktober"], ["Seite 2"]]),
-            ("Rechnung Kopie.pdf", nil),
+        /// What a generated file holds.
+        enum Content {
+            /// A PDF with these pages.
+            case pdf([[String]])
+            /// A portrait photo with these lines.
+            case portraitPhoto([String])
+            /// The first file's bytes again.
+            case copyOfFirst
+        }
+
+        /// The files in import order.
+        static let files: [(name: String, content: Content)] = [
+            ("Rechnung Stadtwerke.pdf", .pdf([["Stadtwerke Musterstadt", "Rechnung Strom", "Betrag 84,20 EUR"]])),
+            ("Kontoauszug Oktober.pdf", .pdf([["Musterbank", "Kontoauszug Oktober"], ["Seite 2"]])),
+            ("Kassenbon Bäckerei.jpg", .portraitPhoto(["Bäckerei Muster", "Kassenbon", "Summe 4,80 EUR"])),
+            ("Rechnung Kopie.pdf", .copyOfFirst),
         ]
 
         static func isRequested(arguments: [String], launchStore: LaunchStore) -> Bool {
@@ -68,7 +80,12 @@
             var first: Data?
             var urls: [URL] = []
             for file in files {
-                let data = file.pages.map(SyntheticPDF.make(pages:)) ?? first ?? Data()
+                let data =
+                    switch file.content {
+                    case .pdf(let pages): SyntheticPDF.make(pages: pages)
+                    case .portraitPhoto(let lines): SyntheticImage.makePortraitPhoto(lines: lines)
+                    case .copyOfFirst: first ?? Data()
+                    }
                 if first == nil { first = data }
                 let url = folder.appending(path: file.name)
                 try data.write(to: url)

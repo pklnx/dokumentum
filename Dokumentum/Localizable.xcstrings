@@ -124,6 +124,47 @@
         }
       }
     },
+    "%lld photos could not be read and were left out." : {
+      "comment" : "Import notice line: photos of a selection are missing from the new document (two or more).",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Foto konnte nicht gelesen werden und wurde ausgelassen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos konnten nicht gelesen werden und wurden ausgelassen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 photo could not be read and was left out."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos could not be read and were left out."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Add" : {
       "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
       "localizations" : {
@@ -639,6 +680,23 @@
         }
       }
     },
+    "One photo could not be read and was left out." : {
+      "comment" : "Import notice line: one photo of a selection is missing from the new document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Foto konnte nicht gelesen werden und wurde ausgelassen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One photo could not be read and was left out."
+          }
+        }
+      }
+    },
     "Permanently delete %lld documents?" : {
       "comment" : "Title of the Empty Trash confirmation: how many documents it deletes.",
       "localizations" : {
@@ -676,6 +734,40 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Photo %@" : {
+      "comment" : "Title of a document made from photos; %@ is the date and time of the import.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foto %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo %@"
+          }
+        }
+      }
+    },
+    "Photos…" : {
+      "comment" : "Item of the list toolbar's import menu: opens the Photos picker.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos…"
           }
         }
       }
@@ -979,6 +1071,23 @@
         }
       }
     },
+    "“%@” is damaged or not an image and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name of an image, or the title of photos picked together.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist beschädigt oder kein Bild und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is damaged or not an image and was not imported."
+          }
+        }
+      }
+    },
     "“%@” is empty and was not imported." : {
       "comment" : "Import notice line; %@ is the file name.",
       "localizations" : {
@@ -996,19 +1105,19 @@
         }
       }
     },
-    "“%@” is not a PDF and was not imported." : {
+    "“%@” is not a PDF or an image and was not imported." : {
       "comment" : "Import notice line; %@ is the file name.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%@“ ist kein PDF und wurde nicht importiert."
+            "value" : "„%@“ ist kein PDF oder Bild und wurde nicht importiert."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” is not a PDF and was not imported."
+            "value" : "“%@” is not a PDF or an image and was not imported."
           }
         }
       }

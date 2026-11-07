@@ -2,6 +2,7 @@ import DokumentumCore
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
+import PDFKit
 import SwiftData
 import Synchronization
 import Testing
@@ -12,13 +13,29 @@ import UniformTypeIdentifiers
 /// An importer that answers from a script by file name and records the names it was given, in order.
 final class StubImporter: DocumentImporting {
     let outcomes: [String: ImportOutcome]
+    /// The answer to `importImages`.
+    let imagesResult: ImageImportResult
     private let calls = Mutex<[String]>([])
+    private let imageCalls = Mutex<[(items: [Data], title: String?)]>([])
 
-    init(_ outcomes: [String: ImportOutcome] = [:]) {
+    init(
+        _ outcomes: [String: ImportOutcome] = [:],
+        images: ImageImportResult = ImageImportResult(outcome: .failed(.storeFailed))
+    ) {
         self.outcomes = outcomes
+        self.imagesResult = images
     }
 
     var fileNames: [String] { calls.withLock { $0 } }
+    /// The items and titles `importImages` was given, per call.
+    var imageImports: [(items: [Data], title: String?)] { imageCalls.withLock { $0 } }
+
+    func importImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
+        -> ImageImportResult
+    {
+        imageCalls.withLock { $0.append((items, title)) }
+        return imagesResult
+    }
 
     func importFile(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
@@ -35,6 +52,17 @@ struct StubReader: ImportFileReading {
 
     func read(_ url: URL) async throws -> Data {
         if failing.contains(url) { throw CocoaError(.fileReadNoPermission) }
+        return data
+    }
+}
+
+/// A photo from the picker: its bytes, nothing (not handed over), or an error.
+struct StubPhoto: ImportPhotoItem {
+    var data: Data?
+    var fails = false
+
+    func loadData() async throws -> Data? {
+        if fails { throw CocoaError(.fileReadUnknown) }
         return data
     }
 }
@@ -229,18 +257,82 @@ struct ImportControllerTests {
         }
     }
 
-    @Test func theSyntheticFilesAreTwoPDFsAndACopyOfTheFirst() throws {
+    /// Photos picked together (part 3): one import of their bytes in selection order, titled with the time.
+    @Test func photosAreImportedTogetherInTheirOrderWithAPhotoTitle() async throws {
+        let id = UUID()
+        let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id)))
+        let library = LibraryModel(source: SnapshotSource([Self.row(id)]))
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: library, now: { Self.date })
+        let photos = ["eins", "zwei", "drei"].map { StubPhoto(data: Data($0.utf8)) }
+
+        let report = await controller.importPhotos(photos)
+
+        let call = try #require(importer.imageImports.first)
+        #expect(importer.imageImports.count == 1)
+        #expect(call.items == ["eins", "zwei", "drei"].map { Data($0.utf8) })
+        #expect(call.title == ImportController.photoTitle(at: Self.date))
+        #expect(report.entries.map(\.outcome) == [.imported(instanceID: id)])
+        #expect(library.selection == .inbox)
+        #expect(library.selectedDocumentID == id, "one new document opens (PQ1)")
+        #expect(controller.notices.shown == nil, "nothing to report (PQ4)")
+    }
+
+    /// A photo Photos cannot hand over is left out of the import and counted with the ones the importer
+    /// could not decode.
+    @Test func aPhotoThatIsNotHandedOverIsLeftOutAndCounted() async throws {
+        let id = UUID()
+        let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id), leftOut: 1))
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([Self.row(id)])))
+
+        let report = await controller.importPhotos([
+            StubPhoto(data: Data("eins".utf8)), StubPhoto(data: nil), StubPhoto(fails: true),
+            StubPhoto(data: Data("vier".utf8)),
+        ])
+
+        #expect(importer.imageImports.first?.items == [Data("eins".utf8), Data("vier".utf8)])
+        #expect(report.entries.map(\.leftOut) == [3])
+        let notice = try #require(controller.notices.shown)
+        #expect(notice.message == String(localized: "\(3) photos could not be read and were left out."))
+    }
+
+    @Test func noPhotoHandedOverIsOneFailureAndImportsNothing() async throws {
+        let importer = StubImporter()
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([])),
+            now: { Self.date })
+
+        let report = await controller.importPhotos([StubPhoto(data: nil), StubPhoto(fails: true)])
+
+        #expect(importer.imageImports.isEmpty)
+        #expect(report.entries.map(\.outcome) == [.failed(.couldNotRead)])
+        #expect(report.entries.map(\.fileName) == [ImportController.photoTitle(at: Self.date)])
+        #expect(controller.notices.shown != nil)
+        #expect(await controller.importPhotos([]).entries.isEmpty, "an empty pick is no batch")
+    }
+
+    /// The files picker, ⌘O and a drop accept images as well as PDFs (part 3).
+    @Test func thePickerAcceptsPDFsAndImages() {
+        #expect(ImportController.importableTypes == [.pdf, .image])
+    }
+
+    @Test func theSyntheticFilesAreTwoPDFsAPortraitPhotoAndACopyOfTheFirst() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "DokumentumTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         let urls = try UITestImportSynthetic.writeFiles(into: folder)
 
         #expect(
             urls.map(\.lastPathComponent) == [
-                "Rechnung Stadtwerke.pdf", "Kontoauszug Oktober.pdf", "Rechnung Kopie.pdf",
+                "Rechnung Stadtwerke.pdf", "Kontoauszug Oktober.pdf", "Kassenbon Bäckerei.jpg", "Rechnung Kopie.pdf",
             ])
         let bytes = try urls.map { try Data(contentsOf: $0) }
-        #expect(bytes[0] == bytes[2])
+        #expect(bytes[0] == bytes[3])
         #expect(bytes[0] != bytes[1])
+        // The photo is stored as landscape pixels with orientation 6 and becomes a portrait page.
+        let page = try #require(PDFBuilder.makePDF(fromImageData: [bytes[2]]))
+        let size = try #require(PDFDocument(data: page.data)?.page(at: 0)?.bounds(for: .mediaBox).size)
+        #expect(size.height > size.width, "a portrait page: \(size)")
         #expect(
             !UITestImportSynthetic.isRequested(
                 arguments: [UITestImportSynthetic.argument, "YES"],

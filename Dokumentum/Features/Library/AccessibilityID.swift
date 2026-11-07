@@ -54,9 +54,11 @@ enum AccessibilityID {
     /// The sidebar footer's "Sync off" line.
     static let syncOffLine = "sidebar.syncOff"
 
-    /// The list toolbar's "+" menu, its "Files…" item, and the import notice's OK button (#4, part 2).
+    /// The list toolbar's "+" menu, its "Files…" and "Photos…" items, and the import notice's OK button (#4,
+    /// parts 2 and 3).
     static let importMenu = "import.menu"
     static let importFiles = "import.files"
+    static let importPhotos = "import.photos"
     static let importNoticeOK = "import.notice.ok"
 
     /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
