@@ -254,6 +254,34 @@ changes. Deploying the schema to Production is the maintainer's.
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
 from tests or the VM).
 
+**The repair.** `RepairPlanner` (DokumentumKit) decides, `DokumentumCore/Repair/` carries it out on the store:
+re-point references to tombstones, merge same-name metadata into tombstones, break tag cycles, relink early
+blobs, revive tombstones; it never deletes (plan of #2, "Repair passes"). `RepairScheduler` runs it at launch,
+after debounced store changes (`StoreChangeObserver`) and at the end of a CloudKit import, only for stores on
+disk, off the main thread. A run reads a light snapshot once to plan (no linked blob is loaded; `RepairSQLTests`
+checks the SQL under `swift test`), and saves once per pass that changed something and never otherwise. Each
+pass re-reads only the records it writes and re-checks every operation on that read (I6).
+
+**Concurrent saves (I6).** A `ModelContext` that saves over a row another save changed since it read it writes
+back the whole row, every field, not only the ones it changed (measured on #56: Core Data re-selects the row on
+the optimistic-locking conflict, and the `UPDATE` sets every field the stale object holds). So the repair never
+writes over a row state it has not read: right before a pass saves, it reads the rows it changed (inverse-only
+rows included) and the records its operations name in another context and compares every field with what it
+read. If one differs, the pass writes nothing and the next run, which that save triggers, plans again. Nothing
+is ever written to undo. Residual window: a save to one of those rows that commits between that check and the
+pass's commit is overwritten in that row. Measured on the VM (`swift test` debug build, from the check's start
+to the pass's `didSave`, 3,000 documents in two correspondents' halves): about 0.06 s for a merge moving 300
+documents, and 0.24 to 0.40 s for one moving 1,500, with one to five tags per document, depending on the data
+and the VM's load (review A measured 0.40 s). It grows with the rows the pass writes, never with the archive.
+A document's file, thumbnail and text links are part of its row (by identifier, without loading the blob), so a
+link another save makes in the window is seen. The external-storage data of a relinked blob is not compared.
+Also not re-checked: records inserted in the window. A revived tombstone whose chain end arrives just then, or a
+document that newly points at a merge's loser, is left for the next run, which merges or re-points it; nothing
+is lost, but the keeper can differ from the one another device chose until both converge.
+
+Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.swift`) and check
+`RepairInvariants` and that the store ends where the planner's simulation ends (`CheckedRepair`).
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, subsystem
