@@ -272,6 +272,10 @@ struct RepairInvariantsTests {
         #expect(decisions(state, .makeRoot(tag: uuid(2), expectedParent: uuid(1))) == [.i5])
         #expect(decisions(state, .makeRoot(tag: uuid(3), expectedParent: uuid(1))) == [.i5], "below the cycle")
         #expect(decisions(state, .makeRoot(tag: uuid(1), expectedParent: uuid(2))).isEmpty)
+        // Older than the cycle, so only the membership check can tell it is outside.
+        var withOlderTail = state
+        withOlderTail.metadata.append(tag(4, "Tail", created: 0, parent: 1))
+        #expect(decisions(withOlderTail, .makeRoot(tag: uuid(4), expectedParent: uuid(1))) == [.i5], "older tail")
     }
 
     @Test func i5FindsARootThatIsNoLiveTag() {
