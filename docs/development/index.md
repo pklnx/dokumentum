@@ -56,6 +56,12 @@ app) and `DokumentumUITests`. Two local packages live in `Packages/`.
   whatever it writes into the `.pbxproj`. The settings of Xcode's "App Sandbox & Hardened Runtime"
   category inject entitlements past these files, so the script rejects them all, except
   `ENABLE_HARDENED_RUNTIME = NO` until step 8.
+- **The Mac app reads files the user picks** through `com.apple.security.files.user-selected.read-only`
+  (an App Sandbox key, not an App ID capability): the open panel and ⌘O need it, and the import only
+  reads. A drop needs no key when the app receives it as a file (`FileRepresentation`, a copy); a
+  dropped file URL taken as a plain `URL` could not be read in the sandbox, with or without the key
+  (probe on #58). The unsigned path below drops all keys, so only a sandboxed build shows what this key
+  does.
 - **Each package is a folder reference in the project**, not an
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
