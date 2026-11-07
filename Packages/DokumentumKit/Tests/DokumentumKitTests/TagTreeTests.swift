@@ -12,15 +12,18 @@ struct TagTreeTests {
         TagRecord(instanceID: id(number), parentInstanceID: parent.map(id), name: name)
     }
 
-    /// Builds the tree off the test's thread and waits for a signal, so a traversal that never ends
-    /// fails the test at the safety net instead of hanging the run.
+    /// Builds the tree on a thread of its own and waits for a signal, so a traversal that never ends
+    /// fails the test at the safety net instead of hanging the run. Not a task: a traversal that spins
+    /// would hold a thread of the cooperative pool, and with a few of them the safety net itself
+    /// never got its turn (measured with the cycle check removed).
     private static func build(_ records: [TagRecord]) async -> TagTree? {
         let built = TestSignal()
         let box = Box()
-        Task.detached {
+        let thread = Thread {
             box.tree = TagTree(records)
             built.fire()
         }
+        thread.start()
         guard await built.wait(timeout: .seconds(20), "TagTree did not finish") else { return nil }
         return box.tree
     }
