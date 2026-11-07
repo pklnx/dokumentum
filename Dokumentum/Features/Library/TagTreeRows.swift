@@ -23,10 +23,23 @@ private struct TagTreeRow: View {
     private var isExpanded: Bool { model.expandedTags.contains(id) }
     private var path: String { model.tree.displayPath(of: id) }
 
-    // Not a `NavigationLink`: on the Mac a link makes the whole row one accessibility element, and
-    // the chevron inside it can no longer be reached. The row is tagged instead, which the sidebar's
-    // `List(selection:)` selects the same way.
+    // On the Mac not a `NavigationLink`: a link makes the whole row one accessibility element there,
+    // and the chevron inside it can no longer be reached. The row is tagged instead, which the
+    // sidebar's `List(selection:)` selects the same way. On the iPhone the link stays, for the row's
+    // disclosure indicator like the other sidebar rows; the chevron is a plain button that takes only
+    // its own taps (checked by `LibrarySmokeTests`).
     var body: some View {
+        #if os(macOS)
+        content
+            .tag(LibrarySelection.tag(id))
+        #else
+        NavigationLink(value: LibrarySelection.tag(id)) {
+            content
+        }
+        #endif
+    }
+
+    private var content: some View {
         HStack(spacing: 2) {
             chevron
             SidebarRowLabel(
@@ -42,7 +55,6 @@ private struct TagTreeRow: View {
             .accessibilityIdentifier(AccessibilityID.sidebarRow(.tag(id)))
         }
         .padding(.leading, CGFloat(row.depth) * 14)
-        .tag(LibrarySelection.tag(id))
     }
 
     /// Expands or collapses the nested tags. An empty space of the same width on tags without nested
