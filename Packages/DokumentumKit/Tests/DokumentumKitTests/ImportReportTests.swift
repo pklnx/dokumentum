@@ -12,7 +12,8 @@ struct ImportReportTests {
         failed: { "FAILED" },
         duplicatesHeading: { $0 == 1 ? "ONE DUPLICATE:" : "\($0) DUPLICATES:" },
         duplicateLine: { "• \($0) → “\($1)”" + ($2 ? " (TRASH)" : "") },
-        failureLine: { "\($0): \($1)" })
+        failureLine: { "\($0): \($1)" },
+        leftOutLine: { "\($0) LEFT OUT" })
 
     let a = UUID()
     let b = UUID()
@@ -72,6 +73,29 @@ struct ImportReportTests {
             .init(fileName: "b.pdf", outcome: .failed(.couldNotRead)),
         ])
         #expect(imported.notice(Self.strings)?.title == "PARTLY FAILED")
+    }
+
+    /// Photos left out of an imported document (part 3): a partial failure, their count last; a document
+    /// imported whole still gives no notice.
+    @Test func photosLeftOutAreAPartialFailure() {
+        let leftOut = ImportReport(entries: [
+            .init(fileName: "Photo 1", outcome: .imported(instanceID: a), leftOut: 2)
+        ])
+        #expect(leftOut.leftOut == 2)
+        #expect(leftOut.notice(Self.strings) == ImportNotice(title: "PARTLY FAILED", message: "2 LEFT OUT"))
+        #expect(leftOut.documentToOpen == .new(a), "the document still opens (PQ1)")
+        let withDuplicate = ImportReport(entries: [
+            .init(fileName: "Photo 1", outcome: .imported(instanceID: a), leftOut: 1),
+            .init(fileName: "x.jpg", outcome: .duplicate(of: existing, title: "Bon", isTrashed: false)),
+            .init(fileName: "b.jpg", outcome: .failed(.unreadableImage)),
+        ])
+        #expect(
+            withDuplicate.notice(Self.strings)
+                == ImportNotice(
+                    title: "PARTLY FAILED",
+                    message: "ONE DUPLICATE:\n• x.jpg → “Bon”\nb.jpg: unreadableImage\n1 LEFT OUT"))
+        let whole = ImportReport(entries: [.init(fileName: "Photo 1", outcome: .imported(instanceID: a))])
+        #expect(whole.notice(Self.strings) == nil)
     }
 
     @Test func theDocumentToOpen() {

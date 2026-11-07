@@ -6,32 +6,47 @@ import UniformTypeIdentifiers
 
 /// What an import source needs from the importer; the app's tests stub it.
 public protocol DocumentImporting: Sendable {
-    /// Imports one file whose bytes were already read. Never throws: every way it can end is an outcome.
+    /// Imports one file whose bytes were already read: a PDF as it is, an image as a one-page PDF (part 3).
+    /// Never throws: every way it can end is an outcome.
     /// - Parameters:
     ///   - fileName: the file's name with its extension; it becomes the title (`importTitle`).
     ///   - contentType: the type a provider declared; `nil` takes it from the name's extension.
+    ///   - source: the source of a PDF; an image is always `.image`.
     func importFile(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
+
+    /// Imports images as one document, one page per image in their order (part 3): photos picked together.
+    /// - Parameters:
+    ///   - fileName: the `originalFileName` (empty for photos); the title when `title` is `nil`.
+    ///   - title: the document's title, such as "Photo <date, time>" (PQ2); `nil` takes it from `fileName`.
+    func importImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
+        -> ImageImportResult
 }
 
-/// The one import pipeline (plan of #4, part 2). **One instance for the whole app**, created next to the
-/// container in `DokumentumApp`, so every window and every later source (Photos, the share queue) goes
+/// The one import pipeline (plan of #4, parts 2 and 3). **One instance for the whole app**, created next to
+/// the container in `DokumentumApp`, so every window and every later source (Photos, the share queue) goes
 /// through the same actor.
 ///
 /// **It only inserts.** A new `Document` with its `DocumentFile` and `DocumentText`, in one save, in a fresh
 /// context. It never writes to an existing row: a duplicate is reported, not touched (SwiftData writes whole
 /// rows and has no merge policy).
 ///
-/// **Order of one import:** the type (PDF only in this part), not empty, the hash (off the actor), the first
-/// duplicate check (a short-lived context), PDFKit's check (off the actor: it opens, is not locked, has a
-/// page), then `commit`: one synchronous call that opens a fresh context, checks for a duplicate again,
-/// inserts and saves. **No `await` while a context is in use** (plan review N3): the contexts live inside
-/// synchronous calls only.
+/// **Order of one import:** the type (PDF or image), not empty, the hash (off the actor), the first duplicate
+/// check (a short-lived context), for images building the PDF (`PDFBuilder`, off the actor), PDFKit's check
+/// (off the actor: it opens, is not locked, has a page), then `commit`: one synchronous call that opens a
+/// fresh context, checks for a duplicate again, inserts and saves. **No `await` while a context is in use**
+/// (plan review N3): the contexts live inside synchronous calls only.
 ///
-/// **Concurrent imports.** The awaits for hashing and PDFKit let other imports run meanwhile, so large files
-/// do not wait for each other. The step that touches the store, `commit`, runs to its end on the actor
-/// without a suspension, so two imports of the same bytes can never both pass its duplicate check: one
-/// document, one duplicate. That second check is what holds it; the first only saves the PDFKit work.
+/// **Concurrent imports.** The awaits for hashing, building and PDFKit let other imports run meanwhile, so
+/// large files do not wait for each other. The step that touches the store, `commit`, runs to its end on the
+/// actor without a suspension, so two imports of the same bytes can never both pass its duplicate check: one
+/// document, one duplicate. That second check is what holds it; the first only saves the work before it.
+///
+/// **Images (part 3, T3).** The hash is taken over the original bytes, never over the built PDF: an image
+/// file's bytes; photos picked together, their bytes concatenated in selection order (the predecessor's
+/// `PendingImport.make`). So the same image or the same selection is a duplicate the next time, and the same
+/// photos in another order are not. An image that cannot be decoded is left out of the document and counted
+/// (`ImageImportResult.leftOut`); the hash still covers its bytes.
 public actor DocumentImporter: DocumentImporting {
     public let container: ModelContainer
     /// This device's `processingDeviceID` (`DeviceIdentity`): the importing device claims the document (T4).
@@ -48,52 +63,110 @@ public actor DocumentImporter: DocumentImporting {
         data: Data, fileName: String, contentType: UTType? = nil, source: DocumentSource = .file
     ) async -> ImportOutcome {
         let outcome = await run(data: data, fileName: fileName, contentType: contentType, source: source)
+        Self.log(outcome, items: 1, bytes: data.count, leftOut: 0, fileName: fileName)
+        return outcome
+    }
+
+    public func importImages(
+        _ items: [Data], fileName: String, title: String? = nil, source: DocumentSource = .image
+    ) async -> ImageImportResult {
+        let result = await runImages(items, fileName: fileName, title: title, source: source)
+        Self.log(
+            result.outcome, items: items.count, bytes: items.reduce(0) { $0 + $1.count }, leftOut: result.leftOut,
+            fileName: fileName)
+        return result
+    }
+
+    private static func log(_ outcome: ImportOutcome, items: Int, bytes: Int, leftOut: Int, fileName: String) {
         switch outcome {
         case .imported:
             Log.importing.notice(
-                "Imported: \(data.count, privacy: .public) bytes, \(fileName, privacy: .private)")
+                """
+                Imported: \(items, privacy: .public) items, \(leftOut, privacy: .public) left out, \
+                \(bytes, privacy: .public) bytes, \(fileName, privacy: .private)
+                """)
         case .duplicate(_, _, let isTrashed):
             Log.importing.notice(
                 """
-                Duplicate skipped: \(data.count, privacy: .public) bytes, trashed \(isTrashed, privacy: .public), \
-                \(fileName, privacy: .private)
+                Duplicate skipped: \(items, privacy: .public) items, \(bytes, privacy: .public) bytes, trashed \
+                \(isTrashed, privacy: .public), \(fileName, privacy: .private)
                 """)
         case .failed(let failure):
             Log.importing.error(
                 """
-                Not imported: \(String(describing: failure), privacy: .public), \(data.count, privacy: .public) \
-                bytes, \(fileName, privacy: .private)
+                Not imported: \(String(describing: failure), privacy: .public), \(items, privacy: .public) items, \
+                \(bytes, privacy: .public) bytes, \(fileName, privacy: .private)
                 """)
         }
-        return outcome
     }
 
     private func run(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
     {
-        guard Self.isPDF(fileName: fileName, contentType: contentType) else { return .failed(.unsupportedType) }
+        switch Self.kind(fileName: fileName, contentType: contentType) {
+        case nil:
+            return .failed(.unsupportedType)
+        case .image?:
+            return await runImages([data], fileName: fileName, title: nil, source: .image).outcome
+        case .pdf?:
+            break
+        }
         guard !data.isEmpty else { return .failed(.empty) }
         let hash = await Self.hash(data)
-        do {
-            let context = ModelContext(container)
-            if let duplicate = try Self.existingDocument(withHash: hash, in: context) { return duplicate }
-        } catch {
-            Log.importing.error("Duplicate check failed: \(Log.code(of: error), privacy: .public)")
-            return .failed(.storeFailed)
-        }
+        if let duplicate = firstDuplicateCheck(hash) { return duplicate }
         let pageCount: Int
         switch await Self.validate(data) {
         case .failure(let failure): return .failed(failure)
         case .success(let pages): pageCount = pages
         }
         if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
-        return commit(data: data, hash: hash, fileName: fileName, source: source, pageCount: pageCount)
+        return commit(
+            pdfData: data, hash: hash, title: importTitle(fromFileName: fileName), fileName: fileName,
+            source: source, pageCount: pageCount)
+    }
+
+    /// Images to one PDF: the hash over the original bytes, the first duplicate check, the PDF built (that
+    /// takes time, so the commit checks again), PDFKit's check of the built PDF, then `commit`.
+    private func runImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
+        -> ImageImportResult
+    {
+        guard items.contains(where: { !$0.isEmpty }) else { return ImageImportResult(outcome: .failed(.empty)) }
+        let hash = await Self.hash(concatenating: items)
+        if let duplicate = firstDuplicateCheck(hash) { return ImageImportResult(outcome: duplicate) }
+        guard let built = await Self.buildPDF(items) else {
+            return ImageImportResult(outcome: .failed(.unreadableImage))
+        }
+        let pageCount: Int
+        switch await Self.validate(built.data) {
+        case .failure: return ImageImportResult(outcome: .failed(.unreadableImage))
+        case .success(let pages): pageCount = pages
+        }
+        if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
+        let outcome = commit(
+            pdfData: built.data, hash: hash, title: title ?? importTitle(fromFileName: fileName),
+            fileName: fileName, source: source, pageCount: pageCount)
+        // Left out counts only for the document saved here.
+        guard case .imported = outcome else { return ImageImportResult(outcome: outcome) }
+        return ImageImportResult(outcome: outcome, leftOut: built.leftOut)
+    }
+
+    /// The duplicate check before the work, in a short-lived context: the existing document, a store failure,
+    /// or `nil` to go on.
+    private func firstDuplicateCheck(_ hash: String) -> ImportOutcome? {
+        do {
+            let context = ModelContext(container)
+            return try Self.existingDocument(withHash: hash, in: context)
+        } catch {
+            Log.importing.error("Duplicate check failed: \(Log.code(of: error), privacy: .public)")
+            return .failed(.storeFailed)
+        }
     }
 
     /// The second duplicate check, the insert and the one save, in a fresh context, without a suspension.
-    private func commit(data: Data, hash: String, fileName: String, source: DocumentSource, pageCount: Int)
-        -> ImportOutcome
-    {
+    /// `hash` is the input's (T3), `pdfData` what is stored.
+    private func commit(
+        pdfData data: Data, hash: String, title: String, fileName: String, source: DocumentSource, pageCount: Int
+    ) -> ImportOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         do {
@@ -104,7 +177,7 @@ public actor DocumentImporter: DocumentImporting {
         }
         let date = now()
         // `documentDate` stays the import time until step 10 detects it (PQ2); `isInbox` keeps its default.
-        let document = Document(title: importTitle(fromFileName: fileName), createdAt: date)
+        let document = Document(title: normalizedTitle(title), createdAt: date)
         document.originalFileName = fileName
         document.source = source
         document.contentHash = hash
@@ -130,15 +203,35 @@ public actor DocumentImporter: DocumentImporting {
         return .imported(instanceID: document.instanceID)
     }
 
-    /// Whether the file is a PDF: by the declared type, else by the name's extension.
-    static func isPDF(fileName: String, contentType: UTType?) -> Bool {
-        let type = contentType ?? UTType(filenameExtension: (fileName as NSString).pathExtension)
-        return type?.conforms(to: .pdf) ?? false
+    /// What the importer does with a file of a type.
+    enum Kind: Equatable {
+        case pdf, image
+    }
+
+    /// PDF or image by the declared type, else by the name's extension; `nil` for anything else.
+    static func kind(fileName: String, contentType: UTType?) -> Kind? {
+        guard let type = contentType ?? UTType(filenameExtension: (fileName as NSString).pathExtension) else {
+            return nil
+        }
+        if type.conforms(to: .pdf) { return .pdf }
+        if type.conforms(to: .image) { return .image }
+        return nil
     }
 
     @concurrent
     static func hash(_ data: Data) async -> String {
         ContentHash.sha256(data)
+    }
+
+    @concurrent
+    static func hash(concatenating items: [Data]) async -> String {
+        ContentHash.sha256(concatenating: items)
+    }
+
+    /// `PDFBuilder`, off the actor: decoding and compressing images takes time.
+    @concurrent
+    static func buildPDF(_ items: [Data]) async -> PDFBuilder.Result? {
+        PDFBuilder.makePDF(fromImageData: items)
     }
 
     /// PDFKit's check: the PDF opens, is not locked by a password (PQ9) and has a page. Off the actor. A PDF

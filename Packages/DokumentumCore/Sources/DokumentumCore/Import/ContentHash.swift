@@ -9,3 +9,14 @@ public enum ContentHash {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
+
+extension ContentHash {
+    /// The hash of `items` concatenated in their order, without building the concatenation: the fingerprint
+    /// of photos picked together (the predecessor's `PendingImport.make`). Equal to `sha256` of the joined
+    /// bytes.
+    public static func sha256(concatenating items: [Data]) -> String {
+        var hasher = SHA256()
+        for item in items { hasher.update(data: item) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}

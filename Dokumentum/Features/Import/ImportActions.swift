@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Opens the window's files picker. Equal to every other: a window's action never changes, so a new
-/// closure must not invalidate the views and menus that read it.
+/// Opens the window's files picker or its Photos picker. Equal to every other: a window's actions never
+/// change, so a new closure must not invalidate the views and menus that read it.
 struct ImportActions: Equatable {
     let pickFiles: @MainActor () -> Void
+    let pickPhotos: @MainActor () -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool { true }
 }
@@ -18,7 +19,7 @@ extension FocusedValues {
     @Entry var importActions: ImportActions?
 }
 
-/// The "+" menu in the list's toolbar, on both devices (PQ7): "Files…". Part 3 adds "Photos…".
+/// The "+" menu in the list's toolbar, on both devices (PQ7): "Files…" and "Photos…".
 struct ImportToolbarMenu: View {
     @Environment(\.importActions) private var actions
 
@@ -30,6 +31,13 @@ struct ImportToolbarMenu: View {
                 Label("Files…", systemImage: "folder")
             }
             .accessibilityIdentifier(AccessibilityID.importFiles)
+            .disabled(actions == nil)
+            Button {
+                actions?.pickPhotos()
+            } label: {
+                Label("Photos…", systemImage: "photo.on.rectangle")
+            }
+            .accessibilityIdentifier(AccessibilityID.importPhotos)
             .disabled(actions == nil)
         } label: {
             Label("Import", systemImage: "plus")

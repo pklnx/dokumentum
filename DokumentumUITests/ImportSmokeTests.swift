@@ -1,9 +1,10 @@
 import XCTest
 
-/// The import on an empty in-memory store (plan of #4, part 2): `-UITestImportSynthetic` imports three
-/// generated PDFs through the window's import controller, the third with the first one's bytes. The Inbox
-/// lists two documents and the notice names the skipped duplicate. Then the "+" menu and its files picker,
-/// for the evidence screenshots; the picker is cancelled.
+/// The import on an empty in-memory store (plan of #4, parts 2 and 3): `-UITestImportSynthetic` imports two
+/// generated PDFs, a generated portrait photo and the first PDF's bytes again through the window's import
+/// controller. The Inbox lists three documents, the notice names the skipped duplicate, and the photo opens
+/// as a PDF page. Then the "+" menu with "Files…" and "Photos…", and on the Mac its open panel (cancelled),
+/// on the iPhone the Photos picker, for the evidence screenshots.
 final class ImportSmokeTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -36,39 +37,69 @@ final class ImportSmokeTests: XCTestCase {
         XCTAssertTrue(
             notice.waitForNonExistence(timeout: 10), "the notice stayed after OK")
 
-        // Two documents in the Inbox: the duplicate added none.
+        // Three documents in the Inbox: the duplicate added none.
         let rows = ui.app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "documentList.row."))
-        let twoRows = XCTNSPredicateExpectation(
+        let threeRows = XCTNSPredicateExpectation(
             predicate: NSPredicate { query, _ in
                 guard let query = query as? XCUIElementQuery else { return false }
-                return Set(query.allElementsBoundByIndex.map(\.identifier)).count == 2
+                return Set(query.allElementsBoundByIndex.map(\.identifier)).count == 3
             }, object: rows)
-        XCTAssertEqual(XCTWaiter.wait(for: [twoRows], timeout: 30), .completed, "the Inbox does not list two documents")
-        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)).count, 2)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [threeRows], timeout: 30), .completed, "the Inbox does not list three documents")
+        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)).count, 3)
         ui.attachWindowScreenshot("4-result", to: self)
 
-        // The "+" menu and the files picker it opens (evidence only; cancelled).
+        // The photo (part 3): its PDF page, upright and portrait (the evidence screenshot shows it).
+        let photo = rows.matching(NSPredicate(format: "label CONTAINS %@", "Kassenbon Bäckerei")).firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 10), "no row for the imported photo")
+        #if os(macOS)
+            photo.click()
+        #else
+            photo.tap()
+        #endif
+        XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the photo's PDF did not appear")
+        ui.attachWindowScreenshot("5-photo-page", to: self)
+        #if os(iOS)
+            let back = ui.app.navigationBars.buttons.element(boundBy: 0)
+            XCTAssertTrue(back.waitForExistence(timeout: 10), "no back button")
+            back.tap()
+        #endif
+
+        // The "+" menu with "Files…" and "Photos…".
         ui.activate("import.menu")
         let files = ui.element("import.files")
         XCTAssertTrue(files.waitForExistence(timeout: 10), "no “Files…” item")
+        let photos = ui.element("import.photos")
+        XCTAssertTrue(photos.waitForExistence(timeout: 10), "no “Photos…” item")
         ui.attachWindowScreenshot("1-import-menu", to: self)
         #if os(macOS)
+            // The open panel opens and closes again. No screenshot of it, nor is the Photos picker opened: both
+            // show the Mac's own files and photo library (maintainer decision on #4, 2026-11-07).
             files.click()
             let panel = ui.app.sheets.firstMatch
-            if panel.waitForExistence(timeout: 20) {
-                ui.attachWindowScreenshot("2-open-panel", to: self)
-                ui.app.typeKey(.escape, modifierFlags: [])
-                XCTAssertTrue(panel.waitForNonExistence(timeout: 10), "the open panel stayed open")
-            } else {
-                XCTFail("no open panel")
-            }
+            XCTAssertTrue(panel.waitForExistence(timeout: 20), "no open panel")
+            ui.app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(panel.waitForNonExistence(timeout: 10), "the open panel stayed open")
         #else
-            files.tap()
-            // The document picker runs in another process; the window screenshot shows what it can of it.
-            let cancel = ui.app.buttons["Cancel"]
-            _ = cancel.waitForExistence(timeout: 20)
-            ui.attachWindowScreenshot("2-files-picker", to: self)
+            // The Photos picker runs in another process, but its elements are in the app's tree. On the simulator it
+            // shows the simulator's sample photos. Two of them, picked in reverse order, become one document that
+            // opens (PQ1, PQ5).
+            photos.tap()
+            let samplePhotos = ui.app.images.matching(identifier: "PXGGridLayout-Info")
+            XCTAssertTrue(samplePhotos.firstMatch.waitForExistence(timeout: 60), "the Photos picker shows no photos")
+            ui.attachWindowScreenshot("2-photos-picker", to: self)
+            samplePhotos.element(boundBy: 1).tap()
+            samplePhotos.element(boundBy: 0).tap()
+            ui.attachWindowScreenshot("6-photos-picked", to: self)
+            let add = ui.app.buttons.matching(
+                NSPredicate(format: "label IN %@", ["Done", "Add", "Fertig", "Hinzufügen"])
+            ).firstMatch
+            XCTAssertTrue(add.waitForExistence(timeout: 10), "no Done button in the Photos picker")
+            add.tap()
+            XCTAssertTrue(
+                ui.element("documentDetail.pdf").waitForExistence(timeout: 60), "the photos did not open as a document")
+            ui.attachWindowScreenshot("7-photos-document", to: self)
         #endif
     }
 }

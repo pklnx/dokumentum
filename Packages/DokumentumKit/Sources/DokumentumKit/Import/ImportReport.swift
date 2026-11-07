@@ -2,7 +2,7 @@ import Foundation
 
 /// Why a file was not imported.
 public enum ImportFailure: Error, Hashable, Sendable, CaseIterable {
-    /// The file is not of a type this step imports (PDF only, part 2 of #4).
+    /// The file is neither a PDF nor an image (parts 2 and 3 of #4).
     case unsupportedType
     /// The file has no bytes.
     case empty
@@ -11,6 +11,8 @@ public enum ImportFailure: Error, Hashable, Sendable, CaseIterable {
     case unreadablePDF
     /// The PDF needs a password to open (PQ9).
     case passwordProtected
+    /// An image file, or photos picked together, that ImageIO cannot decode: no page could be built (part 3).
+    case unreadableImage
     /// The file could not be read: no access, or a file in iCloud Drive that could not be downloaded.
     case couldNotRead
     /// The archive could not be read for the duplicate check, or refused the save.
@@ -25,6 +27,18 @@ public enum ImportOutcome: Hashable, Sendable {
     /// written. `title` is the existing document's title as stored (it can be empty).
     case duplicate(of: UUID, title: String, isTrashed: Bool)
     case failed(ImportFailure)
+}
+
+/// What the importer did with images that become one document (part 3 of #4): the outcome, and how many of
+/// the images could not be decoded and were left out of the document.
+public struct ImageImportResult: Hashable, Sendable {
+    public var outcome: ImportOutcome
+    public var leftOut: Int
+
+    public init(outcome: ImportOutcome, leftOut: Int = 0) {
+        self.outcome = outcome
+        self.leftOut = leftOut
+    }
 }
 
 /// The alert shown after an import (PQ4).
@@ -54,6 +68,8 @@ public struct ImportNoticeStrings: Sendable {
     public var duplicateLine: @Sendable (_ fileName: String, _ existingTitle: String, _ isTrashed: Bool) -> String
     /// One failure, naming the file.
     public var failureLine: @Sendable (_ fileName: String, _ failure: ImportFailure) -> String
+    /// Photos of a document that could not be read and were left out: "%lld photos could not be read …".
+    public var leftOutLine: @Sendable (_ count: Int) -> String
 
     public init(
         alreadyInArchive: @escaping @Sendable () -> String,
@@ -62,7 +78,8 @@ public struct ImportNoticeStrings: Sendable {
         failed: @escaping @Sendable () -> String,
         duplicatesHeading: @escaping @Sendable (Int) -> String,
         duplicateLine: @escaping @Sendable (String, String, Bool) -> String,
-        failureLine: @escaping @Sendable (String, ImportFailure) -> String
+        failureLine: @escaping @Sendable (String, ImportFailure) -> String,
+        leftOutLine: @escaping @Sendable (Int) -> String
     ) {
         self.alreadyInArchive = alreadyInArchive
         self.importedDuplicatesSkipped = importedDuplicatesSkipped
@@ -71,6 +88,7 @@ public struct ImportNoticeStrings: Sendable {
         self.duplicatesHeading = duplicatesHeading
         self.duplicateLine = duplicateLine
         self.failureLine = failureLine
+        self.leftOutLine = leftOutLine
     }
 }
 
@@ -80,10 +98,13 @@ public struct ImportReport: Hashable, Sendable {
     public struct Entry: Hashable, Sendable {
         public var fileName: String
         public var outcome: ImportOutcome
+        /// Photos of this entry's document that could not be read and were left out (part 3 of #4).
+        public var leftOut: Int
 
-        public init(fileName: String, outcome: ImportOutcome) {
+        public init(fileName: String, outcome: ImportOutcome, leftOut: Int = 0) {
             self.fileName = fileName
             self.outcome = outcome
+            self.leftOut = leftOut
         }
     }
 
@@ -93,8 +114,8 @@ public struct ImportReport: Hashable, Sendable {
         self.entries = entries
     }
 
-    public mutating func add(fileName: String, outcome: ImportOutcome) {
-        entries.append(Entry(fileName: fileName, outcome: outcome))
+    public mutating func add(fileName: String, outcome: ImportOutcome, leftOut: Int = 0) {
+        entries.append(Entry(fileName: fileName, outcome: outcome, leftOut: leftOut))
     }
 
     /// The new documents, in batch order.
@@ -117,6 +138,11 @@ public struct ImportReport: Hashable, Sendable {
         entries.compactMap { if case .failed(let failure) = $0.outcome { ($0.fileName, failure) } else { nil } }
     }
 
+    /// The photos left out of the batch's documents, all entries together.
+    public var leftOut: Int {
+        entries.reduce(0) { $0 + $1.leftOut }
+    }
+
     /// The document to open afterwards (PQ1): the one new document, or the existing one when the batch's only
     /// outcome was one duplicate. `nil` for several documents and for a batch without either.
     public var documentToOpen: DocumentToOpen? {
@@ -134,21 +160,24 @@ public struct ImportReport: Hashable, Sendable {
         case existing(UUID)
     }
 
-    /// The notice for this batch; `nil` when every file was imported (PQ4) or the batch was empty. Wording of
-    /// the predecessor's `ImportResult.notice`, with "Import failed" when nothing but failures came out.
+    /// The notice for this batch; `nil` when every file was imported whole (PQ4) or the batch was empty.
+    /// Wording of the predecessor's `ImportResult.notice`, with "Import failed" when nothing but failures came
+    /// out. Photos left out count like a failure: "Import partly failed", with their line last.
     public func notice(_ strings: ImportNoticeStrings) -> ImportNotice? {
         let duplicates = duplicates
         let failures = failures
-        guard !duplicates.isEmpty || !failures.isEmpty else { return nil }
+        let leftOut = leftOut
+        guard !duplicates.isEmpty || !failures.isEmpty || leftOut > 0 else { return nil }
         var lines: [String] = []
         if !duplicates.isEmpty {
             lines.append(strings.duplicatesHeading(duplicates.count))
             lines += duplicates.map { strings.duplicateLine($0.fileName, $0.title, $0.isTrashed) }
         }
         lines += failures.map { strings.failureLine($0.fileName, $0.failure) }
+        if leftOut > 0 { lines.append(strings.leftOutLine(leftOut)) }
         let importedCount = imported.count
         let title: String
-        if failures.isEmpty {
+        if failures.isEmpty, leftOut == 0 {
             title = importedCount == 0 ? strings.alreadyInArchive() : strings.importedDuplicatesSkipped(importedCount)
         } else {
             title = importedCount == 0 && duplicates.isEmpty ? strings.failed() : strings.partlyFailed()
