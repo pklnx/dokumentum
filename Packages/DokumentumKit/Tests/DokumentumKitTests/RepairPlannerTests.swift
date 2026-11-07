@@ -753,11 +753,13 @@ struct RepairPlannerTests {
                 blob(.text, 31, documentID: 5),
                 // Document 6's unlisted linked text alone is one text, not two.
                 blob(.file, 32, documentID: 6),
+                // A second orphan thumbnail, so orphan texts and thumbnails differ.
+                blob(.thumbnail, 33, documentID: 96),
             ]
         )
         var expected = RepairCounts()
         expected.orphanFiles = 2
-        expected.orphanThumbnails = 1
+        expected.orphanThumbnails = 2
         expected.documentsWithTwoFiles = 1
         expected.documentsWithTwoThumbnails = 2
         expected.orphanTexts = 1
