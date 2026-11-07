@@ -128,6 +128,32 @@ struct StoreChoiceTests {
         #expect(opened.container.configurations.first?.url == fallback)
     }
 
+    /// When the CloudKit open fails, the archive opens locally at the same file, so the user still sees it;
+    /// the second fallback file is not even created. The opener fails the CloudKit step without CloudKit:
+    /// the CloudKit configuration is built but never opened.
+    @Test func aFailedCloudKitOpenFallsBackToLocalAtTheSameFile() throws {
+        SQLLog.enable()
+        let folder = try TestSupport.makeTemporaryDirectory()
+        let url = folder.appending(path: "Archive.store")
+        let fallback = folder.appending(path: "Archive-local.store")
+        var tried: [(url: URL, cloudKit: String?)] = []
+        let failCloudKit: (ModelConfiguration) throws -> ModelContainer = { configuration in
+            tried.append((configuration.url, configuration.cloudKitContainerIdentifier))
+            if configuration.cloudKitContainerIdentifier != nil { throw CocoaError(.featureUnsupported) }
+            return try ArchiveStore.open(configuration)
+        }
+        let opened = ArchiveStore.makeContainer(
+            for: .cloudKit, at: url, fallbackURL: fallback, opener: failCloudKit)
+        TestSupport.keepAlive(opened.container)
+        #expect(opened.store == .local)
+        #expect(opened.container.configurations.first?.url == url)
+        #expect(opened.container.configurations.first?.cloudKitContainerIdentifier == nil)
+        #expect(tried.map(\.url) == [url, url])
+        #expect(tried.map(\.cloudKit) == [ArchiveStore.cloudKitContainerIdentifier, nil])
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(!FileManager.default.fileExists(atPath: fallback.path))
+    }
+
     /// Making a container changes no global state: only `openAtLaunch` records the store. Another test in this
     /// process may call `openAtLaunch(.inMemory(seed: false))` at the same time, so `opened` is either unset or
     /// that, never what this test made.
