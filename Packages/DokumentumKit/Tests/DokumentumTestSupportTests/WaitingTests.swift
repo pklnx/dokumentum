@@ -218,6 +218,15 @@ struct WaitingTests {
         #expect(!never)
     }
 
+    /// A main-actor test checks main-actor state: the condition runs on the caller's actor, and the waits let
+    /// the main actor run what sets it.
+    @Test @MainActor func waitUntilChecksMainActorState() async throws {
+        let state = MainActorFlag()
+        Task { @MainActor in state.isSet = true }
+        let reached = try await TestSupport.waitUntil { state.isSet }
+        #expect(reached)
+    }
+
     /// The overload for a condition that needs an actor's turn.
     @Test func waitUntilChecksAnAsynchronousCondition() async throws {
         let counter = Counter()
@@ -343,4 +352,9 @@ private actor Counter {
         value += 1
         return value
     }
+}
+
+/// State that is not `Sendable`, owned by a main-actor test.
+private final class MainActorFlag {
+    var isSet = false
 }
