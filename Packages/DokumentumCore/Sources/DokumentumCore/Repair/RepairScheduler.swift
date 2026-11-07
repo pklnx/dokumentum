@@ -89,7 +89,10 @@ public final class RepairScheduler {
     private func drain() async {
         repeat {
             isQueued = false
-            let report = await runner.run(hasCompletedImport: hasCompletedImport)
+            // Off the main actor: a model actor's default executor runs a job on the thread that enqueues it, so
+            // a call from here would run the whole repair on the main thread (measured on #56).
+            let (runner, flag) = (runner, hasCompletedImport)
+            let report = await Task.detached { await runner.run(hasCompletedImport: flag) }.value
             completedRuns += 1
             didFinishRun?(report)
         } while isQueued

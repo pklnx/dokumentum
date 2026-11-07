@@ -33,10 +33,19 @@ public enum CloudImportEvents {
     public static func importEnd(of notification: Notification) -> CloudImportEvent? {
         guard
             let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
-                as? NSPersistentCloudKitContainer.Event,
-            event.type == .import, event.endDate != nil
+                as? NSPersistentCloudKitContainer.Event
         else { return nil }
-        return CloudImportEvent(succeeded: event.succeeded)
+        return importEnd(type: event.type, endDate: event.endDate, succeeded: event.succeeded)
+    }
+
+    /// The filter itself, over the event's plain values: only an import that has ended counts. A setup or an
+    /// export never does, or a successful export would set `hasCompletedImport` and let pass 5 revive tombstones
+    /// whose end is still downloading.
+    public static func importEnd(
+        type: NSPersistentCloudKitContainer.EventType, endDate: Date?, succeeded: Bool
+    ) -> CloudImportEvent? {
+        guard type == .import, endDate != nil else { return nil }
+        return CloudImportEvent(succeeded: succeeded)
     }
 
     private final class Observer: @unchecked Sendable {

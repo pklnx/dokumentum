@@ -73,7 +73,39 @@ struct RepairSQLTests {
             // run fetched, so at most one such statement per relinked blob of the kind, and none without one.
             let byKey = selects.filter { $0.hasSuffix("WHERE  t0.Z_PK = ?") }
             #expect(byKey.count <= (pending ? 1 : 0), "\(byKey)")
-            #expect(selects.count == unlinked.count + byKey.count, "a SELECT of linked rows: \(selects)")
+            // `ConcurrentSaveWatcher` reads the rows the pass holds after each save to the store while the pass
+            // runs, its own save included: then the blob it just linked, by `instanceID`, once.
+            let watched = selects.filter { $0.hasSuffix("WHERE  t0.ZINSTANCEID IN  (?)") }
+            #expect(watched.count <= (pending ? 1 : 0), "\(watched)")
+            #expect(
+                selects.count == unlinked.count + byKey.count + watched.count, "a SELECT of linked rows: \(selects)")
+        }
+    }
+
+    /// The re-check read of a pass covers what the pass writes, not the archive (#56, review A): of 30
+    /// documents, one points at a tombstone. The run's only read of every document is its planning read; the
+    /// pass reads the one it re-points (`ZINSTANCEID IN (?)`), and the watcher the same one after the save.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func aPassReadsOnlyTheDocumentsItWrites() throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        try store.seed(
+            RepairSnapshot(
+                documents: [document(1, correspondent: 10)] + (2...30).map { document($0, correspondent: 11) },
+                metadata: [correspondent(10, "Old", mergedInto: 11), correspondent(11, "New")]))
+
+        let recording = try SQLLog.Recording()
+        let report = try RepairRun.perform(in: store.container, now: Date(), hasCompletedImport: true)
+        let statements = try recording.statements()
+
+        #expect(report.plan.operations.count == 1)
+        let documentReads = statements.filter { $0.hasPrefix("SELECT") && $0.contains("FROM ZDOCUMENT t0") }
+        let whole = documentReads.filter { !$0.contains("WHERE") }
+        #expect(whole.count == 1, "the archive is read once, to plan: \(documentReads)")
+        let byInstance = documentReads.filter { $0.contains("t0.ZINSTANCEID IN") }
+        #expect(!byInstance.isEmpty, "the pass read its document by instanceID: \(documentReads)")
+        for statement in byInstance {
+            #expect(statement.hasSuffix("IN  (?)"), "one document, not more: \(statement)")
         }
     }
 }

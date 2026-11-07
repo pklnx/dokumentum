@@ -258,9 +258,20 @@ from tests or the VM).
 re-point references to tombstones, merge same-name metadata into tombstones, break tag cycles, relink early
 blobs, revive tombstones; it never deletes (plan of #2, "Repair passes"). `RepairScheduler` runs it at launch,
 after debounced store changes (`StoreChangeObserver`) and at the end of a CloudKit import, only for stores on
-disk. A run reads a light snapshot (no linked blob is loaded; `RepairSQLTests` checks the SQL under `swift
-test`), saves once per pass that changed something and never otherwise, and re-checks every operation on a
-fresh read right before its save. Repair tests seed a `RepairSnapshot` into a store on disk
+disk, off the main thread. A run reads a light snapshot once to plan (no linked blob is loaded; `RepairSQLTests`
+checks the SQL under `swift test`), and saves once per pass that changed something and never otherwise. Each
+pass re-reads only the records it writes and re-checks every operation on that read (I6).
+
+**Concurrent saves (I6).** A `ModelContext` that saves over a row another save changed since it read it writes
+back the whole row, every field, not only the ones it changed (measured on #56: Core Data re-selects the row on
+the optimistic-locking conflict, and the `UPDATE` sets every field the stale object holds). So from a pass's
+re-read to its write, `ConcurrentSaveWatcher` reads the pass's rows after every save to the store (Core Data's
+`NSManagedObjectContextDidSave`, which app contexts and CloudKit imports post). If another save changed a row
+the pass wrote, the pass is undone in a second save: those rows get that save's values, the others what the pass
+read, and the next run plans again. Residual window: a save on another thread that commits before the pass's
+write but whose notification is handled only after it; that save's fields in the rows the pass wrote are lost.
+The external-storage data of a relinked blob is not compared. Repair tests seed a `RepairSnapshot` into a store
+on disk
 (`RepairStoreFixtures.swift`) and check `RepairInvariants` and that the store ends where the planner's
 simulation ends (`CheckedRepair`).
 
