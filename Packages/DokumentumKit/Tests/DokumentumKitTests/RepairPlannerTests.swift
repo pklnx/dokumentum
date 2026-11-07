@@ -630,6 +630,7 @@ struct RepairPlannerTests {
                 correspondent(12, "Z", created: 7, mergedInto: 10, mergedAt: planningTime),
             ]
         )
+        #expect(RepairPlanner.repointReferences(in: state).isEmpty, "pass 1 leaves a loop to pass 5")
         let context = RepairContext(now: planningTime, hasCompletedImport: false)
         let (plan, after) = planned(state, context: context)
         #expect(plan.operations == [.revive(tombstone: uuid(10))], "needs neither 30 days nor an import")
