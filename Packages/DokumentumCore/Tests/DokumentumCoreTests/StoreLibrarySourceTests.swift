@@ -138,14 +138,14 @@ struct StoreLibrarySourceTests {
 }
 
 /// The footer's "Sync off" reason comes from the store that opened, never from a guess.
-struct SyncOffReasonTests {
+struct StoreSyncOffReasonTests {
     @Test func eachOpenedStoreHasItsReason() {
-        #expect(SyncOffReason.reason(choice: .cloudKit, opened: .cloudKit) == nil)
-        #expect(SyncOffReason.reason(choice: .local, opened: .local) == .noICloudAccess)
-        #expect(SyncOffReason.reason(choice: .local, opened: .localFallback) == .noICloudAccess)
-        #expect(SyncOffReason.reason(choice: .cloudKit, opened: .local) == .cloudKitStoreFailed)
-        #expect(SyncOffReason.reason(choice: .cloudKit, opened: .localFallback) == .cloudKitStoreFailed)
-        #expect(SyncOffReason.reason(choice: .inMemory(seed: true), opened: .sampleData) == .sampleData)
-        #expect(SyncOffReason.reason(choice: .inMemory(seed: false), opened: .inMemory) == .sampleData)
+        #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .cloudKit) == nil)
+        #expect(StoreSyncOffReason.reason(choice: .local, opened: .local) == .noICloudAccess)
+        #expect(StoreSyncOffReason.reason(choice: .local, opened: .localFallback) == .noICloudAccess)
+        #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .local) == .cloudKitStoreFailed)
+        #expect(StoreSyncOffReason.reason(choice: .cloudKit, opened: .localFallback) == .cloudKitStoreFailed)
+        #expect(StoreSyncOffReason.reason(choice: .inMemory(seed: true), opened: .sampleData) == .sampleData)
+        #expect(StoreSyncOffReason.reason(choice: .inMemory(seed: false), opened: .inMemory) == .sampleData)
     }
 }

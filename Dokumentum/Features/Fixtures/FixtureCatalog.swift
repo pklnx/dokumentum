@@ -6,8 +6,9 @@
     /// `5EED…` pattern), so UI tests can address each document. Data, not UI text: nothing here is
     /// localized. Only in Debug builds; a Release build contains none of it (plan of #3, T3).
     ///
-    /// The fixed `instanceID`s are fine here because these values are never written to a synced store
-    /// (plan of #3, Revision 1).
+    /// The fixed `instanceID`s reach a store only in the in-memory `-UITestSeed` store, which never syncs.
+    /// "Add Sample Documents" writes the same samples with fresh `instanceID`s and keeps the fixed values
+    /// only as `id` (`FixtureSeeder`; plan of #3, Revision 1).
     enum FixtureCatalog {
         /// What a sample document's file is.
         enum File: Sendable, Equatable {
@@ -119,8 +120,8 @@
         static let notPDFData = Data("This is a plain text file, not a PDF.".utf8)
     }
 
-    /// The library source of Debug builds: the sample library, never changing. Each PDF is generated
-    /// when it is opened, off the main actor.
+    /// The sample library as a source without a store, for unit tests of `LibraryModel`: never
+    /// changing. Each PDF is generated when it is opened, off the main actor.
     struct FixtureLibrarySource: LibrarySource {
         let changes = AsyncStream<Void> { _ in }
 

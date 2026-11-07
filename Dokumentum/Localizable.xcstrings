@@ -207,6 +207,17 @@
         }
       }
     },
+    "Sync off: %@" : {
+      "comment" : "Sidebar footer while the store does not sync; the argument is the reason, e.g. “this build has no iCloud access”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synchronisierung aus: %@"
+          }
+        }
+      }
+    },
     "Tags" : {
       "comment" : "Sidebar section with the tag tree.",
       "localizations" : {
@@ -306,6 +317,17 @@
         }
       }
     },
+    "sample data, not saved" : {
+      "comment" : "Reason in “Sync off: %@”: an in-memory store with sample documents (UI tests, screenshots).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beispieldaten, nicht gespeichert"
+          }
+        }
+      }
+    },
     "tags: %@" : {
       "comment" : "Part of a list row's VoiceOver label. %@ is the list of tag names, e.g. “Tax and Auto › Golf”.",
       "localizations" : {
@@ -313,6 +335,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tags: %@"
+          }
+        }
+      }
+    },
+    "the iCloud store could not be opened" : {
+      "comment" : "Reason in “Sync off: %@”: the CloudKit store failed to open and a local store opened instead.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "der iCloud-Speicher konnte nicht geöffnet werden"
+          }
+        }
+      }
+    },
+    "this build has no iCloud access" : {
+      "comment" : "Reason in “Sync off: %@”: a build without the CloudKit entitlement uses a local store.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "dieser Build hat keinen iCloud-Zugriff"
           }
         }
       }

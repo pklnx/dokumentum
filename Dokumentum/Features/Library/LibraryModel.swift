@@ -107,9 +107,11 @@ final class LibraryModel {
 
     // MARK: Sidebar
 
-    /// The display path of each of the document's tags, sorted, for rows and VoiceOver.
+    /// The display path of each of the document's tags, sorted, for rows and VoiceOver. A tag the
+    /// sidebar does not list (a tombstone whose chain ends nowhere) shows by its name.
     func tagPaths(of document: LibraryDocument) -> [String] {
-        document.tagIDs.map(tree.displayPath(of:)).filter { !$0.isEmpty }
+        document.tagIDs.map { tree.tags[$0] == nil ? snapshot.unlistedTagNames[$0] ?? "" : tree.displayPath(of: $0) }
+            .filter { !$0.isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
