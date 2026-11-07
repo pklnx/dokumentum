@@ -15,9 +15,13 @@ public struct RepairCounts: Hashable, Sendable {
     /// Unlinked, and no present document has their `documentID`.
     public var orphanFiles = 0
     public var orphanThumbnails = 0
-    /// Documents that two or more files claim: linked to it, or unlinked with its `id` as `documentID`.
+    public var orphanTexts = 0
+    /// Documents that two or more files claim: linked to it (listed, or in `linkedBlobs`), or unlinked with its
+    /// `id` as `documentID`. In the store a document links one blob of a kind at most (a to-one relationship),
+    /// so there "two" always means one linked blob plus unlinked candidates.
     public var documentsWithTwoFiles = 0
     public var documentsWithTwoThumbnails = 0
+    public var documentsWithTwoTexts = 0
     /// `id`s held by more than one document, or by more than one metadata record of one kind.
     public var idGroupsWithSeveralRecords = 0
     public var tombstones = 0
@@ -217,6 +221,7 @@ public enum RepairPlanner {
         for kind in BlobKind.allCases {
             let blobs = snapshot.blobs.filter { $0.kind == kind }
             let taken = Set(blobs.compactMap(\.linkedDocumentInstanceID))
+                .union(documents.filter { $0.linkedBlobs.contains(kind) }.map(\.instanceID))
             var free = Dictionary(grouping: documents.filter { !taken.contains($0.instanceID) }, by: \.id)
             for blob in keeperOrder(blobs) where blob.linkedDocumentInstanceID == nil {
                 guard let documentID = blob.documentID, let document = free[documentID]?.first else { continue }
@@ -265,16 +270,19 @@ public enum RepairPlanner {
         func documentsWithTwo(_ kind: BlobKind) -> Int {
             let blobs = snapshot.blobs.filter { $0.kind == kind }
             return snapshot.documents.count { document in
-                blobs.count {
+                let listed = blobs.count {
                     $0.linkedDocumentInstanceID == document.instanceID
                         || ($0.linkedDocumentInstanceID == nil && $0.documentID == document.id)
-                } >= 2
+                }
+                return listed + (document.linkedBlobs.contains(kind) ? 1 : 0) >= 2
             }
         }
         counts.orphanFiles = snapshot.blobs.count { $0.kind == .file && isOrphan($0) }
         counts.orphanThumbnails = snapshot.blobs.count { $0.kind == .thumbnail && isOrphan($0) }
         counts.documentsWithTwoFiles = documentsWithTwo(.file)
         counts.documentsWithTwoThumbnails = documentsWithTwo(.thumbnail)
+        counts.orphanTexts = snapshot.blobs.count { $0.kind == .text && isOrphan($0) }
+        counts.documentsWithTwoTexts = documentsWithTwo(.text)
         counts.idGroupsWithSeveralRecords = Dictionary(grouping: snapshot.documents, by: \.id).values
             .count { $0.count > 1 }
         for kind in MetadataKind.allCases {

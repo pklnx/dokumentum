@@ -14,10 +14,15 @@ public enum MetadataKind: String, Hashable, Sendable, CaseIterable {
     case tag
 }
 
-/// The kinds of large-data record that belong to a document.
+/// The kinds of large-data record that belong to a document: one each per document, linked through a
+/// to-one relationship of `Document`.
 public enum BlobKind: String, Hashable, Sendable, CaseIterable {
+    /// `DocumentFile`, the PDF.
     case file
+    /// `DocumentThumbnail`.
     case thumbnail
+    /// `DocumentText`, the extracted text.
+    case text
 }
 
 /// A document as the repair sees it. Records are named by `instanceID`, because records can share an `id`.
@@ -37,6 +42,11 @@ public struct DocumentSnapshot: Hashable, Sendable, KeeperOrdered {
     public var sourceRaw: String
     public var textSourceRaw: String
     public var processingStateRaw: String
+    /// The kinds of which this document holds a linked blob that the snapshot does not list in `blobs`. The
+    /// store reads them from the document row (`file != nil` and so on), so a repair run never loads a linked
+    /// blob; every function here treats such a kind like a listed blob linked to this document. Only states
+    /// the store can hold are meaningful: a kind here has no listed blob linked to this document.
+    public var linkedBlobs: Set<BlobKind>
 
     public init(
         instanceID: UUID,
@@ -48,7 +58,8 @@ public struct DocumentSnapshot: Hashable, Sendable, KeeperOrdered {
         tags: Set<UUID> = [],
         sourceRaw: String = "file",
         textSourceRaw: String = "",
-        processingStateRaw: String = "pending"
+        processingStateRaw: String = "pending",
+        linkedBlobs: Set<BlobKind> = []
     ) {
         self.instanceID = instanceID
         self.id = id
@@ -60,6 +71,7 @@ public struct DocumentSnapshot: Hashable, Sendable, KeeperOrdered {
         self.sourceRaw = sourceRaw
         self.textSourceRaw = textSourceRaw
         self.processingStateRaw = processingStateRaw
+        self.linkedBlobs = linkedBlobs
     }
 }
 
@@ -100,7 +112,7 @@ public struct MetadataSnapshot: Hashable, Sendable, KeeperOrdered {
     public var isLive: Bool { mergedIntoID == nil }
 }
 
-/// A `DocumentFile` or `DocumentThumbnail` as the repair sees it.
+/// A `DocumentFile`, `DocumentThumbnail` or `DocumentText` as the repair sees it.
 public struct BlobSnapshot: Hashable, Sendable, KeeperOrdered {
     public var kind: BlobKind
     public var instanceID: UUID

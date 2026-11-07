@@ -1,0 +1,73 @@
+# DokumentumSchemaV1 1.0.0
+entity Correspondent uniqueness=none
+attribute Correspondent.createdAt type=date optional=no default=generated external=no transient=no
+relationship Correspondent.documents to=Document many=yes optional=yes inverse=correspondent delete=nullify ordered=no
+attribute Correspondent.id type=uuid optional=no default=generated external=no transient=no
+attribute Correspondent.instanceID type=uuid optional=no default=generated external=no transient=no
+attribute Correspondent.mergedAt type=date optional=yes default=none external=no transient=no
+attribute Correspondent.mergedIntoID type=uuid optional=yes default=none external=no transient=no
+attribute Correspondent.name type=string optional=no default="" external=no transient=no
+entity Document uniqueness=none
+attribute Document.contentHash type=string optional=no default="" external=no transient=no
+relationship Document.correspondent to=Correspondent many=no optional=yes inverse=documents delete=nullify ordered=no
+attribute Document.createdAt type=date optional=no default=generated external=no transient=no
+attribute Document.deletedAt type=date optional=yes default=none external=no transient=no
+attribute Document.documentDate type=date optional=no default=generated external=no transient=no
+relationship Document.documentType to=DocumentType many=no optional=yes inverse=documents delete=nullify ordered=no
+relationship Document.file to=DocumentFile many=no optional=yes inverse=document delete=cascade ordered=no
+attribute Document.fileSize type=int64 optional=no default=0 external=no transient=no
+attribute Document.id type=uuid optional=no default=generated external=no transient=no
+attribute Document.instanceID type=uuid optional=no default=generated external=no transient=no
+attribute Document.isInbox type=bool optional=no default=true external=no transient=no
+attribute Document.modifiedAt type=date optional=no default=generated external=no transient=no
+attribute Document.originalFileName type=string optional=no default="" external=no transient=no
+attribute Document.pageCount type=int64 optional=no default=0 external=no transient=no
+attribute Document.processingClaimedAt type=date optional=yes default=none external=no transient=no
+attribute Document.processingDeviceID type=string optional=no default="" external=no transient=no
+attribute Document.processingStateRaw type=string optional=no default="pending" external=no transient=no
+attribute Document.sourceRaw type=string optional=no default="file" external=no transient=no
+relationship Document.tags to=Tag many=yes optional=yes inverse=documents delete=nullify ordered=no
+relationship Document.text to=DocumentText many=no optional=yes inverse=document delete=cascade ordered=no
+attribute Document.textSourceRaw type=string optional=no default="" external=no transient=no
+relationship Document.thumbnail to=DocumentThumbnail many=no optional=yes inverse=document delete=cascade ordered=no
+attribute Document.title type=string optional=no default="" external=no transient=no
+entity DocumentFile uniqueness=none
+attribute DocumentFile.createdAt type=date optional=no default=generated external=no transient=no
+relationship DocumentFile.document to=Document many=no optional=yes inverse=file delete=nullify ordered=no
+attribute DocumentFile.documentID type=uuid optional=yes default=none external=no transient=no
+attribute DocumentFile.id type=uuid optional=no default=generated external=no transient=no
+attribute DocumentFile.instanceID type=uuid optional=no default=generated external=no transient=no
+attribute DocumentFile.pdfData type=binary optional=yes default=none external=yes transient=no
+entity DocumentText uniqueness=none
+attribute DocumentText.createdAt type=date optional=no default=generated external=no transient=no
+relationship DocumentText.document to=Document many=no optional=yes inverse=text delete=nullify ordered=no
+attribute DocumentText.documentID type=uuid optional=yes default=none external=no transient=no
+attribute DocumentText.extractedText type=string optional=no default="" external=no transient=no
+attribute DocumentText.id type=uuid optional=no default=generated external=no transient=no
+attribute DocumentText.instanceID type=uuid optional=no default=generated external=no transient=no
+entity DocumentThumbnail uniqueness=none
+attribute DocumentThumbnail.createdAt type=date optional=no default=generated external=no transient=no
+relationship DocumentThumbnail.document to=Document many=no optional=yes inverse=thumbnail delete=nullify ordered=no
+attribute DocumentThumbnail.documentID type=uuid optional=yes default=none external=no transient=no
+attribute DocumentThumbnail.id type=uuid optional=no default=generated external=no transient=no
+attribute DocumentThumbnail.imageData type=binary optional=yes default=none external=yes transient=no
+attribute DocumentThumbnail.instanceID type=uuid optional=no default=generated external=no transient=no
+entity DocumentType uniqueness=none
+attribute DocumentType.createdAt type=date optional=no default=generated external=no transient=no
+relationship DocumentType.documents to=Document many=yes optional=yes inverse=documentType delete=nullify ordered=no
+attribute DocumentType.id type=uuid optional=no default=generated external=no transient=no
+attribute DocumentType.instanceID type=uuid optional=no default=generated external=no transient=no
+attribute DocumentType.mergedAt type=date optional=yes default=none external=no transient=no
+attribute DocumentType.mergedIntoID type=uuid optional=yes default=none external=no transient=no
+attribute DocumentType.name type=string optional=no default="" external=no transient=no
+entity Tag uniqueness=none
+relationship Tag.children to=Tag many=yes optional=yes inverse=parent delete=nullify ordered=no
+attribute Tag.colorHex type=string optional=no default="#3B82F6" external=no transient=no
+attribute Tag.createdAt type=date optional=no default=generated external=no transient=no
+relationship Tag.documents to=Document many=yes optional=yes inverse=tags delete=nullify ordered=no
+attribute Tag.id type=uuid optional=no default=generated external=no transient=no
+attribute Tag.instanceID type=uuid optional=no default=generated external=no transient=no
+attribute Tag.mergedAt type=date optional=yes default=none external=no transient=no
+attribute Tag.mergedIntoID type=uuid optional=yes default=none external=no transient=no
+attribute Tag.name type=string optional=no default="" external=no transient=no
+relationship Tag.parent to=Tag many=no optional=yes inverse=children delete=nullify ordered=no

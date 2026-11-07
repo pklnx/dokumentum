@@ -26,6 +26,7 @@ FOLDERS = [
     "DokumentumUITests",
     "Packages/*/Tests",
     "Packages/DokumentumKit/Sources/DokumentumTestSupport",
+    "Packages/DokumentumCore/Sources/DokumentumCoreTestSupport",
 ]
 
 PATTERNS = [
@@ -167,12 +168,14 @@ def self_test() -> None:
     fine = "let a = 1\n"
     wait = "try await Task.sleep(for: x)\n"
     support = "Packages/DokumentumKit/Sources/DokumentumTestSupport"
+    core_support = "Packages/DokumentumCore/Sources/DokumentumCoreTestSupport"
     every_folder = {
         "DokumentumTests/A.swift": fine,
         "DokumentumUITests/A.swift": fine,
         "Packages/DokumentumKit/Tests/KitTests/A.swift": fine,
         "Packages/DokumentumCore/Tests/CoreTests/A.swift": fine,
         f"{support}/A.swift": fine,
+        f"{core_support}/A.swift": fine,
     }
     trees = [
         ("all fine", every_folder, []),
@@ -183,6 +186,7 @@ def self_test() -> None:
         ("Core test", {**every_folder, "Packages/DokumentumCore/Tests/CoreTests/B.swift": wait},
          ["Packages/DokumentumCore/Tests/CoreTests/B.swift:1"]),
         ("test support", {**every_folder, f"{support}/B.swift": wait}, [f"{support}/B.swift:1"]),
+        ("Core test support", {**every_folder, f"{core_support}/B.swift": wait}, [f"{core_support}/B.swift:1"]),
         ("the app is not checked", {**every_folder, "Dokumentum/B.swift": wait}, []),
         ("a package's sources are not checked", {**every_folder, "Packages/DokumentumCore/Sources/Core/B.swift": wait},
          []),

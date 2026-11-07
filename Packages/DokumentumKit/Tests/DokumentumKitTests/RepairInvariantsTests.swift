@@ -288,6 +288,12 @@ struct RepairInvariantsTests {
         #expect(decisions(state, .relink(blob: uuid(10), to: uuid(2))) == [.i5], "not the oldest document")
         #expect(decisions(state, .relink(blob: uuid(10), to: uuid(1))).isEmpty)
         #expect(decisions(state, .relink(blob: uuid(99), to: uuid(1))) == [.i5], "not present")
+        var lightState = state
+        lightState.documents[0].linkedBlobs = [.file]
+        #expect(
+            decisions(lightState, .relink(blob: uuid(10), to: uuid(1))) == [.i5],
+            "the document's row already holds a file")
+        #expect(decisions(lightState, .relink(blob: uuid(10), to: uuid(2))).isEmpty)
     }
 
     @Test func i5FindsARevivalWithoutACause() {

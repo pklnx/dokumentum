@@ -361,6 +361,7 @@ public enum RepairInvariants {
             return "relinked \(blob), not the oldest unlinked blob"
         }
         let taken = Set(state.blobs.filter { $0.kind == record.kind }.compactMap(\.linkedDocumentInstanceID))
+            .union(state.documents.filter { $0.linkedBlobs.contains(record.kind) }.map(\.instanceID))
         let free = state.documents.filter { $0.id == record.documentID && !taken.contains($0.instanceID) }
         return RepairPlanner.keeperOrder(free).first?.instanceID == document
             ? nil : "relinked \(blob) to \(document), not the oldest free document"

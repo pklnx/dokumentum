@@ -130,7 +130,7 @@ while the work it waits for has not had its turn yet. A fixed sleep "long enough
 request is the same bet.
 
 `scripts/check-test-waits.py`, part of `lint`, enforces this in `DokumentumTests`, `DokumentumUITests`,
-`Packages/*/Tests` and `DokumentumTestSupport`. A use that is justified stays when it says why, on its
+`Packages/*/Tests`, `DokumentumTestSupport` and `DokumentumCoreTestSupport`. A use that is justified stays when it says why, on its
 line or in the comment lines directly above it: `// allow-wait: <reason>`. Waits of XCTest with a
 condition (`waitForExistence`) are fine: UI tests use them. The script does not flag `clock.sleep(for:)`
 on a `Clock`: its pattern leaves out `.sleep(`, because `debounce.sleep(…)` must stay allowed. That rule
@@ -189,11 +189,83 @@ detaches captures it first. Each step adds the fields it needs. `TestEnvironment
 whether this run stays away from real data; it holds in the app host, in the test bundles `xcodebuild`
 runs, and under `swift test`.
 
+## Data model and sync
+
+The model is `DokumentumSchemaV1` in `Packages/DokumentumCore/Sources/DokumentumCore/Model/`, seven
+`@Model` classes that `NSPersistentCloudKitContainer` mirrors to the private database of
+`iCloud.space.pklnx.Dokumentum` (record types `CD_<entity>`). Features name the typealiases in `Model.swift`
+(`Document`, `Tag`, …), never a schema version. Fields and reasons: [plan.md](./plan.md), section 3.3.
+
+**CloudKit rules.** Every attribute has a default or is optional; every relationship is optional and has an
+inverse; nothing is `@Attribute(.unique)`; no delete rule is `deny`; no relationship is ordered. Synced enums
+are raw `String`s read through typed accessors with a fallback (`source`, `textSource`, `processingState`); a
+setter never writes a fallback back. `SchemaTests` checks the model, `scripts/check-schema-snapshots.py` the
+committed snapshots.
+
+**Large data in records of their own.** `Document` holds no large field. The PDF (`DocumentFile`), the
+thumbnail (`DocumentThumbnail`) and the extracted text (`DocumentText`) are one each per document, behind
+to-one cascade relationships. SwiftData on 27 ignores `propertiesToFetch` (measured on #29), so this shape is
+what keeps lists light. **A document's file and text are created once, at import**, in the same save as the
+document, the text with an empty `extractedText`. Later steps write `pdfData` and `extractedText` in place and
+never insert a second file or text; processing requires `text != nil`. A second one that still arises (two
+devices before syncing) stays unlinked and is counted by the repair, never deleted.
+
+**The store.** `ArchiveStore` is the one boundary around it. `StoreChoice` decides per launch:
+
+| Launch | Store |
+|---|---|
+| A test run (`TestEnvironment.isRunningTests`) | in memory, never synced |
+| DEBUG build with `-UITestSeed YES` / `-UITestEmptyStore YES` | in memory, with sample data / empty |
+| With the CloudKit entitlement (every iOS build; a signed macOS build) | `Application Support/Dokumentum/Dokumentum.store`, mirrored to CloudKit |
+| Without it (the VM's unsigned macOS build) | the same file, local only |
+
+If CloudKit cannot open, the same file opens locally; if that fails too, `Dokumentum-local.store` next to it.
+The store is in the app's own container, never in the app group. UI tests pass the launch arguments as
+`-key value` pairs: a bare flag swallows the next argument. Tests get containers from
+`DokumentumCoreTestSupport` (`TestSupport.makeContainer()`, `makeContainerOnDisk()`), which keeps them alive
+until the end of the run.
+
+**The list query.** `DocumentListQuery` is the only list fetch of documents and returns `DocumentSummary`
+values (inbox, all, trash). `DocumentListQuerySQLTests` records the SQL of the fetch with `SQLLog` and fails if
+a statement names `ZDOCUMENTTEXT`, `ZDOCUMENTFILE` or `ZDOCUMENTTHUMBNAIL`. Core Data's SQL can be read only
+under `swift test` (in the `xctest` runner of `xcodebuild` it logs none, measured on #29), so that test runs
+in `swift test --package-path Packages/DokumentumCore` and is skipped in Xcode. Core Data reads the SQL
+setting once per process, at its first store: `SQLLog.enable()` comes before any store opens (the container
+helpers call it).
+
+**Adding schema version N** (only with a real model change: identical versions have the same checksum):
+1. Copy the models into `DokumentumSchemaV<N>` (version `N.0.0`) and change them additively: new attributes
+   optional or defaulted, new relationships optional with an inverse.
+2. Add it to `DokumentumMigrationPlan.schemas` with one `.lightweight(fromVersion:toVersion:)` stage. A
+   conversion of synced data is a one-time pass behind a flag, never a custom stage.
+3. Move the typealiases in `Model.swift` to V(N).
+4. Write the snapshot: `DOKUMENTUM_SCHEMA_DUMP_DIRECTORY=$PWD/Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema
+   swift test --package-path Packages/DokumentumCore --filter SchemaTests` writes `schema-v1.txt`; add the
+   same for `schema-v<N>.txt` in `SchemaTests`. Review the diff: only added lines.
+5. Add a `StoreMigrationTests` case that writes a store with V(N-1) and opens it with V(N).
+
+**Production freezes a version.** Until step 8 nothing is in Production, and V1 may still change in place (with
+its snapshot, in the same PR, with the reason; a non-additive change also needs "Reset Development
+Environment" in the CloudKit Console, a maintainer step). The PR that records step 8's deploy adds `1` to
+`Schema/production-versions.txt`; from then on `check-schema-snapshots.py --base <sha>` fails if that snapshot
+changes. Deploying the schema to Production is the maintainer's.
+
+**Development schema.** CloudKit creates record types when records are first saved, or all at once through
+`DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
+from tests or the VM).
+
+## Logging
+
+Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, subsystem
+`space.pklnx.Dokumentum`. Counts, enum states and error domain and code are `.public`; names, titles, paths,
+text and `localizedDescription` are `.private`. App code never prints, and a crash message is a fixed text.
+`scripts/check-logging.py` enforces this in the app, the share extension and the packages' library code.
+
 ## Checks
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), and flags tests that wait for time (`scripts/check-test-waits.py`). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
@@ -210,6 +282,10 @@ python3 scripts/check-localization.py --self-test
 python3 scripts/check-localization.py --catalog
 python3 scripts/check-test-waits.py --self-test
 python3 scripts/check-test-waits.py
+python3 scripts/check-logging.py --self-test
+python3 scripts/check-logging.py
+python3 scripts/check-schema-snapshots.py --self-test
+python3 scripts/check-schema-snapshots.py --base origin/main
 ```
 
 `--catalog` only reads the catalog. `python3 scripts/check-localization.py <derived data path>` also

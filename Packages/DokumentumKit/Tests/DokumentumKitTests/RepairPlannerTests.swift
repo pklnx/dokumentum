@@ -548,6 +548,34 @@ struct RepairPlannerTests {
         #expect(planned(state).plan.operations == [.relink(blob: uuid(2), to: uuid(1))])
     }
 
+    /// A kind the document row says is linked (`linkedBlobs`, the store's light snapshot) counts like a listed
+    /// linked blob: no relink onto it, and the unlinked candidate is counted as a second one.
+    @Test(arguments: BlobKind.allCases)
+    func aDocumentWithAnUnlistedLinkedBlobGetsNoSecond(kind: BlobKind) {
+        let state = RepairSnapshot(
+            documents: [document(1, linkedBlobs: [kind])],
+            blobs: [blob(kind, 3, documentID: 1)]
+        )
+        let (plan, after) = planned(state)
+        #expect(plan.isEmpty)
+        #expect(after.blob(3).linkedDocumentInstanceID == nil)
+        let counts = RepairPlanner.counts(in: after)
+        let doubles: [Int] = [
+            counts.documentsWithTwoFiles, counts.documentsWithTwoThumbnails, counts.documentsWithTwoTexts,
+        ]
+        let expected: [Int] = BlobKind.allCases.map { $0 == kind ? 1 : 0 }
+        #expect(doubles == expected)
+    }
+
+    /// Another kind in `linkedBlobs` does not block a relink.
+    @Test func anUnlistedLinkedFileDoesNotBlockTheText() {
+        let state = RepairSnapshot(
+            documents: [document(1, linkedBlobs: [.file, .thumbnail])],
+            blobs: [blob(.text, 3, documentID: 1)]
+        )
+        #expect(planned(state).plan.operations == [.relink(blob: uuid(3), to: uuid(1))])
+    }
+
     @Test func aDocumentWithABlobGetsNoSecond() {
         let state = RepairSnapshot(
             documents: [document(1)],
@@ -699,7 +727,10 @@ struct RepairPlannerTests {
 
     @Test func countsAreCounted() {
         let state = RepairSnapshot(
-            documents: [document(1), document(2), document(3, id: 1001), document(4)],
+            documents: [
+                document(1), document(2), document(3, id: 1001), document(4), document(5, linkedBlobs: [.text]),
+                document(6, linkedBlobs: [.text]),
+            ],
             metadata: [
                 correspondent(10, "A", id: 7), correspondent(11, "B", id: 7),
                 tag(12, "C", id: 8), tag(13, "D", id: 8, mergedInto: 99),
@@ -717,13 +748,22 @@ struct RepairPlannerTests {
                 // Two thumbnails for document 2 too, so the two kinds count differently.
                 blob(.thumbnail, 27, documentID: 2, linkedTo: 2),
                 blob(.thumbnail, 28, documentID: 2, linkedTo: 2),
+                // Texts: one orphan; document 5 holds an unlisted linked text and has an unlinked one.
+                blob(.text, 30, documentID: 97),
+                blob(.text, 31, documentID: 5),
+                // Document 6's unlisted linked text alone is one text, not two.
+                blob(.file, 32, documentID: 6),
+                // A second orphan thumbnail, so orphan texts and thumbnails differ.
+                blob(.thumbnail, 33, documentID: 96),
             ]
         )
         var expected = RepairCounts()
         expected.orphanFiles = 2
-        expected.orphanThumbnails = 1
+        expected.orphanThumbnails = 2
         expected.documentsWithTwoFiles = 1
         expected.documentsWithTwoThumbnails = 2
+        expected.orphanTexts = 1
+        expected.documentsWithTwoTexts = 1
         expected.idGroupsWithSeveralRecords = 3
         expected.tombstones = 2
         #expect(RepairPlanner.counts(in: state) == expected)
@@ -837,6 +877,9 @@ struct RepairPlannerTests {
         linked.blobs[0].linkedDocumentInstanceID = uuid(2)
         #expect(plan.apply(to: linked, now: planningTime).applied.isEmpty)
         #expect(RepairPlan([.relink(blob: uuid(3), to: uuid(2))]).apply(to: state, now: planningTime).applied.isEmpty)
+        var linkedInTheRow = state
+        linkedInTheRow.documents[0].linkedBlobs = [.file]
+        #expect(plan.apply(to: linkedInTheRow, now: planningTime).applied.isEmpty, "the row says it has a file")
     }
 
     @Test func aReviveSkipsARecordThatIsLiveAgain() {
