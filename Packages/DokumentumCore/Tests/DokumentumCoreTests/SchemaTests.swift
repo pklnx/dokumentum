@@ -92,7 +92,8 @@ struct SchemaTests {
             _ = try Self.committedSnapshot(number)
         }
         #expect(
-            Bundle.module.url(forResource: "schema-v\(versions.count + 1)", withExtension: "txt", subdirectory: "Schema")
+            Bundle.module.url(
+                forResource: "schema-v\(versions.count + 1)", withExtension: "txt", subdirectory: "Schema")
                 == nil, "a snapshot without a version in the migration plan")
     }
 }
