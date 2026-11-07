@@ -3,7 +3,7 @@ import DokumentumKit
 import SwiftUI
 
 /// The sidebar (PQ2): Library (Inbox, All Documents), then Tags, Correspondents and Document Types,
-/// each row with its count. Trash joins at the bottom in part 4 of #3.
+/// each row with its count, and Trash at the bottom (part 4 of #3).
 struct SidebarView: View {
     @Bindable var model: LibraryModel
     /// The footer's "Sync off" reason; no footer for `nil`.
@@ -35,6 +35,9 @@ struct SidebarView: View {
                         row(.documentType(type.instanceID), title: Text(verbatim: type.name), symbol: "doc.text")
                     }
                 }
+            }
+            Section {
+                row(.trash, title: Text("Trash"), symbol: "trash")
             }
         }
         // On the list itself, before the footer: an identifier after it would also replace the footer's

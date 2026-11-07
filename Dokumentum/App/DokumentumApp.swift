@@ -62,6 +62,7 @@ struct DokumentumApp: App {
             .defaultSize(width: 1100, height: 720)
             .commands {
                 LibraryCommands()
+                TrashCommands()
                 ImportCommands()
                 #if DEBUG
                     DebugCommands()

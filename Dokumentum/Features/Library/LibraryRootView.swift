@@ -9,6 +9,8 @@ import SwiftUI
 /// the root's type, because the Mac's saved window state names the root's type (plan of #3, T5).
 struct LibraryRootView: View {
     @State private var model: LibraryModel
+    /// The window's trash actions (plan of #3, part 4).
+    @State private var trash: LibraryTrash
     /// The window's imports (#4, part 2), on the app's one importer.
     @State private var importController: ImportController
     /// The footer's reason and the debug command's confirmation come from it.
@@ -19,6 +21,7 @@ struct LibraryRootView: View {
     init(source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting) {
         let model = LibraryModel(source: source, loadNow: false)
         _model = State(initialValue: model)
+        _trash = State(initialValue: LibraryTrash(model: model))
         _importController = State(initialValue: ImportController(importer: importer, library: model))
         self.launchStore = launchStore
     }
@@ -30,6 +33,7 @@ struct LibraryRootView: View {
             DocumentListView(model: model)
         } detail: {
             DocumentDetailView(model: model)
+                .safeAreaInset(edge: .top, spacing: 0) { TrashedDocumentBar(trash: trash) }
         }
         #if os(macOS)
             // The info panel, a trailing column of the whole window (plan of #3, part 3). Not on the detail
@@ -42,6 +46,9 @@ struct LibraryRootView: View {
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)
+        .environment(trash)
+        .focusedSceneValue(\.libraryTrash, trash)
+        .modifier(EmptyTrashConfirmation(trash: trash))
         .modifier(ImportSupport(controller: importController, launchStore: launchStore))
         #if DEBUG
             .modifier(sampleDocumentsCommand)

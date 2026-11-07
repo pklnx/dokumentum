@@ -3,7 +3,7 @@ import DokumentumKit
 import SwiftUI
 
 /// One list row (PQ4): the title, or "Untitled document"; the document date; correspondent and type;
-/// the tag names. No thumbnail until step 5. VoiceOver reads it as one sentence.
+/// the tag names; in the trash, since when. No thumbnail until step 5. VoiceOver reads it as one sentence.
 struct DocumentRow: View {
     let document: LibraryDocument
     /// The display paths of the document's tags, sorted.
@@ -42,6 +42,15 @@ struct DocumentRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            if let trashedSince {
+                Label {
+                    Text(trashedSince)
+                } icon: {
+                    Image(systemName: "trash")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
@@ -49,7 +58,14 @@ struct DocumentRow: View {
     }
 
     private var accessibilityLabel: String {
-        document.accessibilityLabel(displayTitle: title, tagPaths: tagPaths, strings: Self.accessibilityStrings)
+        let label = document.accessibilityLabel(
+            displayTitle: title, tagPaths: tagPaths, strings: Self.accessibilityStrings)
+        return trashedSince.map { "\(label), \(String(localized: $0))" } ?? label
+    }
+
+    /// "In the Trash since 7 Nov 2026" for a trashed document (plan of #3, part 4).
+    private var trashedSince: LocalizedStringResource? {
+        document.deletedAt.map { "In the Trash since \($0.formatted(date: .abbreviated, time: .omitted))" }
     }
 
     /// The words of the VoiceOver label, localized here: Kit emits no strings.

@@ -13,6 +13,7 @@ struct DocumentListView: View {
                     DocumentRow(document: document, tagPaths: model.tagPaths(of: document))
                 }
                 .accessibilityIdentifier(AccessibilityID.documentRow(document.instanceID))
+                .modifier(TrashRowActions(document: document))
             }
         }
         // On the list itself, before the overlay: an identifier after it would also replace the empty
@@ -30,6 +31,11 @@ struct DocumentListView: View {
             ToolbarItem(placement: .primaryAction) {
                 ImportToolbarMenu()
             }
+            if model.selection == .trash {
+                ToolbarItem(placement: .primaryAction) {
+                    EmptyTrashButton()
+                }
+            }
         }
         #if os(macOS)
             .navigationSplitViewColumnWidth(min: 260, ideal: 320)
@@ -40,6 +46,8 @@ struct DocumentListView: View {
     private var emptyState: some View {
         if model.selection == .inbox {
             ContentUnavailableView("Inbox empty", systemImage: "tray")
+        } else if model.selection == .trash {
+            ContentUnavailableView("Trash empty", systemImage: "trash")
         } else {
             ContentUnavailableView("No documents", systemImage: "doc")
         }

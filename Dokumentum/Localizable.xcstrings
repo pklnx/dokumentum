@@ -284,6 +284,28 @@
         }
       }
     },
+    "Empty Trash" : {
+      "comment" : "Confirmation of Empty Trash: the button that deletes.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb leeren"
+          }
+        }
+      }
+    },
+    "Empty Trash…" : {
+      "comment" : "Toolbar button in the trash and File menu item: asks before deleting the trash's documents for good.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb leeren …"
+          }
+        }
+      }
+    },
     "Expand" : {
       "comment" : "VoiceOver action on a tag with nested tags.",
       "localizations" : {
@@ -424,6 +446,17 @@
         }
       }
     },
+    "In the Trash since %@" : {
+      "comment" : "A trashed document's row and detail: the date it went into the trash.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Papierkorb seit %@"
+          }
+        }
+      }
+    },
     "Inbox" : {
       "comment" : "Sidebar row, list title and Go menu item: documents not filed yet.",
       "localizations" : {
@@ -464,6 +497,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bibliothek"
+          }
+        }
+      }
+    },
+    "Move to Trash" : {
+      "comment" : "Context menu, swipe action and Edit menu item: moves the document into the trash.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In den Papierkorb legen"
           }
         }
       }
@@ -584,6 +628,58 @@
         }
       }
     },
+    "Permanently delete %lld documents?" : {
+      "comment" : "Title of the Empty Trash confirmation: how many documents it deletes.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Dokument endgültig löschen?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dokumente endgültig löschen?"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Permanently delete 1 document?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Permanently delete %lld documents?"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Restore" : {
+      "comment" : "Context menu, swipe action and detail button: takes the document out of the trash.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wiederherstellen"
+          }
+        }
+      }
+    },
     "Show Info" : {
       "comment" : "Toolbar button and Mac menu item (Document › Show Info, ⌘I) that shows the info panel.",
       "localizations" : {
@@ -661,6 +757,17 @@
         }
       }
     },
+    "This cannot be undone." : {
+      "comment" : "Message of the Empty Trash confirmation.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das kann nicht rückgängig gemacht werden."
+          }
+        }
+      }
+    },
     "This file is already in the archive and was skipped:" : {
       "comment" : "Import notice: heading of one skipped duplicate.",
       "localizations" : {
@@ -690,12 +797,23 @@
       }
     },
     "Trash" : {
-      "comment" : "List title of the trash.",
+      "comment" : "Sidebar row and list title of the trash.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Papierkorb"
+          }
+        }
+      }
+    },
+    "Trash empty" : {
+      "comment" : "The trash list has no documents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb leer"
           }
         }
       }
