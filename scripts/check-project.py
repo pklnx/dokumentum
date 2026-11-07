@@ -19,7 +19,8 @@ diff. Python only, so it also runs on Linux (the `lint` check):
 - Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, SIGNING_OVERRIDES
   are not set in the project or a target, and Config/Unsigned.xcconfig holds exactly its three
   macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig, which is never committed, and
-  conditions on an SDK name no version: this script resolves them on the bare SDK names.
+  uses only the conditions in XCCONFIG_CONDITIONS: this script resolves them on the bare SDK names, and
+  Xcode also honours patterns that match only versioned names, such as [sdk=macosx*.*].
 - No setting of Xcode's "App Sandbox & Hardened Runtime" category is set (CAPABILITY_SETTINGS): these
   inject entitlements past the files. The one exception is ENABLE_HARDENED_RUNTIME = NO in
   Project.xcconfig, until step 8 decides hardened runtime. The App Sandbox comes from the macOS
@@ -105,6 +106,8 @@ CAPABILITY_SETTINGS = {
     "RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION",
 }
 ALLOWED_INCLUDE = '#include? "Local.xcconfig"'
+# Every condition Project.xcconfig may use, as a whole. A list, not a pattern: see the docstring.
+XCCONFIG_CONDITIONS = {"", "[sdk=iphone*]", "[sdk=iphoneos*]", "[sdk=iphonesimulator*]", "[sdk=macosx*]"}
 
 # Identifiers and entitlements: docs/development/plan.md, section 2.
 TEAM = "88GY2V9C2A"
@@ -390,9 +393,9 @@ def check_xcconfig(text, settings):
         problems.append(f"{XCCONFIG}: sets {key}; a build that signs differently says so on its command line")
     for key, lines in sorted(settings.items()):
         for condition, _ in lines:
-            if any(re.search(r"\d", pattern) for pattern in re.findall(r"\[sdk=([^\]]*)\]", condition)):
-                problems.append(f"{XCCONFIG}: {key}{condition} names an SDK version, which this script cannot "
-                                "resolve; use [sdk=macosx*] or [sdk=iphone*]")
+            if condition not in XCCONFIG_CONDITIONS:
+                problems.append(f"{XCCONFIG}: {key}{condition} uses a condition this script cannot resolve; "
+                                "use [sdk=macosx*] or [sdk=iphone*]")
     if settings.get("DEVELOPMENT_TEAM") != [("", TEAM)]:
         problems.append(f"{XCCONFIG}: DEVELOPMENT_TEAM must be one line with the team {TEAM}")
     if settings.get("CODE_SIGN_STYLE") != [("", "Automatic")]:
@@ -501,12 +504,45 @@ def check_local_xcconfig(root):
     return []
 
 
+def swift_code(text):
+    """Swift source without its comments (block comments nest) and string literals."""
+    token = re.compile(r'"""|"|//|/\*')
+    code = []
+    position = 0
+    while True:
+        match = token.search(text, position)
+        if not match:
+            code.append(text[position:])
+            return "".join(code)
+        code.append(text[position:match.start()] + " ")
+        position = match.end()
+        if match.group() == "//":
+            end = text.find("\n", position)
+            position = end if end != -1 else len(text)
+        elif match.group() == "/*":
+            depth = 1
+            while depth and position < len(text):
+                inner = re.compile(r"/\*|\*/").search(text, position)
+                if not inner:
+                    position = len(text)
+                    break
+                depth += 1 if inner.group() == "/*" else -1
+                position = inner.end()
+        elif match.group() == '"""':
+            end = text.find('"""', position)
+            position = end + 3 if end != -1 else len(text)
+        else:
+            position = re.compile(r'(?:\\.|[^"\\\n])*"?').match(text, position).end()
+
+
 def check_share_sources(root):
-    """The extension never opens the store: no import of the store's or the model's framework."""
+    """The extension never opens the store: no import of the store's or the model's framework. Looks for
+    the keyword in the code, not for a line that starts with it: an import may follow an access level, an
+    attribute, a `;` or a comment, and it may span lines."""
     problems = []
-    pattern = re.compile(r"^\s*(?:@\w+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?(\w+)", re.M)
+    pattern = re.compile(r"\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?`?(\w+)")
     for path in sorted((root / SHARE_FOLDER).rglob("*.swift")):
-        for module in pattern.findall(path.read_text(encoding="utf-8")):
+        for module in pattern.findall(swift_code(path.read_text(encoding="utf-8"))):
             if module in SHARE_FORBIDDEN_IMPORTS:
                 problems.append(f"{path.relative_to(root)}: imports {module}; the extension never opens the store "
                                 "(plan.md, section 3.4)")
@@ -1076,10 +1112,36 @@ def self_test():
         ("xcconfig with #  include?", in_xcconfig('#  include? "Unsigned.xcconfig"'), "the only include allowed"),
         ("unsigned file with # include", edit(UNSIGNED_XCCONFIG, "// A comment", '# include "Sneaky.xcconfig"'), "includes another file"),
         ("entitlements for one SDK version pattern", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27*] = Config/x.plist"),
-         "DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27*] names an SDK version"),
+         "DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27*] uses a condition"),
         ("entitlements for one exact SDK", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx27.0] = Config/x.plist"),
-         "names an SDK version"),
-        ("identity for one SDK version", in_xcconfig("CODE_SIGN_IDENTITY[sdk=macosx27*] = Apple Development"), "names an SDK version"),
+         "uses a condition"),
+        ("identity for one SDK version", in_xcconfig("CODE_SIGN_IDENTITY[sdk=macosx27*] = Apple Development"), "uses a condition"),
+        ("a pattern for versioned names only", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx*.*] = Config/x.plist"),
+         "[sdk=macosx*.*] uses a condition"),
+        ("the same on the key itself", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS[sdk=*.*] = Config/x.plist"), "[sdk=*.*] uses a condition"),
+        ("a pattern with a question mark", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS[sdk=macosx?*] = Config/x.plist"),
+         "[sdk=macosx?*] uses a condition"),
+        ("the same with a space", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS [sdk=macosx*.*] = Config/x.plist"), "[sdk=macosx*.*] uses a condition"),
+        ("a condition for every SDK", in_xcconfig_last("MY_SETTING[sdk=*] = x"), "[sdk=*] uses a condition"),
+        ("two conditions in one bracket", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS[arch=arm64,sdk=macosx*.*] = Config/x.plist"), "uses a condition"),
+        ("a condition on the architecture", in_xcconfig_last("CODE_SIGN_ENTITLEMENTS[arch=arm64] = Config/x.plist"), "uses a condition"),
+        ("a condition on the configuration", in_xcconfig_last("MY_SETTING[config=Debug] = x"), "uses a condition"),
+        ("iphone* is fine", in_xcconfig_last("MY_SETTING[sdk=iphone*] = x"), None),
+        ("iphoneos* is fine", in_xcconfig_last("MY_SETTING[sdk=iphoneos*] = x"), None),
+        ("iphonesimulator* is fine", in_xcconfig_last("MY_SETTING[sdk=iphonesimulator*] = x"), None),
+        ("macosx* is fine", in_xcconfig_last("MY_SETTING[sdk=macosx*] = x"), None),
+        # What Xcode writes keeps passing.
+        ("$(inherited) in the xcconfig is fine", in_xcconfig_last("OTHER_SWIFT_FLAGS = $(inherited) -DSHARE"), None),
+        ("$(inherited) on a target is fine", edit(PROJECT, "A9 = {isa = XCBuildConfiguration; buildSettings = {",
+                                                  'A9 = {isa = XCBuildConfiguration; buildSettings = {\n\t\t\tOTHER_SWIFT_FLAGS = "$(inherited) -DSHARE";'),
+         None),
+        ("$(inherited) in a list on a target is fine", edit(PROJECT, "A9 = {isa = XCBuildConfiguration; buildSettings = {",
+                                                            'A9 = {isa = XCBuildConfiguration; buildSettings = {\n\t\t\tOTHER_LDFLAGS = ("$(inherited)", "-ObjC", );'),
+         None),
+        ("Xcode's forms together are fine", lambda root: (
+            edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolder = PlugIns;")(root),
+            edit(PROJECT, 'dstPath = "";', "")(root),
+            edit(PROJECT, "platformFilters = (ios, );", "platformFilter = ios;")(root)), None),
         ("xcconfig OTHER_CODE_SIGN_FLAGS", in_xcconfig("OTHER_CODE_SIGN_FLAGS = --options runtime"), "sets OTHER_CODE_SIGN_FLAGS"),
         ("xcconfig OTHER_CODE_SIGN_FLAGS with a condition", in_xcconfig("OTHER_CODE_SIGN_FLAGS[sdk=macosx*] = --options runtime"),
          "sets OTHER_CODE_SIGN_FLAGS"),
@@ -1132,6 +1194,21 @@ def self_test():
         (".xcode-version empty", edit(XCODE_VERSION, "27.1\n", "\n"), XCODE_VERSION),
         (".xcode-version missing", remove(XCODE_VERSION), XCODE_VERSION),
     ]
+    # Every way to write an import fails, for both modules; what is no import does not.
+    for module in sorted(SHARE_FORBIDDEN_IMPORTS):
+        for form in ("import {}", "internal import {}", "public import {}", "package import {}", "private import {}",
+                     "fileprivate import {}", "@preconcurrency import {}", "@preconcurrency internal import {}",
+                     "@testable import {}", "@_exported import {}", "@_spi(Foo) import {}", "@_spi(Foo) public import {}",
+                     "import UIKit; import {}", "import UIKit;import {}", "/* c */ import {}", "/* a /* b */ c */ import {}",
+                     "/** c */\nimport {}", "import /* c */ {}", "import\n{}", "internal\nimport {}", "    import {}",
+                     "import struct {}.X", "import {}.X", "import `{}`", "#if DEBUG\nimport {}\n#endif",
+                     'let a = "//"; import {}', 'let a = "/*"; import {}; let b = "*/"'):
+            source = form.format(module) + "\n"
+            cases.append((f"the extension: {source!r}", write(f"{SHARE_FOLDER}/Store.swift", source), f"imports {module}"))
+        for form in ("// import {}", "/* import {} */", "/* a /* b */ import {} */", "/// import {}", 'let a = "import {}"',
+                     'let a = """\nimport {}\n"""', "let importantValue = {}", "let imports = 1 // {}", "import UIKit // {}"):
+            source = form.format(module) + "\n"
+            cases.append((f"the extension, no import: {source!r}", write(f"{SHARE_FOLDER}/Store.swift", source), None))
     # Every setting of the category fails in the xcconfig, on a target and on the project.
     for name in sorted(CAPABILITY_SETTINGS - {"ENABLE_HARDENED_RUNTIME"}):
         cases += [
