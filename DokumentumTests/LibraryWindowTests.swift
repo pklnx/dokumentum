@@ -42,7 +42,8 @@ struct LibraryWindowTests {
     /// model, so creating it must not read the library; the window reads it when it appears.
     @Test func creatingTheRootViewReadsNothing() {
         let source = ScriptedSource()
-        _ = LibraryRootView(source: source, launchStore: LaunchStore(choice: .local, opened: .local))
+        _ = LibraryRootView(
+            source: source, launchStore: LaunchStore(choice: .local, opened: .local), importer: StubImporter())
         #expect(source.reads.count == 0)
 
         let model = LibraryModel(source: source, loadNow: false)
@@ -87,7 +88,9 @@ struct LibraryWindowTests {
     func theWindowsSampleCommandAsksForStoresOnDisk(
         choice: StoreChoice, opened: ArchiveStore.OpenedStore, asks: Bool
     ) {
-        let view = LibraryRootView(source: ScriptedSource(), launchStore: LaunchStore(choice: choice, opened: opened))
+        let view = LibraryRootView(
+            source: ScriptedSource(), launchStore: LaunchStore(choice: choice, opened: opened), importer: StubImporter()
+        )
         #expect(view.sampleDocumentsCommand.asksFirst == asks)
     }
 

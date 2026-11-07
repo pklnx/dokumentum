@@ -14,6 +14,9 @@ struct DokumentumApp: App {
     let launchStore: LaunchStore
     /// Runs the repair passes; `nil` for an in-memory store.
     let repair: RepairScheduler?
+    /// The one importer of the app (plan of #4, N2): every window's `ImportController` uses it, so all
+    /// imports go through one actor.
+    let importer: DocumentImporter
 
     init() {
         var choice = ArchiveStore.currentChoice()
@@ -39,6 +42,7 @@ struct DokumentumApp: App {
         // The repair (#2, part 3) for the stores on disk only: in-memory stores of tests and UI tests never start
         // it. A launch run now, then after store changes and CloudKit imports.
         repair = choice.isOnDisk ? RepairScheduler.start(for: container) : nil
+        importer = DocumentImporter(container: container, deviceID: DeviceIdentity.processingDeviceID())
     }
 
     var body: some Scene {
@@ -48,7 +52,8 @@ struct DokumentumApp: App {
         WindowGroup(id: "library") {
             // One source per window: each window's model reads its own change events. Creating them reads
             // nothing: the library is read when the window appears, then after each save.
-            LibraryRootView(source: StoreLibrarySource(container: container), launchStore: launchStore)
+            LibraryRootView(
+                source: StoreLibrarySource(container: container), launchStore: launchStore, importer: importer)
         }
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)
@@ -58,6 +63,7 @@ struct DokumentumApp: App {
             .commands {
                 LibraryCommands()
                 TrashCommands()
+                ImportCommands()
                 #if DEBUG
                     DebugCommands()
                 #endif

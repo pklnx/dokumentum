@@ -41,8 +41,9 @@ struct UITestApp {
         ProcessInfo.processInfo.environment["DOKUMENTUM_UI_LANGUAGE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    func launch(_ store: Store = .samples) {
-        var arguments = Self.launchArguments(store)
+    /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
+    func launch(_ store: Store = .samples, extraArguments: [String] = []) {
+        var arguments = Self.launchArguments(store) + extraArguments
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
         }

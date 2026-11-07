@@ -11,8 +11,13 @@ public struct ProcessingEnvironment: Sendable {
     /// and not the object, because `UserDefaults` is not `Sendable`.
     public var defaultsSuite: String?
 
-    public init(defaultsSuite: String?) {
+    /// Tests only: runs in `DocumentImporter` after a file was checked and before its document is inserted,
+    /// with the first duplicate check behind it (#4, part 2). `nil` in the app.
+    public var importWillCommit: (@Sendable () async -> Void)?
+
+    public init(defaultsSuite: String?, importWillCommit: (@Sendable () async -> Void)? = nil) {
         self.defaultsSuite = defaultsSuite
+        self.importWillCommit = importWillCommit
     }
 
     /// The app's environment.

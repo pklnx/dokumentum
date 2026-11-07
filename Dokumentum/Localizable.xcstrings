@@ -42,6 +42,99 @@
         }
       }
     },
+    "%lld files are already in the archive and were skipped:" : {
+      "comment" : "Import notice: heading of the list of skipped duplicates (two or more).",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Datei ist bereits im Archiv und wurde übersprungen:"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dateien sind bereits im Archiv und wurden übersprungen:"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 file is already in the archive and was skipped:"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld files are already in the archive and were skipped:"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld imported, duplicates skipped" : {
+      "comment" : "Import notice title: some files were imported, others were duplicates.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 importiert, Duplikate übersprungen"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld importiert, Duplikate übersprungen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 imported, duplicates skipped"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld imported, duplicates skipped"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Add" : {
+      "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinzufügen"
+          }
+        }
+      }
+    },
     "All Documents" : {
       "comment" : "Sidebar row, list title and Go menu item.",
       "localizations" : {
@@ -49,6 +142,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alle Dokumente"
+          }
+        }
+      }
+    },
+    "Already in the archive" : {
+      "comment" : "Import notice title: every file was a duplicate.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bereits im Archiv"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already in the archive"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen"
           }
         }
       }
@@ -75,6 +196,17 @@
         }
       }
     },
+    "Correspondent" : {
+      "comment" : "Info panel: the picker for the document's correspondent.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korrespondent"
+          }
+        }
+      }
+    },
     "Correspondents" : {
       "comment" : "Sidebar section.",
       "localizations" : {
@@ -82,6 +214,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Korrespondenten"
+          }
+        }
+      }
+    },
+    "Date" : {
+      "comment" : "Info panel: the document date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datum"
+          }
+        }
+      }
+    },
+    "Document" : {
+      "comment" : "Mac menu with the commands for the open document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokument"
+          }
+        }
+      }
+    },
+    "Document Type" : {
+      "comment" : "Info panel: the picker for the document's type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumenttyp"
           }
         }
       }
@@ -104,6 +269,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumentum"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "comment" : "iPhone: closes the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fertig"
           }
         }
       }
@@ -152,6 +328,23 @@
         }
       }
     },
+    "Files…" : {
+      "comment" : "Item of the list toolbar's import menu: opens the files picker.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dateien …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Files…"
+          }
+        }
+      }
+    },
     "Go" : {
       "comment" : "Mac menu with Inbox and All Documents.",
       "localizations" : {
@@ -159,6 +352,96 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gehe zu"
+          }
+        }
+      }
+    },
+    "Hide Info" : {
+      "comment" : "Toolbar button and Mac menu item (Document › Hide Info, ⌘I) while the info panel is shown: hides it.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informationen ausblenden"
+          }
+        }
+      }
+    },
+    "Import" : {
+      "comment" : "The list toolbar's import menu (a plus button).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importieren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import"
+          }
+        }
+      }
+    },
+    "Import Documents…" : {
+      "comment" : "Mac File menu item (⌘O): opens the files picker.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumente importieren …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Documents…"
+          }
+        }
+      }
+    },
+    "Import failed" : {
+      "comment" : "Import notice title: no file was imported.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import fehlgeschlagen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import failed"
+          }
+        }
+      }
+    },
+    "Import partly failed" : {
+      "comment" : "Import notice title: some files could not be imported.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import teilweise fehlgeschlagen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import partly failed"
+          }
+        }
+      }
+    },
+    "In Inbox" : {
+      "comment" : "Info panel: switch that keeps the document in the Inbox.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Posteingang"
           }
         }
       }
@@ -196,6 +479,17 @@
         }
       }
     },
+    "Info" : {
+      "comment" : "iPhone: title of the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info"
+          }
+        }
+      }
+    },
     "Library" : {
       "comment" : "Sidebar section with Inbox and All Documents.",
       "localizations" : {
@@ -218,6 +512,72 @@
         }
       }
     },
+    "Name" : {
+      "comment" : "Text field of the dialog that names a new correspondent, document type or tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "New Correspondent" : {
+      "comment" : "Title of the dialog that names a new correspondent.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Korrespondent"
+          }
+        }
+      }
+    },
+    "New Document Type" : {
+      "comment" : "Title of the dialog that names a new document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Dokumenttyp"
+          }
+        }
+      }
+    },
+    "New Tag" : {
+      "comment" : "Title of the dialog that names a new tag.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Tag"
+          }
+        }
+      }
+    },
+    "New Tag…" : {
+      "comment" : "Info panel: button that creates a new tag for the document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Tag …"
+          }
+        }
+      }
+    },
+    "New…" : {
+      "comment" : "Info panel: the picker item that creates a new correspondent or document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neu …"
+          }
+        }
+      }
+    },
     "No document selected" : {
       "comment" : "The detail column without an open document.",
       "localizations" : {
@@ -236,6 +596,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keine Dokumente"
+          }
+        }
+      }
+    },
+    "None" : {
+      "comment" : "Info panel: the picker item for no correspondent or no document type.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keiner"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "comment" : "Button that closes the import notice.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
           }
         }
       }
@@ -288,6 +676,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wiederherstellen"
+          }
+        }
+      }
+    },
+    "Show Info" : {
+      "comment" : "Toolbar button and Mac menu item (Document › Show Info, ⌘I) that shows the info panel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Informationen einblenden"
           }
         }
       }
@@ -365,6 +764,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Das kann nicht rückgängig gemacht werden."
+          }
+        }
+      }
+    },
+    "This file is already in the archive and was skipped:" : {
+      "comment" : "Import notice: heading of one skipped duplicate.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Datei ist bereits im Archiv und wurde übersprungen:"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This file is already in the archive and was skipped:"
+          }
+        }
+      }
+    },
+    "Title" : {
+      "comment" : "Info panel: the document's title field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Titel"
           }
         }
       }
@@ -486,6 +913,142 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "dieser Build hat keinen iCloud-Zugriff"
+          }
+        }
+      }
+    },
+    "“%@” could not be read and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ konnte nicht gelesen werden und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” could not be read and was not imported."
+          }
+        }
+      }
+    },
+    "“%@” could not be saved in the archive." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ konnte nicht im Archiv gesichert werden."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” could not be saved in the archive."
+          }
+        }
+      }
+    },
+    "“%@” is damaged or not a PDF and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist beschädigt oder kein PDF und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is damaged or not a PDF and was not imported."
+          }
+        }
+      }
+    },
+    "“%@” is empty and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist leer und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is empty and was not imported."
+          }
+        }
+      }
+    },
+    "“%@” is not a PDF and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist kein PDF und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is not a PDF and was not imported."
+          }
+        }
+      }
+    },
+    "“%@” is password-protected and was not imported." : {
+      "comment" : "Import notice line; %@ is the file name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ ist passwortgeschützt und wurde nicht importiert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is password-protected and was not imported."
+          }
+        }
+      }
+    },
+    "• %@ → “%@”" : {
+      "comment" : "Import notice line: the skipped file's name, then the title of the document that already has it.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• %1$@ → „%2$@“"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• %1$@ → “%2$@”"
+          }
+        }
+      }
+    },
+    "• %@ → “%@” (in the Trash)" : {
+      "comment" : "Import notice line: the skipped file's name, then the title of the trashed document that already has it.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• %1$@ → „%2$@“ (im Papierkorb)"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• %1$@ → “%2$@” (in the Trash)"
           }
         }
       }

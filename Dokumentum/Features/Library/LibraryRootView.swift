@@ -11,15 +11,18 @@ struct LibraryRootView: View {
     @State private var model: LibraryModel
     /// The window's trash actions (plan of #3, part 4).
     @State private var trash: LibraryTrash
+    /// The window's imports (#4, part 2), on the app's one importer.
+    @State private var importController: ImportController
     /// The footer's reason and the debug command's confirmation come from it.
     let launchStore: LaunchStore
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
-    init(source: any LibrarySource, launchStore: LaunchStore) {
+    init(source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting) {
         let model = LibraryModel(source: source, loadNow: false)
         _model = State(initialValue: model)
         _trash = State(initialValue: LibraryTrash(model: model))
+        _importController = State(initialValue: ImportController(importer: importer, library: model))
         self.launchStore = launchStore
     }
 
@@ -32,12 +35,21 @@ struct LibraryRootView: View {
             DocumentDetailView(model: model)
                 .safeAreaInset(edge: .top, spacing: 0) { TrashedDocumentBar(trash: trash) }
         }
+        #if os(macOS)
+            // The info panel, a trailing column of the whole window (plan of #3, part 3). Not on the detail
+            // column: there the inspector's split view sometimes did not lay out the detail's next state, and
+            // "Still downloading" stayed at a zero frame (measured in the German `UISmoke` runs of #57).
+            .inspector(isPresented: $model.isInfoPresented) {
+                DocumentInfoView(model: model)
+            }
+        #endif
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .focusedSceneValue(\.libraryModel, model)
         .environment(trash)
         .focusedSceneValue(\.libraryTrash, trash)
         .modifier(EmptyTrashConfirmation(trash: trash))
+        .modifier(ImportSupport(controller: importController, launchStore: launchStore))
         #if DEBUG
             .modifier(sampleDocumentsCommand)
         #endif

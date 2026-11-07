@@ -28,6 +28,9 @@ struct DocumentListView: View {
         }
         .navigationTitle(title)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ImportToolbarMenu()
+            }
             if model.selection == .trash {
                 ToolbarItem(placement: .primaryAction) {
                     EmptyTrashButton()
