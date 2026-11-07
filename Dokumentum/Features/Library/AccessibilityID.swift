@@ -35,6 +35,22 @@ enum AccessibilityID {
     static let detailNoSelection = "documentDetail.noSelection"
     static let detailLoading = "documentDetail.loading"
 
+    /// The detail's toolbar button that shows the info panel.
+    static let detailShowInfo = "documentDetail.showInfo"
+
+    /// The info panel (plan of #3, part 3) and its controls.
+    static let info = "documentInfo"
+    static let infoTitle = "documentInfo.title"
+    static let infoDate = "documentInfo.date"
+    static let infoInbox = "documentInfo.inbox"
+    static let infoCorrespondent = "documentInfo.correspondent"
+    static let infoDocumentType = "documentInfo.documentType"
+    static func infoTag(_ id: UUID) -> String { "documentInfo.tag.\(id.uuidString)" }
+    static let infoNewTag = "documentInfo.newTag"
+    static let infoNewName = "documentInfo.newName"
+    /// The iPhone sheet's "Done".
+    static let infoDone = "documentInfo.done"
+
     /// The sidebar footer's "Sync off" line.
     static let syncOffLine = "sidebar.syncOff"
 

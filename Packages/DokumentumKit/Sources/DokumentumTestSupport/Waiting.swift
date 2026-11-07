@@ -46,10 +46,14 @@ extension TestSupport {
     /// Checks `condition` until it holds; records an issue and returns `false` when it still does
     /// not hold after `timeout` (scaled, counted in rounds like `safetyNet`). Only for state that
     /// has no signal to wait for; prefer `TestSignal`, `Checkpoint` or `ManualDebounce`.
+    ///
+    /// It runs on the caller's actor (`isolation`), so a `@MainActor` test can check main-actor state, such as
+    /// a hosted view's.
     @discardableResult
     public static func waitUntil(
         _ comment: Comment? = nil, timeout: Duration = .seconds(30),
         interval: Duration = .milliseconds(20),
+        isolation: isolated (any Actor)? = #isolation,
         sourceLocation: SourceLocation = #_sourceLocation,
         _ condition: () throws -> Bool
     ) async throws -> Bool {
