@@ -26,6 +26,11 @@ struct DocumentListView: View {
             }
         }
         .navigationTitle(title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ImportToolbarMenu()
+            }
+        }
         #if os(macOS)
             .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         #endif
