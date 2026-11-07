@@ -28,11 +28,17 @@ final class SampleDocumentsSmokeTests: XCTestCase {
         ui.attachWindowScreenshot("1-empty-sync-off", to: self)
 
         #if os(macOS)
+            // In front again first: a system dialog can take the key focus, and the item stays disabled
+            // without a focused window (review B of #53).
+            ui.app.activate()
             let menu = ui.app.menuBars.menuBarItems["Debug"]
             XCTAssertTrue(menu.waitForExistence(timeout: 10), "no Debug menu")
             menu.click()
             let item = ui.app.menuBars.menuItems["Add Sample Documents"]
             XCTAssertTrue(item.waitForExistence(timeout: 10), "no “Add Sample Documents” item")
+            let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: item)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "“Add Sample Documents” stayed disabled")
             item.click()
         #else
             ui.activate("debug.menu")

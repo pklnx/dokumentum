@@ -19,8 +19,10 @@ struct DokumentumApp: App {
             var url = ArchiveStore.storeURL
             var fallbackURL = ArchiveStore.fallbackStoreURL
             if let folder = UITestLocalStore.folder(arguments: ProcessInfo.processInfo.arguments) {
-                // A fresh local store on disk in a temporary folder, never the archive's.
-                try? FileManager.default.removeItem(at: folder)
+                // A fresh local store on disk in a temporary folder, never the archive's; removed again when
+                // the app terminates.
+                UITestLocalStore.removeFolder(arguments: ProcessInfo.processInfo.arguments)
+                UITestLocalStore.removeFolderWhenTerminating(arguments: ProcessInfo.processInfo.arguments)
                 choice = .local
                 url = folder.appending(path: "Dokumentum.store")
                 fallbackURL = folder.appending(path: "Dokumentum-local.store")

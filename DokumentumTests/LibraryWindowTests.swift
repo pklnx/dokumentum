@@ -124,4 +124,38 @@ struct LibraryWindowTests {
         #expect(UITestLocalStore.folder(arguments: ["-UITestLocalStore"], temporaryDirectory: temporary) == nil)
         #expect(UITestLocalStore.folder(arguments: ["-UITestSeed", "YES"], temporaryDirectory: temporary) == nil)
     }
+
+    /// Removing the store's folder removes exactly `DokumentumUITest-<name>`, built from the validated name:
+    /// never a sibling, never the directory above, and nothing for an invalid name.
+    @Test func removingTheUITestLocalStoreRemovesOnlyItsFolder() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appending(
+            path: "DokumentumTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? fileManager.removeItem(at: root) }
+        let store = root.appending(path: "DokumentumUITest-Probe", directoryHint: .isDirectory)
+        let neighbours = [
+            root.appending(path: "Probe", directoryHint: .isDirectory),
+            root.appending(path: "DokumentumUITest-Other", directoryHint: .isDirectory),
+        ]
+        for folder in [store] + neighbours {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: folder.appending(path: "Dokumentum.store"))
+        }
+        func exists(_ url: URL) -> Bool { fileManager.fileExists(atPath: url.path(percentEncoded: false)) }
+
+        for name in ["", "..", "../Probe", "Probe/..", "*", "Probe Other"] {
+            #expect(
+                !UITestLocalStore.removeFolder(arguments: ["-UITestLocalStore", name], temporaryDirectory: root),
+                "\(name)")
+        }
+        #expect(!UITestLocalStore.removeFolder(arguments: ["-UITestSeed", "YES"], temporaryDirectory: root))
+        #expect(([store] + neighbours).allSatisfy(exists))
+
+        #expect(UITestLocalStore.removeFolder(arguments: ["-UITestLocalStore", "Probe"], temporaryDirectory: root))
+        #expect(!exists(store))
+        #expect(neighbours.allSatisfy(exists))
+        #expect(exists(root))
+        // Once removed, a second call finds nothing.
+        #expect(!UITestLocalStore.removeFolder(arguments: ["-UITestLocalStore", "Probe"], temporaryDirectory: root))
+    }
 }
