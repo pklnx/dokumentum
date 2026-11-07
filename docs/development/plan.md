@@ -59,13 +59,17 @@ are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 | Where | macOS | Xcode | SDKs | Simulator runtimes |
 |---|---|---|---|---|
-| Development VM (2026-11-06) | 27.2 (26B123) | 27.1 (27A9275), Swift 6.4 | iOS 27.1, iOS Simulator 27.1, macOS 27.0 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
-| Xcode Cloud (2026-11-06) | 27.0 (26A428) | 27.1 (27A9275) | iOS 27.1, iOS Simulator 27.1, macOS 27.0 | not recorded |
+| Development VM (2026-11-07) | 27.2 (26B123) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
+| Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
-The Xcode Cloud row comes from the `ci_post_clone.sh` output in the Xcode Cloud log
-of PR #37 (build 4, action `Default - iOS`, commit `87cc89a`, recorded on #1). The
-script ran there and printed "Xcode 27.1 matches .xcode-version; SDKs for iOS 27 and
-macOS 27 are there." It prints no simulator runtimes. The checks are
+The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`
+fails when the Xcode differs from `.xcode-version` (27.2) or has no SDK for iOS 27
+and macOS 27, and both test actions passed on PR #41, which pinned 27.2. The exact
+builds and SDK versions are in the Xcode Cloud log, which was not read for this
+row. The last log read was PR #37's (build 4, action `Default - iOS`, commit
+`87cc89a`, recorded on #1), under Xcode 27.1 (27A9275): macOS 27.0 (26A428), SDKs
+iOS 27.1, iOS Simulator 27.1 and macOS 27.0. The script prints no simulator
+runtimes. The checks are
 `Dokumentum | PR | Default - iOS`, `Dokumentum | PR | Default - macOS` and
 `Dokumentum | PR`.
 
@@ -218,6 +222,11 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   step 8's `Release`. So macOS tests in Xcode Cloud and in the VM run without the
   entitlements and outside the sandbox; only the maintainer's signed build
   exercises them.
+- State of the signed check (2026-11-07, the maintainer's delegation window on
+  #1): part 3 of step 0 merges on VM evidence, Xcode Cloud and its reviews. Its
+  signed output and the device check (maintainer step 9 on #1) are deferred, not
+  dropped: they come before signed or iCloud work relies on them, and #1 stays
+  open until then. So no signed build has exercised the entitlements yet.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
   in a macOS VM on the maintainer's MacBook Pro, with Claude Code there (local
   sessions, `gh` available). The VM has no signing identity and builds
