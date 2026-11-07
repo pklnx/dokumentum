@@ -247,7 +247,7 @@ public enum ArchiveStore {
     }
 
     /// Whether this build can open a CloudKit store. On macOS that needs the CloudKit entitlement: an
-    /// unsigned or ad hoc build (the development VM, Xcode Cloud's tests) has none and opens a local
+    /// unsigned or ad hoc build (agents' local builds, Xcode Cloud's tests) has none and opens a local
     /// store. iOS has no public API to read an entitlement, and every iOS build carries it (#22).
     public nonisolated static func cloudKitAvailable() -> Bool {
         #if os(macOS)

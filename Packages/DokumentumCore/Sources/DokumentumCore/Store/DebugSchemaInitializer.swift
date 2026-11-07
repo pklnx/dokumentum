@@ -11,7 +11,7 @@
     ///
     /// It opens its own store in a new temporary folder, never the live store, and removes the folder
     /// afterwards. It needs a signed build with the CloudKit entitlement and an iCloud account; it is never
-    /// run from tests or the development VM.
+    /// run from tests or an unsigned build.
     public enum DebugSchemaInitializer {
         /// A new temporary folder's store file; never the live store or inside its folder.
         public static func makeStoreURL() -> URL {

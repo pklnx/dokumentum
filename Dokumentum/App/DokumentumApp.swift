@@ -47,7 +47,7 @@ struct DokumentumApp: App {
 
     var body: some Scene {
         // An explicit id and one stable root type (`LibraryRootView`): the Mac's saved window state
-        // names the scene, and a root type it does not know opened no window in the development VM
+        // names the scene, and a root type it does not know opened no window in an unsigned local build
         // (plan of #3, T5). Whether the explicit id prevents that is checked on the maintainer's Mac.
         WindowGroup(id: "library") {
             // One source per window: each window's model reads its own change events. Creating them reads

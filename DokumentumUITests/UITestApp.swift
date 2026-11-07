@@ -18,7 +18,7 @@ struct UITestApp {
     }
 
     /// `-UITestSeed`: the sample library in an in-memory store (the predecessor's argument; `-UITestEmptyStore`
-    /// for an empty one). `-ApplePersistenceIgnoreState YES`: the development VM keeps stale window
+    /// for an empty one). `-ApplePersistenceIgnoreState YES`: a development Mac keeps stale window
     /// state for the app's bundle ID, under which a build with a different root view type opens no
     /// window (plan of #3, T5).
     ///

@@ -11,15 +11,15 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 
 | Where | Used for |
 |---|---|
-| A macOS VM on the maintainer's MacBook Pro (local Claude Code session, `gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: it has no signing identity and builds unsigned, see "Build and test". |
-| The MacBook Pro itself, with the maintainer's Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. None has run yet: the signed output and the device check are deferred to before signed or iCloud work relies on them ([plan.md](./plan.md), section 4). |
+| The maintainer's MacBook Pro, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
+| The MacBook Pro, signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. None has run yet: the signed output and the device check are deferred to before signed or iCloud work relies on them ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
-## Setup in the development VM
+## Setup on the development Mac
 
-1. macOS 27 (on the host and in the VM), Xcode 27.x installed and selected
+1. macOS 27, Xcode 27.x installed and selected
    (`xcode-select -p`), the developer Apple Account added in Xcode, Settings,
    Accounts. That account has no signing access: the team is enrolled as an
    individual, so only the Account Holder gets Certificates, Identifiers & Profiles.
@@ -33,6 +33,16 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
    brew install gitleaks
    git config core.hooksPath .githooks
    ```
+4. The iOS 27.0 simulator runtime (it has the iPhone 18 Pro), installed through Xcode, Settings,
+   Components.
+5. For macOS UI tests: the screen unlocked, the test runner allowed under System Settings, Privacy &
+   Security, Screen & System Audio Recording, and the app window on a display that draws. Windows open on
+   the display with the pointer; on a second display that is asleep or off, every window screenshot and
+   `performAccessibilityAudit` fail with "Failed to create screenshot. Image creation failed".
+6. If the SQL-log tests fail with `markerNotFound` although the unified log is enabled, look for a stray
+   file in `/var/db/diagnostics/timesync/`; removing it fixed the log on 2026-11-07.
+7. Several agents on one Mac serialize their `xcodebuild` runs through a shared lock directory (`mkdir`
+   to take it, `rmdir` after the run).
 
 ## The project
 
@@ -65,14 +75,14 @@ app) and `DokumentumUITests`. Two local packages live in `Packages/`.
 - **Each package is a folder reference in the project**, not an
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
-- **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine. The
-  VM and Xcode Cloud's test workflows build macOS without team and entitlements, see "The unsigned
+- **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine. Agents'
+  local builds and Xcode Cloud's test workflows build macOS without team and entitlements, see "The unsigned
   path".
 
 ## Build and test
 
 From the repository root (`-derivedDataPath build` keeps a build in the ignored `build/` folder). These
-are the VM's commands. A machine with a signing identity leaves out the `XCODE_XCCONFIG_FILE` prefix.
+are the agents' commands. A machine with a signing identity leaves out the `XCODE_XCCONFIG_FILE` prefix.
 
 ```sh
 # Test plan Default: DokumentumTests, DokumentumKitTests, DokumentumTestSupportTests, DokumentumCoreTests
@@ -97,13 +107,13 @@ swift format lint --strict --recursive --configuration .swift-format Dokumentum*
 **The unsigned path.** With the team and the entitlements in the project, a macOS build without a
 signing identity exits 65 (`No profiles for 'space.pklnx.Dokumentum'`); simulator builds and
 `swift test` do not need one. That error ends with the advice to pass `-allowProvisioningUpdates`: it
-does not apply, and the flag stays barred in the VM. The fix for a forgotten prefix is the prefix.
+does not apply, and the flag stays barred for agents. The fix for a forgotten prefix is the prefix.
 `Config/Unsigned.xcconfig` makes the macOS build ad hoc, without a team and without entitlements. It
 sets only macOS-conditioned keys, so the simulator keeps the real team and keys, which a build shows in
 its `*-Simulated.xcent` files. The project does not reference the file: it reaches a build only through
 this variable, or through Xcode Cloud's copy (see "Xcode Cloud").
 
-**What this leaves untested.** macOS tests in the VM and in Xcode Cloud run without the entitlements and
+**What this leaves untested.** macOS tests in local unsigned builds and in Xcode Cloud run without the entitlements and
 outside the sandbox, with no iCloud or push keys. Only the maintainer's signed build exercises them. A
 macOS test passing here says nothing about behaviour that depends on them.
 
@@ -114,7 +124,7 @@ macOS test passing here says nothing about behaviour that depends on them.
   XCODE_XCCONFIG_FILE`), but `-showBuildSettings` exits 0 and silently shows the override absent. Do not
   take its output as proof that the override applies.
 - A device build (`generic/platform=iOS`) has no ad hoc form: it needs `CODE_SIGNING_ALLOWED=NO`, as
-  above. Nothing in the VM ever creates a certificate, a profile or a device registration, or passes
+  above. No agent ever creates a certificate, a profile or a device registration, or passes
   `-allowProvisioningUpdates`.
 
 The iPhone 18 Pro exists only on the iOS 27.0 simulator runtime, so the destination names the OS.
@@ -223,7 +233,7 @@ devices before syncing) stays unlinked and is counted by the repair, never delet
 | A test run (`TestEnvironment.isRunningTests`) | in memory, never synced |
 | DEBUG build with `-UITestSeed YES` / `-UITestEmptyStore YES` | in memory, with sample data / empty |
 | With the CloudKit entitlement (every iOS build; a signed macOS build) | `Application Support/Dokumentum/Dokumentum.store`, mirrored to CloudKit |
-| Without it (the VM's unsigned macOS build) | the same file, local only |
+| Without it (an unsigned macOS build) | the same file, local only |
 
 If CloudKit cannot open, the same file opens locally; if that fails too, `Dokumentum-local.store` next to it.
 The store is in the app's own container, never in the app group. UI tests pass the launch arguments as
@@ -267,7 +277,7 @@ changes. Deploying the schema to Production is the maintainer's.
 
 **Development schema.** CloudKit creates record types when records are first saved, or all at once through
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
-from tests or the VM).
+from tests or an unsigned build).
 
 **The repair.** `RepairPlanner` (DokumentumKit) decides, `DokumentumCore/Repair/` carries it out on the store:
 re-point references to tombstones, merge same-name metadata into tombstones, break tag cycles, relink early
@@ -284,10 +294,10 @@ writes over a row state it has not read: right before a pass saves, it reads the
 rows included) and the records its operations name in another context and compares every field with what it
 read. If one differs, the pass writes nothing and the next run, which that save triggers, plans again. Nothing
 is ever written to undo. Residual window: a save to one of those rows that commits between that check and the
-pass's commit is overwritten in that row. Measured on the VM (`swift test` debug build, from the check's start
+pass's commit is overwritten in that row. Measured on #56 (`swift test` debug build, from the check's start
 to the pass's `didSave`, 3,000 documents in two correspondents' halves): about 0.06 s for a merge moving 300
 documents, and 0.24 to 0.40 s for one moving 1,500, with one to five tags per document, depending on the data
-and the VM's load (review A measured 0.40 s). It grows with the rows the pass writes, never with the archive.
+and the machine's load (review A measured 0.40 s). It grows with the rows the pass writes, never with the archive.
 A document's file, thumbnail and text links are part of its row (by identifier, without loading the blob), so a
 link another save makes in the window is seen. The external-storage data of a relinked blob is not compared.
 Also not re-checked: records inserted in the window. A revived tombstone whose chain end arrives just then, or a
