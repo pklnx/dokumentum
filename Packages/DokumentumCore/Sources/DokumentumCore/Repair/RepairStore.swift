@@ -116,17 +116,18 @@ public enum RepairStore {
         return (reader.snapshot, reader.records)
     }
 
-    /// The records `keys` name, linked blobs included, with every metadata record (rows refer to them).
+    /// The records `keys` name, with every metadata record. Blobs only while unlinked (`#Predicate { $0.document ==
+    /// nil }`), so the check before a pass's save loads no linked blob either.
     static func records(_ keys: Set<RowKey>, in context: ModelContext) throws -> RepairRecords {
         var reader = Reader()
         try reader.readMetadata(in: context)
         func ids(_ entity: RowKey.Entity) -> [UUID] { keys.filter { $0.entity == entity }.map(\.instanceID) }
-        let blobDocuments = Set(ids(.document))
-        for document in try fetchDocuments(blobDocuments, in: context) { reader.add(document) }
+        for document in try fetchDocuments(Set(ids(.document)), in: context) { reader.add(document) }
         let files = ids(.file)
         if !files.isEmpty {
             for file in try context.fetch(
-                FetchDescriptor<DocumentFile>(predicate: #Predicate { files.contains($0.instanceID) }))
+                FetchDescriptor<DocumentFile>(
+                    predicate: #Predicate { $0.document == nil && files.contains($0.instanceID) }))
             {
                 reader.add(file)
             }
@@ -134,7 +135,8 @@ public enum RepairStore {
         let thumbnails = ids(.thumbnail)
         if !thumbnails.isEmpty {
             for thumbnail in try context.fetch(
-                FetchDescriptor<DocumentThumbnail>(predicate: #Predicate { thumbnails.contains($0.instanceID) }))
+                FetchDescriptor<DocumentThumbnail>(
+                    predicate: #Predicate { $0.document == nil && thumbnails.contains($0.instanceID) }))
             {
                 reader.add(thumbnail)
             }
@@ -142,18 +144,11 @@ public enum RepairStore {
         let texts = ids(.text)
         if !texts.isEmpty {
             for text in try context.fetch(
-                FetchDescriptor<DocumentText>(predicate: #Predicate { texts.contains($0.instanceID) }))
+                FetchDescriptor<DocumentText>(
+                    predicate: #Predicate { $0.document == nil && texts.contains($0.instanceID) }))
             {
                 reader.add(text)
             }
-        }
-        // A blob's document link may name a document no key names.
-        let linked = Set(
-            reader.records.files.values.compactMap { $0.document?.instanceID }
-                + reader.records.thumbnails.values.compactMap { $0.document?.instanceID }
-                + reader.records.texts.values.compactMap { $0.document?.instanceID })
-        for document in try fetchDocuments(linked.subtracting(reader.records.documents.keys), in: context) {
-            reader.add(document)
         }
         return reader.records
     }

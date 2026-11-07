@@ -11,15 +11,14 @@ struct RowKey: Hashable, Sendable {
     let instanceID: UUID
 }
 
-/// Every value of one row that a save can write, related records as `instanceID`s: what a pass read, what it
-/// wrote, and what another save left in the store (`ConcurrentSaveWatcher`). `RowStateTests` checks against the
-/// schema that every attribute and relationship is either here or named in `RowState.excluded` with its reason,
-/// so a new field cannot be forgotten.
+/// Every value of one row that a save can write, related records as `instanceID`s: what a pass read, and what the
+/// store holds right before the pass saves (`RepairRun`). `RowStateTests` checks against the schema that every
+/// attribute and relationship is either here or named in `RowState.excluded` with its reason, so a new field
+/// cannot be forgotten.
 ///
-/// Why: a `ModelContext` whose row became stale writes back the **whole row** when it saves, not the fields it
-/// changed (measured on #56: on the optimistic-locking conflict Core Data re-selects the row, and the `UPDATE`
-/// then sets every field the stale object holds). A pass that meets another save therefore compares, and
-/// restores, whole rows.
+/// Why whole rows: a `ModelContext` whose row became stale writes back the **whole row** when it saves, not the
+/// fields it changed (measured on #56: on the optimistic-locking conflict Core Data re-selects the row, and the
+/// `UPDATE` then sets every field the stale object holds). So a pass checks every field of every row it writes.
 enum RowState: Equatable, Sendable {
     struct DocumentRow: Equatable, Sendable {
         var id: UUID
@@ -82,8 +81,8 @@ enum RowState: Equatable, Sendable {
 
     /// What a row state leaves out, per entity, and why: to-many relationships are inverses whose other side is
     /// captured (`Document.correspondent`, `Document.tags`, `Tag.parent`, the blob's `document`), the document's
-    /// to-one blob links are captured on the blob's side, and the external-storage data is never loaded by the
-    /// repair (an unlinked blob's data is never written by anything; a stale write of it remains a residual).
+    /// to-one blob links are captured on the blob's side, and the external-storage data is not compared (the
+    /// repair only links an unlinked blob, whose data nothing writes; a stale write of it remains a residual).
     static let excluded: [String: Set<String>] = [
         "Document": ["file", "thumbnail", "text"],
         "Tag": ["children", "documents"],
@@ -169,71 +168,9 @@ enum RowState: Equatable, Sendable {
         return states
     }
 
-    /// The current state of `keys` in the store, read through a new context.
+    /// The current state of `keys` in the store, read through a new context. Blobs are read only while unlinked:
+    /// the repair writes no other blob, and a blob linked meanwhile reads as absent.
     static func read(_ keys: Set<RowKey>, in container: ModelContainer) throws -> [RowKey: RowState] {
         try capture(RepairStore.records(keys, in: ModelContext(container)))
     }
-
-    // MARK: Restore
-
-    /// Writes `state` into the record `key` names in `records`, every captured field. `MissingRecord` if the
-    /// record or a record it refers to is not among them.
-    static func restore(_ state: RowState, to key: RowKey, in records: RepairRecords) throws {
-        func record<T>(_ table: [UUID: T], _ id: UUID) throws -> T {
-            guard let value = table[id] else { throw MergeApplier.MissingRecord(instanceID: id) }
-            return value
-        }
-        switch (key.entity, state) {
-        case (.document, .document(let row)):
-            let document = try record(records.documents, key.instanceID)
-            document.title = row.title
-            document.modifiedAt = row.modifiedAt
-            document.documentDate = row.documentDate
-            document.isInbox = row.isInbox
-            document.pageCount = row.pageCount
-            document.fileSize = row.fileSize
-            document.textSourceRaw = row.textSourceRaw
-            document.processingStateRaw = row.processingStateRaw
-            document.processingDeviceID = row.processingDeviceID
-            document.processingClaimedAt = row.processingClaimedAt
-            document.contentHash = row.contentHash
-            document.originalFileName = row.originalFileName
-            document.sourceRaw = row.sourceRaw
-            document.deletedAt = row.deletedAt
-            document.correspondent = try row.correspondent.map { try record(records.correspondents, $0) }
-            document.documentType = try row.documentType.map { try record(records.documentTypes, $0) }
-            document.tags = try row.tags.map { try record(records.tags, $0) }
-        case (.tag, .tag(let row)):
-            let tag = try record(records.tags, key.instanceID)
-            (tag.name, tag.colorHex, tag.mergedIntoID, tag.mergedAt) = (
-                row.name, row.colorHex, row.mergedIntoID, row.mergedAt
-            )
-            tag.parent = try row.parent.map { try record(records.tags, $0) }
-        case (.correspondent, .metadata(let row)):
-            let correspondent = try record(records.correspondents, key.instanceID)
-            (correspondent.name, correspondent.mergedIntoID, correspondent.mergedAt) =
-                (row.name, row.mergedIntoID, row.mergedAt)
-        case (.documentType, .metadata(let row)):
-            let type = try record(records.documentTypes, key.instanceID)
-            (type.name, type.mergedIntoID, type.mergedAt) = (row.name, row.mergedIntoID, row.mergedAt)
-        case (.file, .blob(let row)):
-            try record(records.files, key.instanceID).document = try row.document.map {
-                try record(records.documents, $0)
-            }
-        case (.thumbnail, .blob(let row)):
-            try record(records.thumbnails, key.instanceID).document = try row.document.map {
-                try record(records.documents, $0)
-            }
-        case (.text, .blob(let row)):
-            let text = try record(records.texts, key.instanceID)
-            text.extractedText = row.extractedText ?? text.extractedText
-            text.document = try row.document.map { try record(records.documents, $0) }
-        default:
-            throw MergeApplier.MissingRecord(instanceID: key.instanceID)
-        }
-    }
-
-    /// The `id`, `instanceID`, `createdAt` and `documentID` fields are set at insert and never changed, so a
-    /// restore leaves them alone; they stay in the row so a comparison sees every field.
-    static let neverWritten: Set<String> = ["id", "instanceID", "createdAt", "documentID"]
 }

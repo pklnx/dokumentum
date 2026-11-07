@@ -264,16 +264,17 @@ pass re-reads only the records it writes and re-checks every operation on that r
 
 **Concurrent saves (I6).** A `ModelContext` that saves over a row another save changed since it read it writes
 back the whole row, every field, not only the ones it changed (measured on #56: Core Data re-selects the row on
-the optimistic-locking conflict, and the `UPDATE` sets every field the stale object holds). So from a pass's
-re-read to its write, `ConcurrentSaveWatcher` reads the pass's rows after every save to the store (Core Data's
-`NSManagedObjectContextDidSave`, which app contexts and CloudKit imports post). If another save changed a row
-the pass wrote, the pass is undone in a second save: those rows get that save's values, the others what the pass
-read, and the next run plans again. Residual window: a save on another thread that commits before the pass's
-write but whose notification is handled only after it; that save's fields in the rows the pass wrote are lost.
-The external-storage data of a relinked blob is not compared. Repair tests seed a `RepairSnapshot` into a store
-on disk
-(`RepairStoreFixtures.swift`) and check `RepairInvariants` and that the store ends where the planner's
-simulation ends (`CheckedRepair`).
+the optimistic-locking conflict, and the `UPDATE` sets every field the stale object holds). So the repair never
+writes over a row state it has not read: right before a pass saves, it reads the rows it changed (inverse-only
+rows included) and the records its operations name in another context and compares every field with what it
+read. If one differs, the pass writes nothing and the next run, which that save triggers, plans again. Nothing
+is ever written to undo. Residual window: a save to one of those rows that commits between that check and the
+pass's commit is overwritten in that row. Measured on the VM (`swift test`): 0.06 s for a merge moving 300
+documents, 0.24 s for one moving 1,500 (debug and release alike); it grows with the rows the pass writes, never
+with the archive. The external-storage data of a relinked blob is not compared.
+
+Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.swift`) and check
+`RepairInvariants` and that the store ends where the planner's simulation ends (`CheckedRepair`).
 
 ## Logging
 

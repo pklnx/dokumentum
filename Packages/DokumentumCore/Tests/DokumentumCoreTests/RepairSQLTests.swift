@@ -73,18 +73,13 @@ struct RepairSQLTests {
             // run fetched, so at most one such statement per relinked blob of the kind, and none without one.
             let byKey = selects.filter { $0.hasSuffix("WHERE  t0.Z_PK = ?") }
             #expect(byKey.count <= (pending ? 1 : 0), "\(byKey)")
-            // `ConcurrentSaveWatcher` reads the rows the pass holds after each save to the store while the pass
-            // runs, its own save included: then the blob it just linked, by `instanceID`, once.
-            let watched = selects.filter { $0.hasSuffix("WHERE  t0.ZINSTANCEID IN  (?)") }
-            #expect(watched.count <= (pending ? 1 : 0), "\(watched)")
-            #expect(
-                selects.count == unlinked.count + byKey.count + watched.count, "a SELECT of linked rows: \(selects)")
+            #expect(selects.count == unlinked.count + byKey.count, "a SELECT of linked rows: \(selects)")
         }
     }
 
     /// The re-check read of a pass covers what the pass writes, not the archive (#56, review A): of 30
     /// documents, one points at a tombstone. The run's only read of every document is its planning read; the
-    /// pass reads the one it re-points (`ZINSTANCEID IN (?)`), and the watcher the same one after the save.
+    /// pass reads the one it re-points (`ZINSTANCEID IN (?)`), and its check reads the same one again before the save.
     @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
     func aPassReadsOnlyTheDocumentsItWrites() throws {
         let store = try TemporaryStore()

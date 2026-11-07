@@ -17,16 +17,16 @@ public enum RepairPass: String, Sendable, CaseIterable {
 }
 
 /// What one run did: per pass the operations it applied and those it skipped because their precondition no
-/// longer held or another save met the pass (I6; the next run plans them again), the passes that failed, and the
-/// counts of what nothing acts on.
+/// longer held or another save changed its rows (I6; the next run plans them again), the passes that failed, and
+/// the counts of what nothing acts on.
 public struct RepairReport: Sendable, Equatable {
     public struct PassResult: Sendable, Equatable {
         public var pass: RepairPass
         public var applied: [RepairOperation]
         public var skipped: [RepairOperation]
-        /// Another save changed a row this pass wrote, between its read and its write: the pass was undone, its
-        /// operations are in `skipped`, and the rows hold that save's values (`ConcurrentSaveWatcher`).
-        public var rolledBack = false
+        /// Another save changed a row this pass was about to write, or a record its operations name, after the
+        /// pass read it: the pass wrote nothing, and its operations are in `skipped`.
+        public var metAnotherSave = false
     }
 
     /// In the order they ran; passes 2 and 3 repeat while one of them changes something.
@@ -35,8 +35,7 @@ public struct RepairReport: Sendable, Equatable {
     public var failed: [RepairPass] = []
     /// Orphans, documents with two blobs of one kind, `id` groups and tombstones, after the run.
     public var counts = RepairCounts()
-    /// How often the run saved: once per pass that applied something (twice if it was rolled back), never
-    /// otherwise (I7).
+    /// How often the run saved: once per pass that applied something, never otherwise (I7).
     public var saves = 0
 
     public init() {}
@@ -50,29 +49,39 @@ public struct RepairReport: Sendable, Equatable {
 /// the app runs it through `RepairRunner`, off the main actor.
 ///
 /// It reads the light snapshot once (`RepairStore`) and plans each pass on it with `RepairPlanner`, carrying the
-/// changes forward. A pass with a non-empty plan runs in one transaction:
-/// 1. A new context reads only what the plan writes (`RepairStore.touched(by:in:)`), and `RepairPlan.apply` on
+/// changes forward. A pass with a non-empty plan runs in one transaction, on one principle: **the repair never
+/// writes over a row state it has not read; it checks that last, and it never writes to undo.**
+/// 1. A new context reads only what the plan touches (`RepairStore.touched(by:in:)`), and `RepairPlan.apply` on
 ///    that read decides which operations still apply; its preconditions are I6's compare-and-set (the reference
 ///    still holds the planned value, source and target are present and as live as planned, …). Only those change
 ///    the records (`MergeApplier`); a skipped one is planned again by the next run.
-/// 2. From that read to the save, `ConcurrentSaveWatcher` keeps what every other save leaves in those rows. A
-///    context writes back whole rows when it saves over a newer row, so after the save the pass compares: if
-///    another save changed a row the pass wrote, the pass is undone in a second save. Those rows get that save's
-///    values, the others what the pass read, and the next run (which that save triggers) plans again. I6 is
-///    therefore kept except in one residual window, stated in `ConcurrentSaveWatcher`: a save on another thread
-///    that commits before the pass's write but is handled only after it.
+/// 2. Right before the save, the rows the pass changed (`changedModelsArray`, which includes rows Core Data
+///    writes only for an inverse relationship) and the records its operations name are read again in another
+///    context (`RowState.read`) and compared with what the pass read, every field. A context writes back the
+///    whole row when it saves over a row changed since it read it, so any difference means another save would be
+///    overwritten: the pass discards its changes and writes nothing, and the next run (which that save triggers)
+///    plans again.
+/// 3. Otherwise it saves.
+///
+/// I6 then holds except for a save to one of those rows that commits between the check's read and the pass's
+/// commit: it is overwritten in that row. The window is the check's read plus the save, bounded by the rows the
+/// pass writes, not by the archive: measured 0.06 s for a merge moving 300 documents and 0.24 s for 1,500
+/// (docs/development/index.md, "Concurrent saves").
 ///
 /// A pass that applies nothing does not save, so a run on repaired data writes nothing and its own save does not
 /// start another (I7). A pass that throws is logged and skipped; the run goes on with the next.
 public enum RepairRun {
     /// Called after a pass is planned and before its read; tests change the store here (I6), or throw.
     public typealias AfterPlanning = (RepairPass, RepairPlan) throws -> Void
+    /// Called after a pass changed its records and before its check; tests save another context's edit here.
+    public typealias BeforeCheck = (RepairPass) throws -> Void
 
     public static func perform(
         in container: ModelContainer,
         now: Date,
         hasCompletedImport: Bool,
-        afterPlanning: AfterPlanning = { _, _ in }
+        afterPlanning: AfterPlanning = { _, _ in },
+        beforeCheck: BeforeCheck = { _ in }
     ) throws -> RepairReport {
         var report = RepairReport()
         var state = try RepairStore.snapshot(in: ModelContext(container))
@@ -81,15 +90,15 @@ public enum RepairRun {
             guard !plan.isEmpty else { return false }
             do {
                 try afterPlanning(pass, plan)
-                let result = try transaction(plan, in: container, now: now)
-                report.saves += result.saves
-                if !result.rolledBack { state = overlay(state, with: result.snapshot) }
+                let result = try transaction(plan, in: container, now: now) { try beforeCheck(pass) }
+                report.saves += result.saved ? 1 : 0
+                if result.saved { state = overlay(state, with: result.snapshot) }
                 report.passes.append(
                     .init(
-                        pass: pass, applied: result.rolledBack ? [] : result.applied,
-                        skipped: result.rolledBack ? result.applied + result.skipped : result.skipped,
-                        rolledBack: result.rolledBack))
-                return !result.rolledBack && !result.applied.isEmpty
+                        pass: pass, applied: result.saved ? result.applied : [],
+                        skipped: result.saved ? result.skipped : result.applied + result.skipped,
+                        metAnotherSave: result.metAnotherSave))
+                return result.saved
             } catch {
                 Log.repair.error(
                     "Repair pass \(pass.rawValue, privacy: .public) failed: \(Log.code(of: error), privacy: .public)")
@@ -117,17 +126,16 @@ public enum RepairRun {
         var applied: [RepairOperation] = []
         var skipped: [RepairOperation] = []
         var snapshot = RepairSnapshot()
-        var saves = 0
-        var rolledBack = false
+        var saved = false
+        var metAnotherSave = false
     }
 
-    private static func transaction(_ plan: RepairPlan, in container: ModelContainer, now: Date) throws -> Transaction {
-        let watcher = ConcurrentSaveWatcher(container: container)
-        defer { watcher.stop() }
+    private static func transaction(
+        _ plan: RepairPlan, in container: ModelContainer, now: Date, beforeCheck: () throws -> Void
+    ) throws -> Transaction {
         let context = ModelContext(container)
         let current = try RepairStore.touched(by: plan, in: context)
         let read = RowState.capture(current.records)
-        watcher.watch(Set(read.keys))
         let application = plan.apply(to: current.snapshot, now: now)
         var result = Transaction(
             applied: application.applied, skipped: application.skipped, snapshot: application.snapshot)
@@ -135,36 +143,62 @@ public enum RepairRun {
         for operation in application.applied {
             try MergeApplier.apply(operation, to: current.records, now: now)
         }
-        let written = RowState.capture(current.records)
-        // Rows whose captured values changed, and rows Core Data writes for an inverse relationship only.
-        let dirty = Set(read.keys.filter { read[$0] != written[$0] }).union(
-            context.changedModelsArray.compactMap(key(of:)))
+        try beforeCheck()
+        let checked = Set(context.changedModelsArray.compactMap(key(of:))).union(named(by: application.applied))
+        let stored = try RowState.read(checked, in: container)
+        if checked.contains(where: { stored[$0] != read[$0] }) {
+            context.rollback()
+            result.metAnotherSave = true
+            Log.repair.notice("A repair pass met another save of its rows and wrote nothing")
+            return result
+        }
         try context.save()
-        result.saves = 1
-        watcher.stop()
-        guard let conflicts = watcher.conflicts(read: read, written: written) else {
-            throw ConcurrentSaveUnknown()
-        }
-        let met = conflicts.filter { dirty.contains($0.key) }
-        guard !met.isEmpty else { return result }
-
-        // Undo the pass: what the other save left where it met the pass, what the pass read everywhere else.
-        let undo = ModelContext(container)
-        let records = try RepairStore.records(dirty, in: undo)
-        for key in dirty {
-            guard let target = met[key] ?? read[key] else { continue }
-            try RowState.restore(target, to: key, in: records)
-        }
-        try undo.save()
-        result.saves = 2
-        result.rolledBack = true
-        Log.repair.notice("A repair pass met another save on \(met.count, privacy: .public) rows and was undone")
+        result.saved = true
         return result
     }
 
-    /// A capture of the watcher failed, so whether another save met the pass is not known. The pass is saved;
-    /// the run reports it as failed.
-    struct ConcurrentSaveUnknown: Error {}
+    /// The records an operation's precondition reads, whether or not it writes them.
+    private static func named(by operations: [RepairOperation]) -> Set<RowKey> {
+        func metadata(_ kind: MetadataKind, _ id: UUID) -> RowKey {
+            switch kind {
+            case .correspondent: RowKey(entity: .correspondent, instanceID: id)
+            case .documentType: RowKey(entity: .documentType, instanceID: id)
+            case .tag: RowKey(entity: .tag, instanceID: id)
+            }
+        }
+        func kind(of reference: RepairReference) -> MetadataKind {
+            switch reference {
+            case .correspondent: .correspondent
+            case .documentType: .documentType
+            case .tag, .parent: .tag
+            }
+        }
+        var keys: Set<RowKey> = []
+        for operation in operations {
+            switch operation {
+            case .repoint(let reference, let from, let to):
+                keys.formUnion([metadata(kind(of: reference), from), metadata(kind(of: reference), to)])
+                switch reference {
+                case .correspondent(let document), .documentType(let document), .tag(let document):
+                    keys.insert(RowKey(entity: .document, instanceID: document))
+                case .parent(let tag):
+                    keys.insert(RowKey(entity: .tag, instanceID: tag))
+                }
+            case .mergeMetadata(let kind, let loser, let keeper):
+                keys.formUnion([metadata(kind, loser), metadata(kind, keeper)])
+            case .makeRoot(let tag, let parent):
+                keys.formUnion([RowKey(entity: .tag, instanceID: tag), RowKey(entity: .tag, instanceID: parent)])
+            case .relink(let blob, let document):
+                keys.insert(RowKey(entity: .document, instanceID: document))
+                for entity in [RowKey.Entity.file, .thumbnail, .text] {
+                    keys.insert(RowKey(entity: entity, instanceID: blob))
+                }
+            case .revive(let tombstone):
+                for kind in MetadataKind.allCases { keys.insert(metadata(kind, tombstone)) }
+            }
+        }
+        return keys
+    }
 
     private static func key(of model: any PersistentModel) -> RowKey? {
         switch model {
