@@ -285,6 +285,21 @@ struct RepairPlannerTests {
         }
     }
 
+    /// Pass 2 alone, not through `plan`'s repeat loop, which would hide a pass that merges one level per
+    /// call: the children of merged tags become siblings and merge in the same pass (top down).
+    @Test func onePassMergesNestedDuplicatesTopDown() {
+        let state = RepairSnapshot(metadata: [
+            tag(10, "Auto", created: 1), tag(11, "Golf", created: 1, parent: 10),
+            tag(20, "Auto", created: 2), tag(21, "Golf", created: 2, parent: 20),
+        ])
+        #expect(
+            RepairPlanner.mergeSameNames(in: state).operations == [
+                .mergeMetadata(kind: .tag, loser: uuid(20), into: uuid(10)),
+                .mergeMetadata(kind: .tag, loser: uuid(21), into: uuid(11)),
+            ]
+        )
+    }
+
     /// Ported.
     @Test func sameNameUnderDifferentParentsIsNotMerged() {
         let state = RepairSnapshot(metadata: [
@@ -442,6 +457,19 @@ struct RepairPlannerTests {
                 .makeRoot(tag: uuid(1), expectedParent: uuid(2)),
                 .makeRoot(tag: uuid(3), expectedParent: uuid(4)),
                 .makeRoot(tag: uuid(5), expectedParent: uuid(5)),
+            ]
+        )
+    }
+
+    /// Pass 3 alone, not through `plan`'s repeat loop, which would hide a pass that breaks one cycle per call.
+    @Test func onePassBreaksEveryCycle() {
+        let state = RepairSnapshot(metadata: [
+            tag(1, "A", parent: 2), tag(2, "B", parent: 1), tag(3, "C", parent: 4), tag(4, "D", parent: 3),
+        ])
+        #expect(
+            RepairPlanner.breakCycles(in: state).operations == [
+                .makeRoot(tag: uuid(1), expectedParent: uuid(2)),
+                .makeRoot(tag: uuid(3), expectedParent: uuid(4)),
             ]
         )
     }
