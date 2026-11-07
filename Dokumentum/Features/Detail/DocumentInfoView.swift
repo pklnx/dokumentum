@@ -120,10 +120,9 @@ private struct DocumentInfoForm: View {
 
     // MARK: Title
 
-    /// Saves the draft to its document if the user changed it.
+    /// Saves the draft to its document if the user changed it; a draft that was not saved shows the stored title.
     private func commitTitle() {
-        guard let commit = titleDraft.commit() else { return }
-        model.edit(.title(commit.title), of: commit.document)
+        model.commitTitle(&titleDraft)
     }
 
     // MARK: Date and inbox
@@ -250,6 +249,7 @@ struct TitleDraft: Equatable {
     }
 
     /// The title to save and its document, if the user changed the draft; the draft then counts as saved.
+    /// `LibraryModel.commitTitle` starts it again from the stored title when the edit is not saved.
     mutating func commit() -> (document: UUID, title: String)? {
         guard let document, text != base else { return nil }
         base = text

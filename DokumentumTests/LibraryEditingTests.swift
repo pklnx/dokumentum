@@ -90,11 +90,115 @@ struct LibraryEditingTests {
         #expect(model.tagChoices.map(\.path) == ["Auto", "Auto › Golf", "golf", "Important", "Tax"])
     }
 
+    // MARK: A title that is not saved
+
+    /// A rename and a move to the trash from another device that the library has not read yet.
+    private func renameAndTrash(_ instanceID: UUID, in container: ModelContainer, trash: Bool) throws {
+        let other = ModelContext(container)
+        let document = try #require(try other.fetch(FetchDescriptor<Document>()).first { $0.instanceID == instanceID })
+        document.title = "Renamed on the iPhone"
+        if trash { document.deletedAt = .now }
+        try other.save()
+    }
+
+    /// The user typed a title while the other device moved the document to the trash: the edit is refused, and
+    /// the draft shows the stored title again instead of text that is not stored (reviews of #57).
+    @Test func aRefusedTitleShowsTheStoredTitleAgain() throws {
+        let (model, container) = try makeModel()
+        model.selectedDocumentID = Self.electricityBill
+        var draft = TitleDraft()
+        draft.show(Self.electricityBill, title: "Electricity bill October")
+        draft.text = "Mine"
+        try renameAndTrash(Self.electricityBill, in: container, trash: true)
+
+        model.commitTitle(&draft)
+        #expect(draft.text == "Renamed on the iPhone")
+        #expect(draft.base == draft.text)
+        #expect(draft.commit() == nil, "a refused draft is not saved again")
+        #expect(model.snapshot.documents.first { $0.instanceID == Self.electricityBill }?.isTrashed == true)
+        // Out of the Inbox list: the panel closes.
+        #expect(model.selectedDocumentID == nil)
+        #expect(!model.isInfoPresented)
+    }
+
+    /// A save that fails is rolled back: the draft shows the stored title, which the library read again.
+    @Test func aFailedTitleSaveShowsTheStoredTitleAgain() throws {
+        let container = try makeInMemoryContainer()
+        FixtureSeeder.seedForUITests(container.mainContext)
+        let model = LibraryModel(source: FailingSaveSource(store: StoreLibrarySource(container: container)))
+        model.selectedDocumentID = Self.electricityBill
+        var draft = TitleDraft()
+        draft.show(Self.electricityBill, title: "Electricity bill October")
+        draft.text = "Mine"
+        try renameAndTrash(Self.electricityBill, in: container, trash: false)
+
+        model.commitTitle(&draft)
+        #expect(draft.text == "Renamed on the iPhone")
+        #expect(draft.base == draft.text)
+        #expect(draft.commit() == nil, "a failed draft is not saved again")
+        #expect(model.selectedDocument?.title == "Renamed on the iPhone")
+        #expect(!container.mainContext.hasChanges)
+    }
+
+    /// A document deleted on the other device: the library reads it again, the document leaves the list and the
+    /// panel closes.
+    @Test func aTitleForADeletedDocumentClosesThePanel() throws {
+        let (model, container) = try makeModel()
+        model.selectedDocumentID = Self.electricityBill
+        model.isInfoPresented = true
+        var draft = TitleDraft()
+        draft.show(Self.electricityBill, title: "Electricity bill October")
+        draft.text = "Mine"
+        let other = ModelContext(container)
+        for document in try other.fetch(FetchDescriptor<Document>()) where document.instanceID == Self.electricityBill {
+            other.delete(document)
+        }
+        try other.save()
+
+        model.commitTitle(&draft)
+        #expect(!model.snapshot.documents.contains { $0.instanceID == Self.electricityBill })
+        #expect(model.selectedDocumentID == nil)
+        #expect(!model.isInfoPresented)
+    }
+
+    /// Counter-check: a saved title and an unchanged one keep the draft as typed.
+    @Test func aSavedTitleKeepsTheDraft() throws {
+        let (model, _) = try makeModel()
+        model.selectedDocumentID = Self.electricityBill
+        var draft = TitleDraft()
+        draft.show(Self.electricityBill, title: "Electricity bill October")
+        draft.text = "Electricity bill November "
+        model.commitTitle(&draft)
+        #expect(draft.text == "Electricity bill November ")
+        #expect(model.selectedDocument?.title == "Electricity bill November")
+        draft.text = "Electricity bill November  "
+        model.commitTitle(&draft)
+        #expect(draft.text == "Electricity bill November  ", "unchanged after trimming")
+        #expect(draft.commit() == nil)
+    }
+
     /// The fixtures of unit tests take no edits; the info panel shows them read only.
     @Test func aSourceWithoutAnEditorTakesNoEdits() {
         let model = LibraryModel(source: FixtureLibrarySource())
         #expect(!model.canEdit)
         #expect(model.edit(.title("Neu"), of: Self.electricityBill) == nil)
         #expect(model.documents.first { $0.instanceID == Self.electricityBill }?.title == "Electricity bill October")
+    }
+}
+
+private struct SaveFailed: Error {}
+
+/// The store's library with an editor whose saves fail (a full disk, a store error).
+private struct FailingSaveSource: LibrarySource {
+    let store: StoreLibrarySource
+
+    var changes: AsyncStream<Void> { store.changes }
+
+    @MainActor func snapshot() -> LibrarySnapshot { store.snapshot() }
+
+    func loadPDF(instanceID: UUID) async -> PDFLoadState { await store.loadPDF(instanceID: instanceID) }
+
+    @MainActor var editor: DocumentEditor? {
+        DocumentEditor(context: store.container.mainContext, save: { _ in throw SaveFailed() })
     }
 }

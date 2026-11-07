@@ -142,18 +142,37 @@ final class LibraryModel {
     var canEdit: Bool { source.editor != nil }
 
     /// Applies one edit to the document with `instanceID` (plan of #3, part 3) and reads the library again at
-    /// once, so the info panel shows the new value without waiting for the change event. `nil`: the source
-    /// takes no edits, or the save failed (logged).
+    /// once, so the info panel shows the new value without waiting for the change event. An edit that was not
+    /// saved (the document was trashed or deleted meanwhile, or the save failed and was rolled back) reads it
+    /// again too, so the panel shows what the store holds now. `nil`: the source takes no edits, or the save
+    /// failed (logged).
     @discardableResult
     func edit(_ change: DocumentEditor.Change, of instanceID: UUID) -> DocumentEditor.Outcome? {
         guard let editor = source.editor else { return nil }
         do {
             let outcome = try editor.apply(change, to: instanceID)
-            if outcome == .saved { reload() }
+            if outcome != .unchanged { reload() }
             return outcome
         } catch {
             Log.store.error("Could not save an edit: \(Log.code(of: error), privacy: .public)")
+            reload()
             return nil
+        }
+    }
+
+    /// Saves the info panel's title draft to its own document if the user changed it (`TitleDraft`). When the
+    /// edit is not saved (the document was trashed or deleted meanwhile, or the save failed and was rolled back),
+    /// the draft starts again from the stored title: the field never keeps a title that is not stored and that
+    /// would not be saved again (reviews of #57).
+    func commitTitle(_ draft: inout TitleDraft) {
+        guard let commit = draft.commit() else { return }
+        switch edit(.title(commit.title), of: commit.document) {
+        case .saved, .unchanged:
+            return
+        case .noDocument, .trashed, .noMetadata, nil:
+            // A document that is gone has no title to show: it left the list, and the panel closed with it.
+            guard let stored = snapshot.documents.first(where: { $0.instanceID == commit.document }) else { return }
+            draft.show(commit.document, title: stored.title)
         }
     }
 
@@ -178,8 +197,9 @@ final class LibraryModel {
             case .tag: .tag(record, true)
             }
         let outcome = edit(change, of: instanceID)
-        // A reused record the document already had saves nothing; the new record itself was saved.
-        if outcome != .saved { reload() }
+        // A reused record the document already had saves nothing, and `edit` reads nothing then; the new record
+        // itself was saved.
+        if outcome == .unchanged { reload() }
         return outcome
     }
 
