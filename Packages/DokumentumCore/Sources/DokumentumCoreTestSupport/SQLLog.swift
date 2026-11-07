@@ -19,6 +19,15 @@ import OSLog
 ///     _ = try DocumentListQuery.fetch(.all, in: context)
 ///     let statements = try recording.statements()
 public enum SQLLog {
+    /// Whether this process can record Core Data's SQL. Measured on macOS 27.2 with Xcode 27.2 (#29): under
+    /// `swift test` (`swiftpm-testing-helper`) the statements are in the process's log; in the `xctest` runner
+    /// that `xcodebuild test` starts, Core Data logs no statement at all, even with
+    /// `-com.apple.CoreData.SQLDebug 1` on its command line and the default reading 1. Tests that need the SQL
+    /// are enabled only where it can be read, so they are evidence there and skipped, not passed, elsewhere.
+    public static var isReadable: Bool {
+        ProcessInfo.processInfo.processName == "swiftpm-testing-helper"
+    }
+
     /// Turns on Core Data's SQL log for the rest of this process. The value goes into the volatile argument
     /// domain, as `-com.apple.CoreData.SQLDebug 1` on the command line would, and never into a preferences file.
     public static func enable() {

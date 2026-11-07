@@ -11,8 +11,11 @@ import Testing
 struct DocumentListQuerySQLTests {
     static let largeTables = ["ZDOCUMENTTEXT", "ZDOCUMENTFILE", "ZDOCUMENTTHUMBNAIL"]
 
-    /// Synchronous on purpose: `SQLLog` records the statements of one thread.
-    @Test(arguments: [DocumentListQuery.Filter.inbox, .all, .trash])
+    /// Synchronous on purpose: `SQLLog` records the statements of one thread. Runs under `swift test` on macOS
+    /// only, where the SQL can be read (`SQLLog.isReadable`); that run is the evidence.
+    @Test(
+        .enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"),
+        arguments: [DocumentListQuery.Filter.inbox, .all, .trash])
     func theListFetchReadsNoLargeTable(filter: DocumentListQuery.Filter) throws {
         let container = try TestSupport.makeContainerOnDisk()
         try Self.seed(container)
