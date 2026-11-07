@@ -10,7 +10,11 @@ struct UITestApp {
     /// in-memory store). `-ApplePersistenceIgnoreState YES`: the development VM keeps stale window
     /// state for the app's bundle ID, under which a build with a different root view type opens no
     /// window (plan of #3, T5).
-    static let launchArguments = ["-UITestSeed", "-ApplePersistenceIgnoreState", "YES"]
+    ///
+    /// Every argument comes as a `-key value` pair. A bare `-UITestSeed` takes the next argument as its
+    /// value, so in `-UITestSeed -ApplePersistenceIgnoreState YES` the `YES` is left over, macOS opens it
+    /// as a document, and SwiftUI then opens no window at all (measured on macOS 27, #43).
+    static let launchArguments = ["-UITestSeed", "YES", "-ApplePersistenceIgnoreState", "YES"]
 
     /// The language of this run: `TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de` on the `xcodebuild` command
     /// line gives the German screenshots. Empty: the system's language.
