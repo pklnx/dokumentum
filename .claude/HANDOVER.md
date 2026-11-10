@@ -11,8 +11,8 @@
 - Xcode Cloud is onboarded and is the PR check; the ruleset `main` with the required checks is active.
 
 ## Development machine
-- The maintainer's MacBook Pro, local Claude Code sessions. Workspace `/Users/patrick/Claude Code` (this repository, `dev-process`, local `.coordination/reports/` and `evidence/`). Agent worktrees live in the session scratchpad.
-- `gh` runs as `pklnx`; reviews are posted with event COMMENT (a PR author cannot approve its own PR).
+- The maintainer's Mac mini (since 2026-11-10), local Claude Code sessions. Workspace `/Users/robert/Mac Mini` (this repository and `dev-process`). Agent worktrees live in the session scratchpad.
+- `gh` runs as the bot account `robert-dot-pklnx-bot` (write access, no admin). Reviews stay COMMENT reviews with a verdict line (maintainer decision 2026-11-10), as before.
 - Agents build unsigned and never touch signing; setup and Mac pitfalls: `docs/development/index.md`, "Setup on the development Mac".
 
 ## Maintainer actions open
@@ -21,4 +21,4 @@
 - #61 needs the share extension's signing set up by the maintainer.
 
 ## Notes
-- Cloud sessions: Linux, no Swift/Xcode; `gh api` (REST) works, GraphQL does not. Builds and app tests run on the MacBook Pro.
+- Cloud sessions: Linux, no Swift/Xcode; `gh api` (REST) works, GraphQL does not. Builds and app tests run on the Mac mini.
