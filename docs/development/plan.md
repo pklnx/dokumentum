@@ -259,8 +259,8 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   dropped: they come before signed or iCloud work relies on them, and #1 stays
   open until then. So no signed build has exercised the entitlements yet.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
-  on the maintainer's MacBook Pro, with Claude Code there (local sessions, `gh`
-  available). Agents have no signing identity and build unsigned; signed builds
+  on the maintainer's Mac mini (since 2026-11-10), with Claude Code there (local
+  sessions, `gh` available). Agents have no signing identity and build unsigned; signed builds
   and device runs are the maintainer's, with their account. Cloud sessions (Linux) plan,
   review plans and verify only what runs on Linux: scripts, workflows, docs,
   and `swift test` / `swift format lint` for `DokumentumKit`. Details:
