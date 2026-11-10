@@ -16,6 +16,12 @@ struct DocumentListView: View {
                 .modifier(TrashRowActions(document: document))
             }
         }
+        #if os(macOS)
+            // Rows inserted above existing ones need an animated update to be measured (#72). Without one, the Mac's
+            // table-backed `List` gives them its estimated row height (24 pt) and never measures them, so a
+            // two-line row is cut to its title. Zero duration: the list looks as before, only the update path changes.
+            .animation(.linear(duration: 0), value: model.documents.map(\.instanceID))
+        #endif
         // On the list itself, before the overlay: an identifier after it would also replace the empty
         // state's own (measured on macOS, #44).
         .accessibilityIdentifier(AccessibilityID.documentList)
