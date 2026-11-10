@@ -29,6 +29,11 @@ struct DocumentDetailView: View {
                     .disabled(model.selectedDocument == nil)
                     .accessibilityIdentifier(AccessibilityID.detailShowInfo)
                 }
+                #if os(iOS)
+                    ToolbarItem(placement: .primaryAction) {
+                        DocumentDetailMenu()
+                    }
+                #endif
             }
             #if os(iOS)
                 // A sheet on the iPhone. Not `.inspector`, which also becomes a sheet here: it put the panel's

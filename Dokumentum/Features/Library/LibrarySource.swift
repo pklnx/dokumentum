@@ -25,5 +25,12 @@ extension LibrarySource {
 /// launch holds the sample documents (`FixtureSeeder`).
 /// Edits go through `DocumentEditor` in the main context, which the library reads; its save fires `changes`.
 extension StoreLibrarySource: LibrarySource {
-    @MainActor var editor: DocumentEditor? { DocumentEditor(context: container.mainContext) }
+    @MainActor var editor: DocumentEditor? {
+        #if DEBUG
+            if UITestFailingSaves.isRequested(for: container, arguments: ProcessInfo.processInfo.arguments) {
+                return UITestFailingSaves.editor(for: container)
+            }
+        #endif
+        return DocumentEditor(context: container.mainContext)
+    }
 }

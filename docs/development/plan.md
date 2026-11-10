@@ -291,6 +291,9 @@ M ≈ 2-3 PRs, L ≈ 4+ PRs.
 Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 6 and 7 in parallel → 8.
 
+Step 2 as built (the source seam, fixtures and launch arguments, the debug command, menus, accessibility and
+the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
+
 ### Milestone 2: Automation
 | # | Step | Content | Size |
 |---|---|---|---|

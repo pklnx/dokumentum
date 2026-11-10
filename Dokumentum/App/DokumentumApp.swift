@@ -14,6 +14,10 @@ struct DokumentumApp: App {
     let launchStore: LaunchStore
     /// Runs the repair passes; `nil` for an in-memory store.
     let repair: RepairScheduler?
+    /// The one debounced "store changed" signal of a store on disk (#30): the repair and every window's library
+    /// follow it, so the library sees remote changes and CloudKit imports (plan of #3, part 5). `nil` for an
+    /// in-memory store, which nothing else writes.
+    let storeChanges: StoreChangeObserver?
     /// The one importer of the app (plan of #4, N2): every window's `ImportController` uses it, so all
     /// imports go through one actor.
     let importer: DocumentImporter
@@ -41,7 +45,13 @@ struct DokumentumApp: App {
         launchStore = LaunchStore(choice: choice, opened: ArchiveStore.opened ?? .inMemory)
         // The repair (#2, part 3) for the stores on disk only: in-memory stores of tests and UI tests never start
         // it. A launch run now, then after store changes and CloudKit imports.
-        repair = choice.isOnDisk ? RepairScheduler.start(for: container) : nil
+        let storeChanges = choice.isOnDisk ? StoreChangeObserver(container: container) : nil
+        self.storeChanges = storeChanges
+        if let storeChanges {
+            repair = RepairScheduler.start(for: container, observer: storeChanges)
+        } else {
+            repair = nil
+        }
         importer = DocumentImporter(container: container, deviceID: DeviceIdentity.processingDeviceID())
     }
 
@@ -53,7 +63,8 @@ struct DokumentumApp: App {
             // One source per window: each window's model reads its own change events. Creating them reads
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
-                source: StoreLibrarySource(container: container), launchStore: launchStore, importer: importer)
+                source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
+                launchStore: launchStore, importer: importer)
         }
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)

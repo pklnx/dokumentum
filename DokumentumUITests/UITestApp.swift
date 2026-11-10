@@ -41,11 +41,21 @@ struct UITestApp {
         ProcessInfo.processInfo.environment["DOKUMENTUM_UI_LANGUAGE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// The Dynamic Type size of this run on the iPhone: `TEST_RUNNER_DOKUMENTUM_UI_CONTENT_SIZE=XXXL` gives the
+    /// screenshots at that size (plan of #3, part 5). The name of a `UIContentSizeCategory` without its prefix
+    /// (`XXXL`, `AccessibilityXXXL`); empty: the simulator's setting.
+    static var contentSize: String? {
+        ProcessInfo.processInfo.environment["DOKUMENTUM_UI_CONTENT_SIZE"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
         var arguments = Self.launchArguments(store) + extraArguments
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
+        }
+        if let contentSize = Self.contentSize {
+            arguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(contentSize)"]
         }
         app.launchArguments = arguments
         app.launch()
@@ -72,7 +82,41 @@ struct UITestApp {
     /// Mac that is the whole desktop, with other apps' windows.
     func attachWindowScreenshot(_ name: String, to testCase: XCTestCase) {
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        attachment.name = [name, Self.language].compactMap { $0 }.joined(separator: "-")
+        attachment.name = [name, Self.contentSize?.lowercased(), Self.language].compactMap { $0 }
+            .joined(separator: "-")
+        attachment.lifetime = .keepAlways
+        testCase.add(attachment)
+    }
+
+    /// The prefixes of the app's own accessibility identifiers (`AccessibilityID`, `DokumentumApp.rootIdentifier`).
+    static let appIdentifierPrefixes = [
+        "sidebar", "documentList", "documentDetail", "documentInfo", "import.", "trash.", "debug.", "dokumentum.",
+    ]
+
+    /// Runs the system's accessibility audit on what is shown now (plan of #3, T12). An issue on an element with
+    /// one of the app's own identifiers fails the test; the others (system controls, elements without an
+    /// identifier) are listed in a text attachment named `audit-<name>`, for the PR body, and do not fail it.
+    func auditAccessibility(_ name: String, in testCase: XCTestCase, file: StaticString = #filePath, line: UInt = #line)
+    {
+        var listed: [String] = []
+        do {
+            try app.performAccessibilityAudit(for: .all) { issue in
+                let identifier = issue.element?.identifier ?? ""
+                let description =
+                    "\(issue.auditType.rawValue) \(issue.compactDescription) | id: \(identifier) | label: \(issue.element?.label ?? "")"
+                guard Self.appIdentifierPrefixes.contains(where: { identifier.hasPrefix($0) }) else {
+                    listed.append(description)
+                    return true
+                }
+                listed.append("FAIL " + description)
+                return false
+            }
+        } catch {
+            XCTFail("accessibility audit \(name): \(error)", file: file, line: line)
+        }
+        let attachment = XCTAttachment(string: listed.isEmpty ? "no issues" : listed.joined(separator: "\n"))
+        attachment.name = ["audit", name, Self.contentSize?.lowercased(), Self.language].compactMap { $0 }
+            .joined(separator: "-")
         attachment.lifetime = .keepAlways
         testCase.add(attachment)
     }

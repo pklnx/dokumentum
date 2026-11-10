@@ -12,6 +12,10 @@ extension AccessibilityID {
     static let rowSwipeMoveToTrash = "documentList.swipe.moveToTrash"
     static let rowSwipeRestore = "documentList.swipe.restore"
 
+    /// The open document's menu on the iPhone, and its "Move to Trash".
+    static let detailMenu = "documentDetail.menu"
+    static let detailMoveToTrash = "documentDetail.moveToTrash"
+
     /// The trash list's toolbar button and the buttons of its confirmation.
     static let emptyTrash = "trash.empty"
     static let emptyTrashConfirm = "trash.empty.confirm"
@@ -28,7 +32,8 @@ extension FocusedValues {
 }
 
 /// A row's trash actions: "Move to Trash", or "Restore" for a trashed document. In the context menu on both
-/// devices, and as a swipe action on the iPhone (PQ8: no confirmation, it can be restored).
+/// devices, as a swipe action (a full swipe on the iPhone only), and as an accessibility action (PQ8: no
+/// confirmation, it can be restored).
 struct TrashRowActions: ViewModifier {
     @Environment(LibraryTrash.self) private var trash: LibraryTrash?
     let document: LibraryDocument
@@ -41,7 +46,9 @@ struct TrashRowActions: ViewModifier {
                         trash,
                         identifier: document.isTrashed ? AccessibilityID.rowRestore : AccessibilityID.rowMoveToTrash)
                 }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                // A full swipe trashes only on the iPhone. On the Mac a trackpad swipe reveals the button and a click
+                // trashes: a full swipe there is too easily made by accident (#70).
+                .swipeActions(edge: .trailing, allowsFullSwipe: Self.allowsFullSwipe) {
                     button(
                         trash,
                         identifier: document.isTrashed
@@ -49,10 +56,25 @@ struct TrashRowActions: ViewModifier {
                     )
                     .tint(document.isTrashed ? .accentColor : .red)
                 }
+                // The same action for VoiceOver and other assistive technologies, named as the button (plan of
+                // #3, part 5): the row reads as one element (`DocumentRow`), so the swipe is no gesture they offer.
+                .accessibilityActions {
+                    if document.isTrashed {
+                        Button("Restore") { trash.restore(document.instanceID) }
+                    } else {
+                        Button("Move to Trash") { trash.moveToTrash(document.instanceID) }
+                    }
+                }
         } else {
             content
         }
     }
+
+    #if os(macOS)
+        static let allowsFullSwipe = false
+    #else
+        static let allowsFullSwipe = true
+    #endif
 
     private func button(_ trash: LibraryTrash, identifier: String) -> some View {
         Group {
@@ -115,6 +137,29 @@ struct EmptyTrashConfirmation: ViewModifier {
             } message: {
                 Text("This cannot be undone.")
             }
+    }
+}
+
+/// The open document's menu in the iPhone's detail bar: "Move to Trash" (#70). The document leaves the shown
+/// list, `LibraryModel` deselects it, and the stack goes back to the list. Not on a trashed document, whose bar
+/// offers Restore, and not on the Mac, which has Edit › Move to Trash (⌘⌫) and the row's context menu.
+struct DocumentDetailMenu: View {
+    @Environment(LibraryTrash.self) private var trash: LibraryTrash?
+
+    var body: some View {
+        if let trash, trash.isAvailable, let document = trash.openDocument, !document.isTrashed {
+            Menu {
+                Button(role: .destructive) {
+                    trash.moveToTrash(document.instanceID)
+                } label: {
+                    Label("Move to Trash", systemImage: "trash")
+                }
+                .accessibilityIdentifier(AccessibilityID.detailMoveToTrash)
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
+            .accessibilityIdentifier(AccessibilityID.detailMenu)
+        }
     }
 }
 

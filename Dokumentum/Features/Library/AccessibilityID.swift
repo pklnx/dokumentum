@@ -41,6 +41,8 @@ enum AccessibilityID {
     /// The info panel (plan of #3, part 3) and its controls.
     static let info = "documentInfo"
     static let infoTitle = "documentInfo.title"
+    /// The line under the title field when its save failed.
+    static let infoTitleNotSaved = "documentInfo.titleNotSaved"
     static let infoDate = "documentInfo.date"
     static let infoInbox = "documentInfo.inbox"
     static let infoCorrespondent = "documentInfo.correspondent"

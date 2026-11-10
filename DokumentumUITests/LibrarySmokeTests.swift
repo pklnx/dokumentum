@@ -50,6 +50,10 @@ final class LibrarySmokeTests: XCTestCase {
             XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
             ui.attachWindowScreenshot("2-sidebar", to: self)
         #endif
+        // Every sidebar row tells VoiceOver its count (#47, from the reviews of #53), and the app's own elements
+        // pass the system's accessibility audit (plan of #3, part 5).
+        assertEverySidebarRowHasACount(ui)
+        ui.auditAccessibility("sidebar", in: self)
 
         // A chevron expands the tag's nested tags and does not select the tag.
         XCTAssertFalse(ui.element(Self.tagRow(Self.golf)).exists, "Golf is shown before Auto is expanded")
@@ -78,6 +82,7 @@ final class LibrarySmokeTests: XCTestCase {
         ui.activate(Self.documentRow(Self.electricityBill))
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
         ui.attachWindowScreenshot("5-pdf", to: self)
+        ui.auditAccessibility("pdf", in: self)
 
         #if os(iOS)
             goBack(ui)
@@ -89,6 +94,55 @@ final class LibrarySmokeTests: XCTestCase {
             ui.element("documentDetail.stillDownloading").waitForExistence(timeout: 20), "no “Still downloading”")
         XCTAssertFalse(ui.element("documentDetail.pdf").exists)
         ui.attachWindowScreenshot("6-still-downloading", to: self)
+    }
+
+    /// Every sidebar row (Library, tags, correspondents, types, Trash) has a VoiceOver value that starts with
+    /// its count ("3 documents", "1 Dokument"). On the iPhone the list creates its lower rows only once they are
+    /// scrolled into view, so it scrolls down to Trash (bounded) and back.
+    @MainActor
+    private func assertEverySidebarRowHasACount(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
+        var values: [String: String] = [:]
+        func collect() {
+            guard let snapshot = try? ui.element("sidebar").snapshot() else { return }
+            var pending = [snapshot]
+            while let element = pending.popLast() {
+                pending += element.children
+                let identifier = element.identifier
+                guard identifier.hasPrefix("sidebar."), !identifier.hasPrefix("sidebar.tagDisclosure."),
+                    identifier != "sidebar.syncOff"
+                else { continue }
+                // An identifier can match more than one element on iOS; one of them carries the value.
+                if let value = element.value as? String, value.first?.isNumber == true {
+                    values[identifier] = value
+                } else if values[identifier] == nil {
+                    values[identifier] = ""
+                }
+            }
+        }
+        collect()
+        #if os(iOS)
+            for _ in 0..<5 where values["sidebar.trash"] == nil {
+                ui.element("sidebar").swipeUp(velocity: .slow)
+                collect()
+            }
+        #endif
+        for prefix in [
+            "sidebar.inbox", "sidebar.all", "sidebar.tag.", "sidebar.correspondent.", "sidebar.documentType.",
+            "sidebar.trash",
+        ] {
+            XCTAssertTrue(
+                values.keys.contains { $0.hasPrefix(prefix) }, "no sidebar row \(prefix)", file: file, line: line)
+        }
+        for (identifier, value) in values.sorted(by: { $0.key < $1.key }) {
+            XCTAssertFalse(value.isEmpty, "\(identifier) has no count for VoiceOver", file: file, line: line)
+        }
+        #if os(iOS)
+            // Back up to the tags, which the test uses next.
+            let auto = ui.element(Self.tagDisclosure(Self.auto))
+            for _ in 0..<5 where !(auto.exists && auto.isHittable) {
+                ui.element("sidebar").swipeDown(velocity: .slow)
+            }
+        #endif
     }
 
     #if os(iOS)

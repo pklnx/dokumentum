@@ -542,6 +542,17 @@
         }
       }
     },
+    "More" : {
+      "comment" : "The open document's menu in the iPhone's detail bar.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr"
+          }
+        }
+      }
+    },
     "Move to Trash" : {
       "comment" : "Context menu, swipe action and Edit menu item: moves the document into the trash.",
       "localizations" : {
@@ -834,6 +845,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Die Datei ist beschädigt oder kein PDF."
+          }
+        }
+      }
+    },
+    "The title could not be saved." : {
+      "comment" : "Info panel: shown under the title field when saving the title failed and it was rolled back.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Titel konnte nicht gesichert werden."
           }
         }
       }

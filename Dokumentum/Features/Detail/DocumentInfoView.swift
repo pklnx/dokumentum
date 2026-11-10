@@ -70,6 +70,20 @@ private struct DocumentInfoForm: View {
                     .focused($titleFocused)
                     .onSubmit(commitTitle)
                     .accessibilityIdentifier(AccessibilityID.infoTitle)
+                // The save failed and was rolled back (maintainer decision on #74): one line, no alert. The text
+                // keeps the primary colour, which has the contrast red footnote text lacks; only the icon is red.
+                if model.titleSaveFailure == document.instanceID {
+                    Label {
+                        Text("The title could not be saved.")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .accessibilityHidden(true)
+                    }
+                    .font(.footnote)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(AccessibilityID.infoTitleNotSaved)
+                }
                 DatePicker("Date", selection: dateBinding, displayedComponents: .date)
                     .accessibilityIdentifier(AccessibilityID.infoDate)
                 Toggle("In Inbox", isOn: inboxBinding)
@@ -102,6 +116,10 @@ private struct DocumentInfoForm: View {
         }
         .onChange(of: document.title) { _, title in
             titleDraft.titleChanged(to: title)
+        }
+        .onChange(of: titleDraft.text) { _, _ in
+            // Typing ends the "could not be saved" line; showing the stored title again (text equals base) does not.
+            if titleDraft.isChanged { model.titleEditStarted() }
         }
         .onChange(of: titleFocused) { _, focused in
             if !focused { commitTitle() }
@@ -240,6 +258,9 @@ struct TitleDraft: Equatable {
         text = title
         base = title
     }
+
+    /// Whether the user changed the text since the draft started or was last saved.
+    var isChanged: Bool { text != base }
 
     /// The library read a new title for the document: an untouched draft follows it.
     mutating func titleChanged(to title: String) {

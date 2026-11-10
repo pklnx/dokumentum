@@ -61,11 +61,27 @@ struct SidebarView: View {
         #endif
     }
 
+    // On the Mac not a `NavigationLink`, as the tag rows (`TagTreeRows`): a link becomes a button there that
+    // exposes the title but not the count to VoiceOver (measured on #46 and #53, also with the value on the link).
+    // The tagged label keeps its own value ("3 documents"), and the sidebar's `List(selection:)` selects it the
+    // same way. On the iPhone the link stays, for the row's disclosure indicator; it exposes the value.
+    // The label is a button to VoiceOver, so it needs the button's action: activating it selects the row, as a
+    // click does (the Mac audit's "Action is missing", review of #74, finding 2).
+    @ViewBuilder
     private func row(_ selection: LibrarySelection, title: Text, symbol: String) -> some View {
-        NavigationLink(value: selection) {
-            SidebarRowLabel(title: title, symbol: symbol, count: model.counts.count(for: selection))
-        }
-        .accessibilityIdentifier(AccessibilityID.sidebarRow(selection))
+        let label = SidebarRowLabel(title: title, symbol: symbol, count: model.counts.count(for: selection))
+        #if os(macOS)
+            label
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.selection = selection }
+                .accessibilityIdentifier(AccessibilityID.sidebarRow(selection))
+                .tag(selection)
+        #else
+            NavigationLink(value: selection) {
+                label
+            }
+            .accessibilityIdentifier(AccessibilityID.sidebarRow(selection))
+        #endif
     }
 
     private func sortedByName(_ references: [LibraryDocument.Reference]) -> [LibraryDocument.Reference] {
@@ -118,10 +134,15 @@ struct SyncOffLine: View {
             Image(systemName: "icloud.slash")
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        // Primary, not secondary: over the bar background the secondary colour measured 4.04:1 in light mode on
+        // the Mac, below 4.5:1 (maintainer decision on #74, round 3). The background stays.
+        .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        // The rows scroll beneath the footer: without a background they showed through its text, at large
+        // Dynamic Type sizes over a whole row (iPhone, XXXL; plan of #3, part 5).
+        .background(.bar)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(AccessibilityID.syncOffLine)
     }

@@ -52,6 +52,11 @@ private struct TagTreeRow: View {
                 }
             }
             .accessibilityAddTraits(.isButton)
+            #if os(macOS)
+                // A button to VoiceOver needs the button's action: it selects the tag, as a click does (review of
+                // #74, finding 2). On the iPhone the row is a link, which has its own.
+                .accessibilityAction { model.selection = .tag(id) }
+            #endif
             .accessibilityIdentifier(AccessibilityID.sidebarRow(.tag(id)))
         }
         .padding(.leading, CGFloat(row.depth) * 14)

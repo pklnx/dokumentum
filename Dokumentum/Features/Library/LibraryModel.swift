@@ -45,8 +45,15 @@ final class LibraryModel {
     var selectedDocumentID: UUID? {
         didSet {
             if selectedDocumentID == nil { isInfoPresented = false }
+            if selectedDocumentID != oldValue { titleSaveFailure = nil }
         }
     }
+
+    /// The document whose last title edit could not be saved (the save failed and was rolled back): the info
+    /// panel says so under the title field until the next edit or until another document opens (maintainer
+    /// decision on #74). A title refused because the document was trashed or deleted on the other device sets
+    /// nothing: the document leaves the list and the panel closes with it.
+    private(set) var titleSaveFailure: UUID?
 
     /// The tags whose nested tags are shown.
     var expandedTags: Set<UUID> = []
@@ -149,6 +156,8 @@ final class LibraryModel {
     @discardableResult
     func edit(_ change: DocumentEditor.Change, of instanceID: UUID) -> DocumentEditor.Outcome? {
         guard let editor = source.editor else { return nil }
+        // The next edit ends the "could not be saved" line; `commitTitle` sets it again if this one fails too.
+        titleSaveFailure = nil
         do {
             let outcome = try editor.apply(change, to: instanceID)
             if outcome != .unchanged { reload() }
@@ -166,7 +175,9 @@ final class LibraryModel {
     /// would not be saved again (reviews of #57).
     func commitTitle(_ draft: inout TitleDraft) {
         guard let commit = draft.commit() else { return }
-        switch edit(.title(commit.title), of: commit.document) {
+        let outcome = edit(.title(commit.title), of: commit.document)
+        if outcome == nil, canEdit { titleSaveFailure = commit.document }
+        switch outcome {
         case .saved, .unchanged:
             return
         case .noDocument, .trashed, .noMetadata, nil:
@@ -201,6 +212,11 @@ final class LibraryModel {
         // itself was saved.
         if outcome == .unchanged { reload() }
         return outcome
+    }
+
+    /// The user typed in the title field again: the "could not be saved" line goes away.
+    func titleEditStarted() {
+        titleSaveFailure = nil
     }
 
     /// Every live tag with its display path, sorted by it: the info panel's tag list.

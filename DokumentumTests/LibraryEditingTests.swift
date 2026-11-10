@@ -18,6 +18,7 @@ struct LibraryEditingTests {
     }
 
     private static let electricityBill = FixtureCatalog.documentID(1)
+    private static let medicalInvoice = FixtureCatalog.documentID(2)
 
     @Test func anEditShowsInTheListAtOnce() throws {
         let (model, _) = try makeModel()
@@ -119,6 +120,8 @@ struct LibraryEditingTests {
         // Out of the Inbox list: the panel closes.
         #expect(model.selectedDocumentID == nil)
         #expect(!model.isInfoPresented)
+        // No "could not be saved" line: the document left the list (maintainer decision on #74).
+        #expect(model.titleSaveFailure == nil)
     }
 
     /// A save that fails is rolled back: the draft shows the stored title, which the library read again.
@@ -138,6 +141,50 @@ struct LibraryEditingTests {
         #expect(draft.commit() == nil, "a failed draft is not saved again")
         #expect(model.selectedDocument?.title == "Renamed on the iPhone")
         #expect(!container.mainContext.hasChanges)
+        #expect(model.titleSaveFailure == Self.electricityBill, "the panel says the title was not saved")
+    }
+
+    /// The "could not be saved" line stays until the next edit, typing in the field, or another document opens
+    /// (maintainer decision on #74).
+    @Test func theNotSavedLineLastsUntilTheNextEditOrSelection() throws {
+        let container = try makeInMemoryContainer()
+        FixtureSeeder.seedForUITests(container.mainContext)
+        let model = LibraryModel(source: FailingSaveSource(store: StoreLibrarySource(container: container)))
+        model.selectedDocumentID = Self.electricityBill
+        func failTitle() {
+            var draft = TitleDraft()
+            draft.show(Self.electricityBill, title: "Electricity bill October")
+            draft.text = "Mine"
+            model.commitTitle(&draft)
+        }
+
+        failTitle()
+        #expect(model.titleSaveFailure == Self.electricityBill)
+        model.titleEditStarted()
+        #expect(model.titleSaveFailure == nil, "typing ends it")
+
+        failTitle()
+        model.edit(.inbox(false), of: Self.electricityBill)
+        #expect(model.titleSaveFailure == nil, "the next edit ends it")
+
+        failTitle()
+        model.selectedDocumentID = Self.medicalInvoice
+        #expect(model.titleSaveFailure == nil, "another document ends it")
+    }
+
+    /// `-UITestFailingSaves` (the UI test of the "could not be saved" line) applies only when asked for and only
+    /// to an in-memory store, never to a store on disk.
+    @Test func failingSavesAreOnlyForInMemoryStores() throws {
+        let inMemory = try makeInMemoryContainer()
+        #expect(UITestFailingSaves.isRequested(for: inMemory, arguments: ["-UITestFailingSaves", "YES"]))
+        #expect(!UITestFailingSaves.isRequested(for: inMemory, arguments: ["-UITestSeed", "YES"]))
+
+        let folder = FileManager.default.temporaryDirectory.appending(path: "FailingSaves-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let onDisk = try ArchiveStore.open(
+            ArchiveStore.configuration(for: .local, at: folder.appending(path: "Test.store")))
+        #expect(!UITestFailingSaves.isRequested(for: onDisk, arguments: ["-UITestFailingSaves", "YES"]))
     }
 
     /// A document deleted on the other device: the library reads it again, the document leaves the list and the
@@ -159,6 +206,7 @@ struct LibraryEditingTests {
         #expect(!model.snapshot.documents.contains { $0.instanceID == Self.electricityBill })
         #expect(model.selectedDocumentID == nil)
         #expect(!model.isInfoPresented)
+        #expect(model.titleSaveFailure == nil)
     }
 
     /// Counter-check: a saved title and an unchanged one keep the draft as typed.
@@ -175,6 +223,7 @@ struct LibraryEditingTests {
         model.commitTitle(&draft)
         #expect(draft.text == "Electricity bill November  ", "unchanged after trimming")
         #expect(draft.commit() == nil)
+        #expect(model.titleSaveFailure == nil)
     }
 
     /// The fixtures of unit tests take no edits; the info panel shows them read only.

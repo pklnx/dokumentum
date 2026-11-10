@@ -307,6 +307,87 @@ is lost, but the keeper can differ from the one another device chose until both 
 Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.swift`) and check
 `RepairInvariants` and that the store ends where the planner's simulation ends (`CheckedRepair`).
 
+## Library UI
+
+The library window (step 2, #3) is one `NavigationSplitView`: three columns on the Mac, a navigation stack on
+the iPhone. Its code is in `Dokumentum/Features/Library/` and `Dokumentum/Features/Detail/`.
+
+**The source seam.** The views never see `@Model` objects. `LibraryModel` (`@MainActor @Observable`) reads
+values from a `LibrarySource`: `snapshot()` (rows, tags, correspondents, types), `changes` and
+`loadPDF(instanceID:)`. The app's source is `StoreLibrarySource` (DokumentumCore), which reads the documents
+only through `DocumentListQuery` and the open document's PDF off the main actor (`DocumentFileLoader`).
+Sidebar filters, counts and the tag tree are pure Kit code over these values (`LibrarySelection`,
+`LibraryCounts`, `TagTree`). Edits go through `DocumentEditor`, the trash through `DocumentTrash`.
+
+**When the library reads again.** `changes` fires at once after any save of a context of the app's container
+(an edit, a trash move, an import), and after every debounced signal of the app's one `StoreChangeObserver`
+(#30). That observer adds what arrives without a context of the app: the CloudKit mirroring's remote changes
+(`NSPersistentStoreRemoteChange` of the store) and, through `RepairScheduler`, the end of each CloudKit import.
+The repair follows the same observer. It exists for stores on disk only; an in-memory store follows its own
+saves. A local save therefore reads the library once more after the debounce (5 s); a read is light.
+
+**Fixtures.** `Dokumentum/Features/Fixtures/` is `#if DEBUG` only, so a Release build contains no sample data
+(checked with `strings` on its binary). `FixtureCatalog` has the sample documents, with fixed `id`s and
+`instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read.
+- `-UITestSeed YES`: an in-memory store with the samples. UI tests, screenshots and a look at the app use it;
+  nothing is saved. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
+  store on disk in a temporary folder, removed when the app quits. `-UITestFailingSaves YES` (in-memory stores
+  only): every save of the info panel's editor fails and is rolled back, for the "The title could not be saved."
+  line under the title field.
+- The debug command "Add Sample Documents" (the Debug menu on the Mac, the sidebar's toolbar menu on the
+  iPhone) writes the samples into the open store, with fresh `instanceID`s; a second run adds nothing. With a
+  store on disk it asks first.
+- To look at the app with sample data: Mac,
+  `open -n build/Build/Products/Debug/Dokumentum.app --args -UITestSeed YES -ApplePersistenceIgnoreState YES`;
+  iPhone simulator, `xcrun simctl launch <udid> space.pklnx.Dokumentum -UITestSeed YES`.
+
+**Stale window state (T5 of #3).** In an unsigned local build, the Mac app under its real bundle ID opened no window
+after the root view's type changed: restoration state for that ID names the old type. Hence one stable root,
+`LibraryRootView`, in `WindowGroup(id: "library")`, and `-ApplePersistenceIgnoreState YES` in every UI test
+launch (`UITestApp`) and in the command above. Every launch argument comes as a `-key value` pair: a bare flag
+takes the next argument as its value, and a left-over `YES` is opened as a document, after which SwiftUI opens
+no window. Whether the explicit scene id prevents the state on a signed, sandboxed build is checked on the
+maintainer's Mac (#1, step 9).
+
+**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Move to
+Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
+nothing to act on (`@FocusedValue` of the focused window). ⌘⌫ while a text field is edited stays with the
+field (`CommandDeleteRouting`), so the field must lose the focus when the user turns to the list: a click on a
+document row, the selected one too, and a change of the selection give the list the focus (`DocumentListView`;
+without it ⌘⌫ emptied the title instead of trashing the document, review of #74). `MenuCommandsSmokeTests`
+drives them through the menu bar's key equivalents.
+
+**Accessibility.** Tests query identifiers (`AccessibilityID`), never localized text. Every sidebar row has
+the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged labels, not
+`NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
+accessibility action that selects the row, as a click does. Document rows read as one sentence
+(`LibraryDocument.accessibilityLabel`). `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)`
+(`UITestApp.auditAccessibility`): an issue on an element with one of the app's identifiers fails the test, the
+others are listed in an `audit-…` text attachment of the run.
+
+**Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
+`app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show
+the whole desktop with other apps' windows. The xcresult's automatic screen recording shows the desktop too,
+and test plan options did not turn it off, so every `UISmoke` run gets a new temporary `-resultBundlePath`,
+the PNGs are exported from it, and the bundle is deleted right away, whether the run passed or failed:
+
+```sh
+R=$(mktemp -d)/run.xcresult
+TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig xcodebuild -scheme Dokumentum \
+  -testPlan UISmoke -destination 'platform=macOS' -derivedDataPath build -resultBundlePath "$R" test
+xcrun xcresulttool export attachments --path "$R" --output-path <evidence folder>
+rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
+```
+
+- `TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de|en`: the language of the run (the screenshot names end with it).
+- `TEST_RUNNER_DOKUMENTUM_UI_CONTENT_SIZE=XXXL`: the Dynamic Type size on the iPhone (a `UIContentSizeCategory`
+  name without its prefix, such as `XXXL` or `AccessibilityXXXL`).
+- On the Mac the screen must be unlocked during a run (`ioreg -n Root -d1 | grep IOConsoleLocked`, recorded
+  before the run), and the test runner needs the screen-recording permission. Without it every window
+  screenshot failed with "Failed to create screenshot. Image creation failed" (#67).
+- A window screenshot can still show another window lying over the app's; whoever passes PNGs on opens each
+  first. PNGs never go into the repository: a PR lists each with its SHA-256.
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, subsystem

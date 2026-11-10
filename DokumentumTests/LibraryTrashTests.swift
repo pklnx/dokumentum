@@ -127,6 +127,15 @@ struct LibraryTrashTests {
         #expect(model.counts.count(for: .inbox) == 5)
     }
 
+    /// A full swipe trashes only on the iPhone; on the Mac the swipe reveals the button, which a click trashes (#70).
+    @Test func aFullSwipeTrashesOnlyOnTheIPhone() {
+        #if os(macOS)
+            #expect(!TrashRowActions.allowsFullSwipe)
+        #else
+            #expect(TrashRowActions.allowsFullSwipe)
+        #endif
+    }
+
     #if os(macOS)
         // MARK: ⌘⌫ in a text field
 

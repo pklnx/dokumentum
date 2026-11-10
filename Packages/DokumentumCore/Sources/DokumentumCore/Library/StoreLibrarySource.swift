@@ -7,24 +7,43 @@ import SwiftData
 /// fetches, and maps them with `LibraryMapping`. The PDF of the open document comes from `DocumentFileLoader`,
 /// off the main actor.
 ///
-/// **Changes:** `changes` fires after any context of this container saves (`ModelContext.didSave`). Remote
-/// changes and CloudKit imports are not seen yet: #30's `StoreChangeObserver` adds them (part 5 of #3).
+/// **Changes:** `changes` fires at once after any context of this container saves (`ModelContext.didSave`), so a
+/// local edit, trash move or import shows without delay. It also fires for every element of `storeChanges`: the
+/// app passes a stream of its shared `StoreChangeObserver` (#30), which adds what arrives without a context of
+/// the app, the remote changes the CloudKit mirroring saves into the store (`NSPersistentStoreRemoteChange`) and
+/// the end of each CloudKit import (through `RepairScheduler`), debounced (plan of #3, part 5). That observer
+/// sees local saves too, so a local save reads the library once more after the debounce; a read is light.
 public final class StoreLibrarySource: Sendable {
     public let container: ModelContainer
-    /// Fires after a save; a burst of saves leaves one pending event.
+    /// Fires after a save or a store change; a burst leaves one pending event.
     public let changes: AsyncStream<Void>
     private let loader: DocumentFileLoader
     private let observation: SaveObservation
+    /// Forwards `storeChanges` into `changes`; cancelled when `changes` ends or the source goes away.
+    private let forwarding: Task<Void, Never>?
 
-    public init(container: ModelContainer) {
+    /// - Parameter storeChanges: the debounced store changes of the app's `StoreChangeObserver`; `nil` for a
+    ///   source that follows its own saves only (tests, in-memory stores).
+    public init(container: ModelContainer, storeChanges: AsyncStream<Void>? = nil) {
         self.container = container
         loader = DocumentFileLoader(container: container)
         let (changes, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         self.changes = changes
         let observation = SaveObservation(container: container) { continuation.yield() }
         self.observation = observation
-        continuation.onTermination = { _ in observation.cancel() }
+        let forwarding = storeChanges.map { storeChanges in
+            Task {
+                for await _ in storeChanges { continuation.yield() }
+            }
+        }
+        self.forwarding = forwarding
+        continuation.onTermination = { _ in
+            observation.cancel()
+            forwarding?.cancel()
+        }
     }
+
+    deinit { forwarding?.cancel() }
 
     /// Everything the sidebar and the list show, read from the main context.
     @MainActor
