@@ -54,13 +54,16 @@ struct DocumentTrashTests {
         }
     }
 
-    /// A document with every field set, metadata, and a linked file, thumbnail and text.
+    /// A document with every field set, metadata, and a linked file, thumbnail and text. With `id`, the document
+    /// (and so its file, thumbnail and text) carries that shared `id`, as a second instance of one document does.
     @discardableResult
     private static func insertDocument(
-        _ title: String, inbox: Bool = true, trashed: Bool = false, metadata: Metadata? = nil,
+        _ title: String, id: UUID? = nil, inbox: Bool = true, trashed: Bool = false, metadata: Metadata? = nil,
         into context: ModelContext
     ) -> Document {
-        let document = Document(title: title, createdAt: created)
+        let document =
+            id.map { Document(id: $0, title: title, createdAt: created) }
+            ?? Document(title: title, createdAt: created)
         document.documentDate = created.addingTimeInterval(-86_400)
         document.isInbox = inbox
         document.pageCount = 3
@@ -253,6 +256,43 @@ struct DocumentTrashTests {
         #expect(blobDocumentIDs == Set(remaining.map(\.id)))
     }
 
+    /// Two instances of one document (the same `id`, different `instanceID`s, as sync can produce them): emptying
+    /// the trash deletes the confirmed trashed instance and its linked records, never the live one or its records.
+    @Test func aLiveInstanceSharingTheTrashedDocumentsIDSurvivesWithItsRecords() throws {
+        let container = try TestSupport.makeContainer()
+        let context = container.mainContext
+        let trashed = Self.insertDocument("Strom", trashed: true, into: context)
+        let live = Self.insertDocument("Strom", id: trashed.id, into: context)
+        try context.save()
+        #expect(live.id == trashed.id)
+        #expect(live.instanceID != trashed.instanceID)
+        let liveFields = Fields(live)
+        let liveRecords = [live.file?.instanceID, live.thumbnail?.instanceID, live.text?.instanceID]
+        #expect(!liveRecords.contains { $0 == nil })
+
+        let deleted = try DocumentTrash(context: context).emptyTrash(confirmed: [trashed.instanceID])
+
+        #expect(deleted == [trashed.instanceID])
+        let reading = ModelContext(container)
+        let remaining = try reading.fetch(FetchDescriptor<Document>())
+        #expect(remaining.map(\.instanceID) == [live.instanceID])
+        let survivor = try #require(remaining.first)
+        #expect(Fields(survivor) == liveFields)
+        #expect(
+            [survivor.file?.instanceID, survivor.thumbnail?.instanceID, survivor.text?.instanceID] == liveRecords)
+        let counts = try Self.counts(in: reading)
+        for entity in ["Document", "DocumentFile", "DocumentThumbnail", "DocumentText"] {
+            #expect(counts[entity] == 1, "\(entity)")
+        }
+        let files = try reading.fetch(FetchDescriptor<DocumentFile>())
+        let thumbnails = try reading.fetch(FetchDescriptor<DocumentThumbnail>())
+        let texts = try reading.fetch(FetchDescriptor<DocumentText>())
+        #expect(files.map(\.documentID) == [live.id])
+        #expect(thumbnails.map(\.documentID) == [live.id])
+        #expect(texts.map(\.documentID) == [live.id])
+        #expect(files.first?.instanceID == liveRecords[0])
+    }
+
     /// The main context still holds the document as trashed when another context restores it (another device's
     /// restore, imported). The re-check reads the store, so the document stays.
     @Test func aDocumentRestoredInAnotherContextAfterTheConfirmationSurvives() throws {
@@ -379,6 +419,18 @@ struct DocumentTrashTests {
 
     // MARK: SQL
 
+    /// Core Data's persistent-history bookkeeping, written with every save (measured on #70: two inserts into each
+    /// per move and restore). The only tables, besides `ZDOCUMENT`, that a move or a restore may write.
+    private static let historyTables: Set<String> = ["ATRANSACTION", "ACHANGE"]
+
+    /// The table an `INSERT`, `UPDATE` or `DELETE` statement writes, or nil for any other statement (a `SELECT`, or
+    /// transaction control such as `BEGIN EXCLUSIVE` and `COMMIT`).
+    private static func writtenTable(_ statement: String) -> String? {
+        let pattern = "^\\s*(?:INSERT(?: OR \\w+)? INTO|UPDATE(?: OR \\w+)?|DELETE FROM)\\s+(\\w+)"
+        guard let match = statement.firstMatch(of: try! Regex(pattern)) else { return nil }
+        return match.output[1].substring.map(String.init)
+    }
+
     /// Moving and restoring read the document rows only, never the text, the PDF or the thumbnail, and write only
     /// `deletedAt` and `modifiedAt` (CloudKit's last writer wins per field, #2 I6). Runs under `swift test` on
     /// macOS, where the SQL can be read (`SQLLog.isReadable`).
@@ -416,6 +468,23 @@ struct DocumentTrashTests {
                 $0.components(separatedBy: "=").first?.trimmingCharacters(in: .whitespaces) ?? ""
             }
             #expect(columns.sorted() == ["ZDELETEDAT", "ZMODIFIEDAT", "Z_OPT"], "\(update)")
+        }
+
+        // Nothing else is written: every write is one of those two updates or a persistent-history insert.
+        var historyInserts: [String: Int] = [:]
+        for statement in statements {
+            guard let table = Self.writtenTable(statement) else { continue }
+            if table == "ZDOCUMENT" {
+                #expect(statement.hasPrefix("UPDATE OR FAIL ZDOCUMENT SET"), "unexpected write: \(statement)")
+            } else if Self.historyTables.contains(table) {
+                #expect(statement.hasPrefix("INSERT INTO \(table)"), "unexpected history write: \(statement)")
+                historyInserts[table, default: 0] += 1
+            } else {
+                Issue.record("unexpected write to \(table): \(statement)")
+            }
+        }
+        for table in Self.historyTables.sorted() {
+            #expect((historyInserts[table] ?? 0) >= 1, "no INSERT INTO \(table) recorded: \(statements)")
         }
     }
 }
