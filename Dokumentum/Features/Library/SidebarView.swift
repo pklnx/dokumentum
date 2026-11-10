@@ -65,12 +65,15 @@ struct SidebarView: View {
     // exposes the title but not the count to VoiceOver (measured on #46 and #53, also with the value on the link).
     // The tagged label keeps its own value ("3 documents"), and the sidebar's `List(selection:)` selects it the
     // same way. On the iPhone the link stays, for the row's disclosure indicator; it exposes the value.
+    // The label is a button to VoiceOver, so it needs the button's action: activating it selects the row, as a
+    // click does (the Mac audit's "Action is missing", review of #74, finding 2).
     @ViewBuilder
     private func row(_ selection: LibrarySelection, title: Text, symbol: String) -> some View {
         let label = SidebarRowLabel(title: title, symbol: symbol, count: model.counts.count(for: selection))
         #if os(macOS)
             label
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.selection = selection }
                 .accessibilityIdentifier(AccessibilityID.sidebarRow(selection))
                 .tag(selection)
         #else
@@ -131,7 +134,9 @@ struct SyncOffLine: View {
             Image(systemName: "icloud.slash")
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        // Primary, not secondary: over the bar background the secondary colour measured 4.04:1 in light mode on
+        // the Mac, below 4.5:1 (maintainer decision on #74, round 3). The background stays.
+        .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

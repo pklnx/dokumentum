@@ -5,6 +5,13 @@ import SwiftUI
 /// time (PQ11).
 struct DocumentListView: View {
     @Bindable var model: LibraryModel
+    #if os(macOS)
+        /// Whether the list has the keyboard focus. A click on a row does not move the focus there by itself: the
+        /// info panel's title field kept it, and ⌘⌫ meant for Move to Trash then emptied the title, which was saved
+        /// (review of #74, finding 1). So a click on a row, the selected one too, and every change of the
+        /// selection give the list the focus.
+        @FocusState private var isListFocused: Bool
+    #endif
 
     var body: some View {
         List(selection: $model.selectedDocumentID) {
@@ -14,9 +21,18 @@ struct DocumentListView: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.documentRow(document.instanceID))
                 .modifier(TrashRowActions(document: document))
+                #if os(macOS)
+                    // The whole row, also the gap between its lines, takes the click that gives the list the focus.
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(TapGesture().onEnded { isListFocused = true })
+                #endif
             }
         }
         #if os(macOS)
+            .focused($isListFocused)
+            .onChange(of: model.selectedDocumentID) { _, selected in
+                if selected != nil { isListFocused = true }
+            }
             // Rows inserted above existing ones need an animated update to be measured (#72). Without one, the Mac's
             // table-backed `List` gives them its estimated row height (24 pt) and never measures them, so a
             // two-line row is cut to its title. Zero duration: the list looks as before, only the update path changes.
