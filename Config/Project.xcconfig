@@ -79,7 +79,7 @@ LOCALIZATION_PREFERS_STRING_CATALOGS = YES
 DOKUMENTUM_EMIT_LOC_STRINGS_Dokumentum = YES
 SWIFT_EMIT_LOC_STRINGS = $(DOKUMENTUM_EMIT_LOC_STRINGS_$(TARGET_NAME):default=NO)
 
-// Signing. Automatic with the team; signed builds run on the maintainer's machine. The development VM
+// Signing. Automatic with the team; signed builds run on the maintainer's machine. Agents' local builds
 // and Xcode Cloud's test workflows build macOS through Config/Unsigned.xcconfig, see
 // docs/development/index.md. Never set CODE_SIGN_IDENTITY = - here: next to a team it gives an ad hoc
 // macOS build with exit 0, and check-project.py rejects it.

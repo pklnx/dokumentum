@@ -48,7 +48,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
-| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; the development VM and Xcode Cloud's test workflows build macOS unsigned, section 4) |
+| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; agents' local builds and Xcode Cloud's test workflows build macOS unsigned, section 4) |
 | Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; user-selected files, read only; no app group, no network. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
@@ -59,7 +59,7 @@ are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 | Where | macOS | Xcode | SDKs | Simulator runtimes |
 |---|---|---|---|---|
-| Development VM (2026-11-07) | 27.2 (26B123) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.1 |
+| Development MacBook Pro (2026-11-07) | 27.2 (26B7124) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.2 |
 | Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
 The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`
@@ -250,19 +250,18 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   distribution build needs the team stays for step 8). macOS refuses to launch an ad
   hoc test host with `com.apple.developer.*` keys, so `ci_scripts/ci_post_clone.sh`
   applies `Config/Unsigned.xcconfig` in the workflows `PR` and `Main`, never in
-  step 8's `Release`. So macOS tests in Xcode Cloud and in the VM run without the
+  step 8's `Release`. So macOS tests in Xcode Cloud and in local builds run without the
   entitlements and outside the sandbox; only the maintainer's signed build
   exercises them.
 - State of the signed check (2026-11-07, the maintainer's delegation window on
-  #1): part 3 of step 0 merges on VM evidence, Xcode Cloud and its reviews. Its
+  #1): part 3 of step 0 merges on unsigned local evidence, Xcode Cloud and its reviews. Its
   signed output and the device check (maintainer step 9 on #1) are deferred, not
   dropped: they come before signed or iCloud work relies on them, and #1 stays
   open until then. So no signed build has exercised the entitlements yet.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
-  in a macOS VM on the maintainer's MacBook Pro, with Claude Code there (local
-  sessions, `gh` available). The VM has no signing identity and builds
-  unsigned; signed builds and device runs happen on the MacBook Pro itself,
-  with the maintainer's account. Cloud sessions (Linux) plan,
+  on the maintainer's Mac mini (since 2026-11-10), with Claude Code there (local
+  sessions, `gh` available). Agents have no signing identity and build unsigned; signed builds
+  and device runs are the maintainer's, with their account. Cloud sessions (Linux) plan,
   review plans and verify only what runs on Linux: scripts, workflows, docs,
   and `swift test` / `swift format lint` for `DokumentumKit`. Details:
   [index.md](./index.md).

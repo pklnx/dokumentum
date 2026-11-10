@@ -48,7 +48,7 @@ echo "Xcode $actual matches .xcode-version; SDKs for iOS $ios_major and macOS $m
 
 # Xcode Cloud's test actions always sign ad hoc (CODE_SIGN_IDENTITY=- on their command line), and macOS
 # refuses to launch an ad hoc test host that carries com.apple.developer.* keys. So the test workflows
-# build macOS as the development VM does: without team and entitlements (docs/development/index.md).
+# build macOS as agents' local builds do: without team and entitlements (docs/development/index.md).
 # Only these workflows: step 8's `Release` must sign with the real entitlements, so any other name
 # leaves the files alone. Without a workflow name under Xcode Cloud nobody can tell which case this is.
 local_xcconfig="$repository/Config/Local.xcconfig"
