@@ -81,7 +81,6 @@ struct UITestApp {
     /// A screenshot of the app's window only, kept with the result. Never `XCUIScreen.main`: on the
     /// Mac that is the whole desktop, with other apps' windows.
     func attachWindowScreenshot(_ name: String, to testCase: XCTestCase) {
-        if ProcessInfo.processInfo.environment["DOKUMENTUM_UI_SKIP_SCREENSHOTS"] == "1" { return }  // TEMP-UNCOMMITTED
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         attachment.name = [name, Self.contentSize?.lowercased(), Self.language].compactMap { $0 }
             .joined(separator: "-")
@@ -100,7 +99,6 @@ struct UITestApp {
     func auditAccessibility(_ name: String, in testCase: XCTestCase, file: StaticString = #filePath, line: UInt = #line)
     {
         var listed: [String] = []
-        if ProcessInfo.processInfo.environment["DOKUMENTUM_UI_SKIP_SCREENSHOTS"] == "1" { return }  // TEMP-UNCOMMITTED
         do {
             try app.performAccessibilityAudit(for: .all) { issue in
                 let identifier = issue.element?.identifier ?? ""

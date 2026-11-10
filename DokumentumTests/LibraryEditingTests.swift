@@ -172,6 +172,21 @@ struct LibraryEditingTests {
         #expect(model.titleSaveFailure == nil, "another document ends it")
     }
 
+    /// `-UITestFailingSaves` (the UI test of the "could not be saved" line) applies only when asked for and only
+    /// to an in-memory store, never to a store on disk.
+    @Test func failingSavesAreOnlyForInMemoryStores() throws {
+        let inMemory = try makeInMemoryContainer()
+        #expect(UITestFailingSaves.isRequested(for: inMemory, arguments: ["-UITestFailingSaves", "YES"]))
+        #expect(!UITestFailingSaves.isRequested(for: inMemory, arguments: ["-UITestSeed", "YES"]))
+
+        let folder = FileManager.default.temporaryDirectory.appending(path: "FailingSaves-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let onDisk = try ArchiveStore.open(
+            ArchiveStore.configuration(for: .local, at: folder.appending(path: "Test.store")))
+        #expect(!UITestFailingSaves.isRequested(for: onDisk, arguments: ["-UITestFailingSaves", "YES"]))
+    }
+
     /// A document deleted on the other device: the library reads it again, the document leaves the list and the
     /// panel closes.
     @Test func aTitleForADeletedDocumentClosesThePanel() throws {

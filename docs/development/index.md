@@ -331,7 +331,9 @@ saves. A local save therefore reads the library once more after the debounce (5 
 `instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read.
 - `-UITestSeed YES`: an in-memory store with the samples. UI tests, screenshots and a look at the app use it;
   nothing is saved. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
-  store on disk in a temporary folder, removed when the app quits.
+  store on disk in a temporary folder, removed when the app quits. `-UITestFailingSaves YES` (in-memory stores
+  only): every save of the info panel's editor fails and is rolled back, for the "The title could not be saved."
+  line under the title field.
 - The debug command "Add Sample Documents" (the Debug menu on the Mac, the sidebar's toolbar menu on the
   iPhone) writes the samples into the open store, with fresh `instanceID`s; a second run adds nothing. With a
   store on disk it asks first.
@@ -339,7 +341,7 @@ saves. A local save therefore reads the library once more after the debounce (5 
   `open -n build/Build/Products/Debug/Dokumentum.app --args -UITestSeed YES -ApplePersistenceIgnoreState YES`;
   iPhone simulator, `xcrun simctl launch <udid> space.pklnx.Dokumentum -UITestSeed YES`.
 
-**Stale window state (T5 of #3).** In the development VM, the Mac app under its real bundle ID opened no window
+**Stale window state (T5 of #3).** In an unsigned local build, the Mac app under its real bundle ID opened no window
 after the root view's type changed: restoration state for that ID names the old type. Hence one stable root,
 `LibraryRootView`, in `WindowGroup(id: "library")`, and `-ApplePersistenceIgnoreState YES` in every UI test
 launch (`UITestApp`) and in the command above. Every launch argument comes as a `-key value` pair: a bare flag

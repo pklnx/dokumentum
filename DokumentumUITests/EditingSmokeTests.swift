@@ -3,7 +3,8 @@ import XCTest
 /// Editing in the info panel (plan of #3, part 3) on the sample documents (`-UITestSeed`): the title and the
 /// correspondent change, and the list shows the new values after leaving the Inbox and coming back. On the Mac
 /// the delete key in the title field only edits the text (a regression of the predecessor,
-/// `MacSmokeTests.testDeleteKeyInTheTitleFieldOnlyEditsText`).
+/// `MacSmokeTests.testDeleteKeyInTheTitleFieldOnlyEditsText`). A second launch shows the line under the title
+/// field when its save fails (part 5); it stays in this test, so the smoke suite keeps its count (plan §4).
 final class EditingSmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test cannot see the
     // app's code. The titles and names are sample data, the same in every language.
@@ -100,16 +101,16 @@ final class EditingSmokeTests: XCTestCase {
             "the row does not show the new values: \(row.label)")
         XCTAssertFalse(row.label.contains("Stadtwerke Musterstadt"), "the row still shows the old correspondent")
         ui.attachWindowScreenshot("3-row-updated", to: self)
+
+        checkATitleThatCannotBeSavedSaysSo(ui)
     }
 
     /// A title whose save fails (`-UITestFailingSaves YES`: every save of the editor fails and is rolled back) says
     /// so under the field, the field shows the stored title again, and typing ends the line (maintainer decision on
-    /// #74).
+    /// #74). Launches the app again, with the sample documents as they were.
     @MainActor
-    func testATitleThatCannotBeSavedSaysSo() {
-        let ui = UITestApp()
+    private func checkATitleThatCannotBeSavedSaysSo(_ ui: UITestApp) {
         ui.launch(extraArguments: ["-UITestFailingSaves", "YES"])
-        defer { ui.app.terminate() }
         XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch")
         ui.activate(Self.electricityBill)
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
