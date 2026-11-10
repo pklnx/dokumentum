@@ -352,11 +352,15 @@ maintainer's Mac (#1, step 9).
 **Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Move to
 Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
 nothing to act on (`@FocusedValue` of the focused window). ⌘⌫ while a text field is edited stays with the
-field (`CommandDeleteRouting`). `MenuCommandsSmokeTests` drives them through the menu bar's key equivalents.
+field (`CommandDeleteRouting`), so the field must lose the focus when the user turns to the list: a click on a
+document row, the selected one too, and a change of the selection give the list the focus (`DocumentListView`;
+without it ⌘⌫ emptied the title instead of trashing the document, review of #74). `MenuCommandsSmokeTests`
+drives them through the menu bar's key equivalents.
 
 **Accessibility.** Tests query identifiers (`AccessibilityID`), never localized text. Every sidebar row has
 the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged labels, not
-`NavigationLink`s, because a link exposes no value there. Document rows read as one sentence
+`NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
+accessibility action that selects the row, as a click does. Document rows read as one sentence
 (`LibraryDocument.accessibilityLabel`). `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)`
 (`UITestApp.auditAccessibility`): an issue on an element with one of the app's identifiers fails the test, the
 others are listed in an `audit-…` text attachment of the run.
