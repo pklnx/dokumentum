@@ -11,7 +11,7 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 
 | Where | Used for |
 |---|---|
-| The maintainer's MacBook Pro, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
+| The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
 | The MacBook Pro, signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. None has run yet: the signed output and the device check are deferred to before signed or iCloud work relies on them ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
