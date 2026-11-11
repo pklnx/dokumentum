@@ -10,6 +10,10 @@ diff. Python only, so it also runs on Linux (the `lint` check):
 - Each target resolves, per SDK, to its expected bundle identifier, platforms, entitlements file and
   Info.plist file, through the $(TARGET_NAME) indirection in the xcconfig. A new target needs a row in
   TARGETS: without its own variables it would silently get the app's identifier.
+- The camera's usage text (NSCameraUsageDescription, #5, part 2) is in the iOS app's Config/Info-iOS.plist,
+  non-empty, and no build setting sets INFOPLIST_KEY_NSCameraUsageDescription: Xcode writes such a key into
+  every target's generated Info.plist, also where it resolves empty (measured: the extension got an empty
+  NSCameraUsageDescription). So the Mac app, the extension and the test bundles never name the camera.
 - Every entitlements file holds exactly the reviewed keys and values, so an unreviewed capability
   fails `lint`. A signed build adds keys of its own beyond these files (for example
   application-identifier, the team identifier and get-task-allow).
@@ -78,6 +82,8 @@ XCCONFIG_ONLY = {
     "MACOSX_DEPLOYMENT_TARGET",
     "PRODUCT_BUNDLE_IDENTIFIER",
     "SWIFT_VERSION",
+    # Not even there: see CAMERA_USAGE_KEY.
+    "INFOPLIST_KEY_NSCameraUsageDescription",
 }
 # Never in the .pbxproj either: with no signing identity, Config/Unsigned.xcconfig does this from outside.
 SIGNING_OVERRIDES = {"CODE_SIGN_IDENTITY", "CODE_SIGNING_ALLOWED", "OTHER_CODE_SIGN_FLAGS"}
@@ -179,6 +185,13 @@ SHARE_INFO_CONTENT = {"NSExtension": {
 
 def on_ios_and_mac(ios, mac):
     return {"iphoneos": ios, "iphonesimulator": ios, "macosx": mac}
+
+
+# The camera's usage text (#5, part 2, P1): only in the iOS app's Info.plist file, never as a build setting. The
+# text itself is the maintainer's; its German is in Dokumentum/InfoPlist.xcstrings.
+CAMERA_USAGE_KEY = "NSCameraUsageDescription"
+CAMERA_USAGE_SETTING = "INFOPLIST_KEY_NSCameraUsageDescription"
+assert CAMERA_USAGE_SETTING in XCCONFIG_ONLY
 
 
 # What each target must resolve to, per SDK it supports.
@@ -416,6 +429,9 @@ def check_xcconfig(text, settings):
                                 "the entitlements files")
     for key in sorted(XCCONFIG_SIGNING_OVERRIDES & set(settings)):
         problems.append(f"{XCCONFIG}: sets {key}; a build that signs differently says so on its command line")
+    if CAMERA_USAGE_SETTING in settings:
+        problems.append(f"{XCCONFIG}: uses {CAMERA_USAGE_SETTING}, which puts the key into every target's Info.plist; "
+                        f"the text belongs into {IOS_APP_INFO}")
     for key, lines in sorted(settings.items()):
         for condition, _ in lines:
             if condition not in XCCONFIG_CONDITIONS:
@@ -503,9 +519,12 @@ def check_info_plists(root):
     if problem:
         problems.append(problem)
     else:
+        camera = actual.pop(CAMERA_USAGE_KEY, None)
+        if not isinstance(camera, str) or not camera.strip():
+            problems.append(f"{IOS_APP_INFO}: {CAMERA_USAGE_KEY} must hold the camera's usage text, found {camera!r}")
         if actual != IOS_APP_INFO_CONTENT:
             problems.append(f"{IOS_APP_INFO}: must hold exactly the reviewed background modes and task identifiers "
-                            f"(IOS_APP_INFO_CONTENT in scripts/check-project.py), found {actual}")
+                            f"and {CAMERA_USAGE_KEY} (IOS_APP_INFO_CONTENT in scripts/check-project.py), found {actual}")
         problems += check_task_identifiers(actual.get("BGTaskSchedulerPermittedIdentifiers"))
     actual, problem = read_plist(root, SHARE_INFO)
     if problem:
@@ -868,8 +887,12 @@ def write_fixture(root):
         os.chmod(root / script, 0o755)
     for name, content in ENTITLEMENTS.items():
         (root / name).write_bytes(plistlib.dumps(content))
-    (root / IOS_APP_INFO).write_bytes(plistlib.dumps(IOS_APP_INFO_CONTENT))
+    (root / IOS_APP_INFO).write_bytes(plistlib.dumps(IOS_APP_INFO_FIXTURE))
     (root / SHARE_INFO).write_bytes(plistlib.dumps(SHARE_INFO_CONTENT))
+
+
+# The self-test's Info.plist: the reviewed content plus a camera text (its value is the maintainer's, not pinned).
+IOS_APP_INFO_FIXTURE = {**IOS_APP_INFO_CONTENT, CAMERA_USAGE_KEY: "Dokumentum uses the camera."}
 
 
 def self_test_post_clone():
@@ -1046,6 +1069,14 @@ def self_test():
             XCCONFIG, "INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))",
             "DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist\nINFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))"),
          "resolves to 'Config/Info-iOS.plist' on macosx"),
+        ("the camera text missing", replace_entitlement(IOS_APP_INFO, CAMERA_USAGE_KEY, None),
+         "NSCameraUsageDescription must hold the camera's usage text, found None"),
+        ("the camera text empty", set_entitlement(IOS_APP_INFO, CAMERA_USAGE_KEY, " "),
+         "NSCameraUsageDescription must hold the camera's usage text, found ' '"),
+        ("the camera text as a setting for every target", in_xcconfig(f"{CAMERA_USAGE_SETTING}[sdk=iphone*] = Camera."),
+         "uses INFOPLIST_KEY_NSCameraUsageDescription"),
+        ("the camera text on a target", in_target(f'"{CAMERA_USAGE_SETTING}[sdk=iphone*]"'),
+         "sets INFOPLIST_KEY_NSCameraUsageDescription"),
         ("a self-referring setting", edit(XCCONFIG, "DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum =\n",
                                           "DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum = $(DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum)\n"),
          "refers to itself"),
@@ -1139,31 +1170,31 @@ def self_test():
         ("an entitlements file is not a plist", write(IOS_APP_ENTITLEMENTS, "<plist"), "not a valid property list"),
         ("an unknown entitlements file", write("Config/Other.entitlements", ""), "Config/Other.entitlements is not a reviewed"),
         # Info.plist files.
-        ("an extra key in the app's Info.plist", write(IOS_APP_INFO, plistlib.dumps({**IOS_APP_INFO_CONTENT, "X": "y"}).decode()),
+        ("an extra key in the app's Info.plist", write(IOS_APP_INFO, plistlib.dumps({**IOS_APP_INFO_FIXTURE, "X": "y"}).decode()),
          "must hold exactly the reviewed background modes"),
         ("another background mode", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "UIBackgroundModes": ["remote-notification", "processing", "audio"]}).decode()),
+            {**IOS_APP_INFO_FIXTURE, "UIBackgroundModes": ["remote-notification", "processing", "audio"]}).decode()),
          "must hold exactly the reviewed background modes"),
         ("no processing background mode", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "UIBackgroundModes": ["remote-notification"]}).decode()),
+            {**IOS_APP_INFO_FIXTURE, "UIBackgroundModes": ["remote-notification"]}).decode()),
          "must hold exactly the reviewed background modes"),
         ("no permitted task identifiers", write(IOS_APP_INFO, plistlib.dumps(
-            {"UIBackgroundModes": IOS_APP_INFO_CONTENT["UIBackgroundModes"]}).decode()),
+            {key: value for key, value in IOS_APP_INFO_FIXTURE.items() if key != "BGTaskSchedulerPermittedIdentifiers"}).decode()),
          "must hold exactly the reviewed background modes"),
         ("a task identifier under the continued wildcard", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "BGTaskSchedulerPermittedIdentifiers": [
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
                 "space.pklnx.Dokumentum.continued.*", "space.pklnx.Dokumentum.continued.background"]}).decode()),
          "overlaps the wildcard space.pklnx.Dokumentum.continued.*"),
         ("a wildcard over every task", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "BGTaskSchedulerPermittedIdentifiers": [
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
                 "space.pklnx.Dokumentum.*", "space.pklnx.Dokumentum.backgroundProcessing"]}).decode()),
          "space.pklnx.Dokumentum.backgroundProcessing overlaps the wildcard space.pklnx.Dokumentum.*"),
         ("a task identifier listed twice", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "BGTaskSchedulerPermittedIdentifiers": [
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
                 "space.pklnx.Dokumentum.backgroundProcessing", "space.pklnx.Dokumentum.backgroundProcessing"]}).decode()),
          "is listed twice"),
         ("a task identifier of another app", write(IOS_APP_INFO, plistlib.dumps(
-            {**IOS_APP_INFO_CONTENT, "BGTaskSchedulerPermittedIdentifiers": ["com.example.task"]}).decode()),
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": ["com.example.task"]}).decode()),
          "is not under space.pklnx.Dokumentum."),
         ("another extension point", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
             **SHARE_INFO_CONTENT["NSExtension"], "NSExtensionPointIdentifier": "x"}}).decode()),
