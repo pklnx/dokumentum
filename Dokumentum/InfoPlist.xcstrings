@@ -2,7 +2,7 @@
   "sourceLanguage" : "en",
   "strings" : {
     "NSCameraUsageDescription" : {
-      "comment" : "Shown once by iOS when the document scanner first asks for the camera (Info.plist NSCameraUsageDescription; the English text is in Config/Project.xcconfig).",
+      "comment" : "Shown once by iOS when the document scanner first asks for the camera (NSCameraUsageDescription; the English text is in Config/Info-iOS.plist).",
       "extractionState" : "extracted_with_value",
       "localizations" : {
         "de" : {

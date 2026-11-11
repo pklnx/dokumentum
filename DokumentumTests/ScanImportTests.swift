@@ -93,7 +93,8 @@ struct ScanImportTests {
     static let date = Date(timeIntervalSinceReferenceDate: 820_000_000)
 
     static func scan(_ count: Int) -> RenderedScan {
-        RenderedScan(pages: (0..<count).map { MarkedPage.make(width: 1240, height: 1754, marker: .corner(for: $0)) })
+        RenderedScan(
+            pages: (0..<count).map { MarkedPage.make(width: 1240, height: 1754, marker: MarkedPage.corner(for: $0)) })
     }
 
     // Test 10.
@@ -240,7 +241,8 @@ struct ScanImportTests {
         #expect(encoded.unreadable == 0)
         let images = try encoded.pages.map { try #require(ImageCoding.orientedImage(from: $0, maxPixelSize: 8000)) }
         #expect(images.map(MarkedPage.markedCorner) == [.topLeft, .topRight, .bottomRight, .bottomLeft])
-        #expect(images.map { [$0.width, $0.height] } == [[2400, 1600], [1333, 2400], [1000, 1400], [2400, 1800]])
+        let sizes: [[Int]] = images.map { [$0.width, $0.height] }
+        #expect(sizes == [[2400, 1600], [1333, 2400], [1000, 1400], [2400, 1800]])
         #expect(ScanEncoder.quality == 0.9 && ScanEncoder.maxPixelSize == 2400, "T4")
     }
 
@@ -303,7 +305,7 @@ struct ScanImportTests {
 
             // `.right`: displayed turned a quarter clockwise, so the top-left marker shows at the top right.
             let turned = try #require(ScannedImage.upright(UIImage(cgImage: stored, scale: 1, orientation: .right)))
-            #expect([turned.width, turned.height] == [600, 800])
+            #expect(turned.width == 600 && turned.height == 800)
             #expect(MarkedPage.markedCorner(of: turned) == .topRight)
         }
     #endif
