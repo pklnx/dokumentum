@@ -33,6 +33,9 @@ struct DocumentInfoView: View {
             if let document = model.selectedDocument {
                 DocumentInfoForm(model: model, document: document)
             } else {
+                // Shown only while the panel closes: it closes with the selection (`LibraryModel.selectedDocumentID`,
+                // `LibraryEditingTests.theInfoPanelClosesWhenTheSelectionClears`), and Show Info is disabled without
+                // a document. So no UI test visits it (plan of #89, T3).
                 #if os(macOS)
                     PlaceholderView(title: "No document selected", systemImage: "doc.text.magnifyingglass")
                 #else

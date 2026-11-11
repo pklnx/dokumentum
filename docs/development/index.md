@@ -412,13 +412,26 @@ the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged
 `NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
 accessibility action that selects the row, as a click does. Document rows read as one sentence
 (`LibraryDocument.accessibilityLabel`). On the Mac they are tagged rows too, not links, for the same reason
-the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver whose action selects the document.
+the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver through its select action, which
+selects the document. They have no button trait: the action alone makes the row a button, and without the action
+the row has "Unknown role" with or without the trait (review of #88, #89).
 The Mac document list is named by its navigation title ("Inbox"). The Mac placeholders ("No document selected",
 "Inbox empty", "Still downloading" and the others) are `PlaceholderView`, not `ContentUnavailableView`: the
 system view's title is secondary (3.11:1 on white in light mode) and it gives VoiceOver its symbol and title as
-one element. `PlaceholderView` keeps the system view's positions, draws the title in the primary colour, hides
-the symbol from VoiceOver and puts the identifier on the title (#82, maintainer decisions P1 and P2). The iPhone
-keeps `ContentUnavailableView`, whose title is already primary.
+one element. `PlaceholderView` keeps the system view's positions, fonts and weights, draws the title and the
+description in the primary colour (#82, maintainer decision P1; #89, maintainer decision of 2026-11-11), hides
+the symbol from VoiceOver, puts the identifier on the title and `<identifier>.description` on the description
+(#82, P2; #89). The iPhone keeps `ContentUnavailableView`, whose title is already primary.
+
+The audit cannot guard the placeholders' contrast. In light it reports "Contrast failed" on the regular-weight
+15 pt description whatever its colour: `.primary`, `.secondary`, black and `labelColor` all fail, the medium and
+semibold weights pass (measured in the plan of #89; `.primary` again in its PR, while in dark it passes). The UI tests therefore measure the text
+contrast of the placeholders' titles and descriptions from each element's own screenshot
+(`UITestApp.assertTextContrast`: the background is the most common pixel, the text the pixel farthest from it in
+relative luminance, at least 10 pixels must reach 4.5:1). `LibrarySmokeTests` measures "Still downloading" and
+"This PDF cannot be shown", `SampleDocumentsSmokeTests` "No documents". The descriptions'
+`documentDetail.*.description` identifiers start with an app prefix, so an audit added later in one of these
+states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
