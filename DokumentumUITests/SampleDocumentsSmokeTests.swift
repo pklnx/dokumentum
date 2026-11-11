@@ -28,6 +28,26 @@ final class SampleDocumentsSmokeTests: XCTestCase {
         ui.attachWindowScreenshot("1-empty-sync-off", to: self)
 
         #if os(macOS)
+            // All Documents says "No documents" (#89). The placeholder keeps its identifier and its text is in its
+            // value (the label is empty), so the test waits until the value is no longer the Inbox's.
+            let empty = ui.element("documentList.empty")
+            let inboxEmpty = empty.value as? String ?? ""
+            XCTAssertFalse(inboxEmpty.isEmpty, "“Inbox empty” has no value")
+            ui.activate("sidebar.all")
+            let noDocuments = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == true AND value != %@", inboxEmpty), object: empty)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [noDocuments], timeout: 10), .completed,
+                "All Documents does not say “No documents”")
+            ui.attachWindowScreenshot("1b-no-documents", to: self)
+            ui.assertTextContrast("documentList.empty", in: self)
+            ui.activate("sidebar.inbox")
+            let inboxAgain = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == true AND value == %@", inboxEmpty), object: empty)
+            XCTAssertEqual(XCTWaiter.wait(for: [inboxAgain], timeout: 10), .completed, "the Inbox is not shown again")
+        #endif
+
+        #if os(macOS)
             // In front again first: a system dialog can take the key focus, and the item stays disabled
             // without a focused window (review B of #53).
             ui.app.activate()

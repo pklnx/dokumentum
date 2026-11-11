@@ -84,14 +84,15 @@ struct DocumentListView: View {
 
     // On the Mac not a `NavigationLink`, as the sidebar rows (`SidebarView.row`): a link becomes a button there whose
     // role the Mac audit does not know ("Unknown role" on every row, #82). The tagged row is selected by the list's
-    // `List(selection:)` as before. It is a button to VoiceOver with the button's action, which selects the document
-    // as a click does. On the iPhone the link stays, for the push and the row's disclosure indicator.
+    // `List(selection:)` as before. Its select action, which selects the document as a click does, is what makes the
+    // row a button to VoiceOver, the role the audit checks; a button trait alone adds nothing (#88 review: without the
+    // trait it stays a button, without the action it has "Unknown role"; #89). On the iPhone the link stays, for the
+    // push and the row's disclosure indicator.
     @ViewBuilder
     private func row(_ document: LibraryDocument, tagPaths: [String]) -> some View {
         let content = DocumentRow(document: document, tagPaths: tagPaths)
         #if os(macOS)
             content
-                .accessibilityAddTraits(.isButton)
                 .accessibilityAction { model.selectedDocumentID = document.instanceID }
                 .tag(document.instanceID)
         #else

@@ -12,7 +12,7 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 | Where | Used for |
 |---|---|
 | The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
-| The MacBook Pro, signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. None has run yet: the signed output and the device check are deferred to before signed or iCloud work relies on them ([plan.md](./plan.md), section 4). |
+| The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
 | Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
@@ -395,8 +395,9 @@ after the root view's type changed: restoration state for that ID names the old 
 `LibraryRootView`, in `WindowGroup(id: "library")`, and `-ApplePersistenceIgnoreState YES` in every UI test
 launch (`UITestApp`) and in the command above. Every launch argument comes as a `-key value` pair: a bare flag
 takes the next argument as its value, and a left-over `YES` is opened as a document, after which SwiftUI opens
-no window. Whether the explicit scene id prevents the state on a signed, sandboxed build is checked on the
-maintainer's Mac (#1, step 9).
+no window. On the maintainer's signed, sandboxed build (#1, step 9, 2026-11-11) the window opened after an update
+from the old root (`75340a0`) to `LibraryRootView`. The container's `Saved Application State` stayed empty in both
+runs, though, so that run did not show whether the scene id overrides a stale state.
 
 **Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Move to
 Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
@@ -411,13 +412,26 @@ the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged
 `NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
 accessibility action that selects the row, as a click does. Document rows read as one sentence
 (`LibraryDocument.accessibilityLabel`). On the Mac they are tagged rows too, not links, for the same reason
-the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver whose action selects the document.
+the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver through its select action, which
+selects the document. They have no button trait: the action alone makes the row a button, and without the action
+the row has "Unknown role" with or without the trait (review of #88, #89).
 The Mac document list is named by its navigation title ("Inbox"). The Mac placeholders ("No document selected",
 "Inbox empty", "Still downloading" and the others) are `PlaceholderView`, not `ContentUnavailableView`: the
 system view's title is secondary (3.11:1 on white in light mode) and it gives VoiceOver its symbol and title as
-one element. `PlaceholderView` keeps the system view's positions, draws the title in the primary colour, hides
-the symbol from VoiceOver and puts the identifier on the title (#82, maintainer decisions P1 and P2). The iPhone
-keeps `ContentUnavailableView`, whose title is already primary.
+one element. `PlaceholderView` keeps the system view's positions, fonts and weights, draws the title and the
+description in the primary colour (#82, maintainer decision P1; #89, maintainer decision of 2026-11-11), hides
+the symbol from VoiceOver, puts the identifier on the title and `<identifier>.description` on the description
+(#82, P2; #89). The iPhone keeps `ContentUnavailableView`, whose title is already primary.
+
+The audit cannot guard the placeholders' contrast. In light it reports "Contrast failed" on the regular-weight
+15 pt description whatever its colour: `.primary`, `.secondary`, black and `labelColor` all fail, the medium and
+semibold weights pass (measured in the plan of #89; `.primary` again in its PR, while in dark it passes). The UI tests therefore measure the text
+contrast of the placeholders' titles and descriptions from each element's own screenshot
+(`UITestApp.assertTextContrast`: the background is the most common pixel, the text the pixel farthest from it in
+relative luminance, at least 10 pixels must reach 4.5:1). `LibrarySmokeTests` measures "Still downloading" and
+"This PDF cannot be shown", `SampleDocumentsSmokeTests` "No documents". The descriptions'
+`documentDetail.*.description` identifiers start with an app prefix, so an audit added later in one of these
+states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text

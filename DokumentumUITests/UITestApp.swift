@@ -1,3 +1,4 @@
+import ImageIO
 import XCTest
 
 /// Launches the app for a UI test and finds its elements by accessibility identifier, never by
@@ -188,4 +189,129 @@ struct UITestApp {
         attachment.lifetime = .keepAlways
         testCase.add(attachment)
     }
+
+    #if os(macOS)
+        /// Measures the text contrast of the element with this identifier from its own screenshot, never the screen's
+        /// (#89): the background is the most common pixel, the text the pixel farthest from it in relative luminance,
+        /// and the ratio is WCAG's. The audit cannot be this check: in light it fails regular-weight text whatever its
+        /// colour (plan of #89, finding 2). The PNG is decoded at its native pixel size and drawn 1:1 into sRGB, so a
+        /// 2× display or a display profile does not blur or shift the stems (plan review N1). At least
+        /// `minimumPixels` pixels must reach the ratio, so one stray pixel cannot pass (N2). The measurement is printed
+        /// and attached as `contrast-<identifier>`; on a failure the element's screenshot is attached too.
+        @discardableResult
+        func assertTextContrast(
+            _ identifier: String, atLeast minimum: Double = 4.5, minimumPixels: Int = 10, in testCase: XCTestCase,
+            file: StaticString = #filePath, line: UInt = #line
+        ) -> TextContrast? {
+            let element = element(identifier)
+            guard element.waitForExistence(timeout: 20) else {
+                XCTFail("\(identifier) did not appear", file: file, line: line)
+                return nil
+            }
+            let screenshot = element.screenshot()
+            guard let contrast = TextContrast(png: screenshot.pngRepresentation, minimum: minimum) else {
+                XCTFail("\(identifier): the screenshot could not be measured", file: file, line: line)
+                return nil
+            }
+            let summary =
+                "CONTRAST \(Self.attachmentName(identifier)): \(contrast.description), "
+                + "\(contrast.pixelsReachingMinimum) px ≥ \(minimum):1"
+            print(summary)
+            let measurement = XCTAttachment(string: summary)
+            measurement.name = Self.attachmentName("contrast-" + identifier)
+            measurement.lifetime = .keepAlways
+            testCase.add(measurement)
+            if contrast.pixelsReachingMinimum < minimumPixels {
+                let image = XCTAttachment(screenshot: screenshot)
+                image.name = Self.attachmentName("contrast-failed-" + identifier)
+                image.lifetime = .keepAlways
+                testCase.add(image)
+                XCTFail(
+                    "\(identifier): \(contrast.description); only \(contrast.pixelsReachingMinimum) px reach "
+                        + "\(minimum):1, \(minimumPixels) needed",
+                    file: file, line: line)
+            }
+            return contrast
+        }
+    #endif
 }
+
+#if os(macOS)
+    /// The text contrast of a PNG of one text element (`UITestApp.assertTextContrast`).
+    struct TextContrast: CustomStringConvertible {
+        /// sRGB, 0xRRGGBB.
+        let background: UInt32
+        let text: UInt32
+        /// WCAG 2 contrast ratio of `text` on `background`.
+        let ratio: Double
+        /// The pixels whose ratio on the background reaches the minimum.
+        let pixelsReachingMinimum: Int
+
+        var description: String {
+            String(format: "#%06x on #%06x, %.2f:1", text, background, ratio)
+        }
+
+        init?(png: Data, minimum: Double) {
+            guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+                let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                let sRGB = CGColorSpace(name: CGColorSpace.sRGB)
+            else { return nil }
+            let width = image.width
+            let height = image.height
+            guard width > 0, height > 0 else { return nil }
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+                guard
+                    let context = CGContext(
+                        data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                        bytesPerRow: width * 4, space: sRGB,
+                        bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+                else { return false }
+                context.interpolationQuality = .none
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            guard drawn else { return nil }
+            var counts: [UInt32: Int] = [:]
+            for index in stride(from: 0, to: pixels.count, by: 4) {
+                let rgb = UInt32(pixels[index]) << 16 | UInt32(pixels[index + 1]) << 8 | UInt32(pixels[index + 2])
+                counts[rgb, default: 0] += 1
+            }
+            // The most common colour; on a tie the lower value, so the result does not depend on the order.
+            let mostCommon = counts.max { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }
+            guard let background = mostCommon?.key else { return nil }
+            let backgroundLuminance = Self.luminance(background)
+            var text = background
+            var farthest = 0.0
+            var reaching = 0
+            for (rgb, count) in counts {
+                let luminance = Self.luminance(rgb)
+                let distance = abs(luminance - backgroundLuminance)
+                if distance > farthest {
+                    farthest = distance
+                    text = rgb
+                }
+                if Self.ratio(luminance, backgroundLuminance) >= minimum {
+                    reaching += count
+                }
+            }
+            self.background = background
+            self.text = text
+            self.ratio = Self.ratio(Self.luminance(text), backgroundLuminance)
+            self.pixelsReachingMinimum = reaching
+        }
+
+        /// WCAG 2 relative luminance of an sRGB colour.
+        static func luminance(_ rgb: UInt32) -> Double {
+            func linear(_ component: UInt32) -> Double {
+                let value = Double(component & 0xff) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(rgb >> 16) + 0.7152 * linear(rgb >> 8) + 0.0722 * linear(rgb)
+        }
+
+        static func ratio(_ first: Double, _ second: Double) -> Double {
+            (max(first, second) + 0.05) / (min(first, second) + 0.05)
+        }
+    }
+#endif
