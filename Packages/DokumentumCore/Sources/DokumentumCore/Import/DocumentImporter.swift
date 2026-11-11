@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 
 /// What an import source needs from the importer; the app's tests stub it.
 public protocol DocumentImporting: Sendable {
-    /// Imports one file whose bytes were already read: a PDF as it is, an image as a one-page PDF (part 3).
+    /// Imports one file whose bytes were already read: a PDF as it is, an image as a one-page PDF (part 3), a
+    /// multi-page TIFF as a PDF with a page per frame (#90; GIF, APNG and HEIC with several images give their
+    /// first).
     /// **PDF bytes are a PDF whatever the label** (#86): a sender can declare a PDF as an image, and the image
     /// path would keep only its first page. Never throws: every way it can end is an outcome.
     /// - Parameters:
@@ -17,7 +19,8 @@ public protocol DocumentImporting: Sendable {
     func importFile(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
 
-    /// Imports images as one document, one page per image in their order (part 3): photos picked together.
+    /// Imports images as one document, one page per image in their order (part 3): photos picked together. A
+    /// multi-page TIFF gives a page per frame at its place (#90); other formats with several images their first.
     /// - Parameters:
     ///   - fileName: the `originalFileName` (empty for photos); the title when `title` is `nil`.
     ///   - title: the document's title, such as "Photo <date, time>" (PQ2); `nil` takes it from `fileName`.
