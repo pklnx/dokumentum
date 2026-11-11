@@ -56,6 +56,12 @@
             self.task = task
         }
 
+        /// The SDK does not name the handler's queue. On the main thread the handler runs at once; elsewhere this
+        /// waits with `DispatchQueue.main.sync` until the main actor ran it, so the attempt is given back before the
+        /// handler returns and the system suspends the app (an async hop could run after the suspension). It cannot
+        /// deadlock: the main thread never waits synchronously for the queue the SDK runs this on, and nothing in the
+        /// app blocks the main thread on BackgroundTasks (review N2 of #129). A main thread busy with a long job
+        /// delays the refund until that job ends (M5).
         func onExpiration(_ handler: @escaping @MainActor @Sendable () -> Void) {
             task.expirationHandler = {
                 if Thread.isMainThread {

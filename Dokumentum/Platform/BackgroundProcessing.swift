@@ -85,8 +85,19 @@ final class BackgroundProcessing {
     private var continued: (any BackgroundTaskHandle)?
     /// The running processing task.
     private var processing: (any BackgroundTaskHandle)?
-    /// Whether the app is in the foreground (`scenePhase` not `.background`).
-    private(set) var isInForeground = true
+    /// Whether the application itself is in the foreground (`UIApplication.applicationState != .background` in the
+    /// app). Asked, not assumed: the system launches a terminated app for the processing task in the background, and
+    /// then no scene phase change arrives (review B1 of #129).
+    private let applicationIsInForeground: @MainActor () -> Bool
+    /// The last scene phase `ProcessingLifecycle` handed over, if any.
+    private var scenePhase: ScenePhase?
+
+    /// Whether the app is in the foreground: the last scene phase is not `.background` and the application is not in
+    /// the background. Before any scene phase arrived (a launch in the background), only the application counts.
+    var isInForeground: Bool {
+        if scenePhase == .background { return false }
+        return applicationIsInForeground()
+    }
 
     /// Whether a background task holds the work, so going to the background does not pause.
     var holdsWork: Bool { continued != nil || processing != nil }
@@ -97,8 +108,10 @@ final class BackgroundProcessing {
 
     init(
         scheduler: ProcessingScheduler, tasks: any BackgroundTaskScheduling,
-        openDocuments: @escaping @MainActor (Set<UUID>?) -> Int, registry: BackgroundTaskRegistry = .process
+        openDocuments: @escaping @MainActor (Set<UUID>?) -> Int,
+        applicationIsInForeground: @escaping @MainActor () -> Bool, registry: BackgroundTaskRegistry = .process
     ) {
+        self.applicationIsInForeground = applicationIsInForeground
         self.scheduler = scheduler
         self.tasks = tasks
         self.openDocuments = openDocuments
@@ -151,12 +164,11 @@ final class BackgroundProcessing {
 
     /// The scene's phase changed (`ProcessingLifecycle`).
     func scenePhaseChanged(to phase: ScenePhase) {
+        scenePhase = phase
         switch phase {
         case .active:
-            isInForeground = true
             scheduler.resume()
         case .background:
-            isInForeground = false
             // A background task keeps the work going; otherwise the running attempt is given back before the
             // system suspends the app (part 1), and the processing task does the rest later.
             guard !holdsWork else { return }
@@ -202,13 +214,18 @@ final class BackgroundProcessing {
         scheduler.resume()
     }
 
-    /// The runs ended and none follows: every running task completes.
+    /// The runs ended and none follows: every running task completes. The continued task succeeds when none of the
+    /// user's documents is open any more. One that still waits (its backoff, another device's claim, its file data)
+    /// ends it without success instead of keeping it: such a wait can last hours (a claim waits up to 6 h), the system
+    /// expires a task whose progress stands still, and the processing task or the next foreground run does the rest
+    /// (review N3 of #129).
     private func drained() {
         reportProgress()
         if let continued {
+            let success = openDocuments(tracked) == 0
             self.continued = nil
             tracked = []
-            continued.complete(success: true)
+            continued.complete(success: success)
         }
         if let processing {
             self.processing = nil

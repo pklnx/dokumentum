@@ -101,7 +101,8 @@ struct DokumentumApp: App {
                             Log.processing.error("Open documents not counted: \(Log.code(of: error), privacy: .public)")
                             return 0
                         }
-                    })
+                    },
+                    applicationIsInForeground: { UIApplication.shared.applicationState != .background })
                 background.register()
                 if let storeChanges {
                     background.followStoreChanges(storeChanges.changes())

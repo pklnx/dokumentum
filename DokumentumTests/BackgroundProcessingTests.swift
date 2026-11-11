@@ -110,6 +110,8 @@ struct BackgroundProcessingTests {
     final class OpenCount {
         var all = 0
         var ofTracked = 0
+        /// What the application's state says (`UIApplication.applicationState != .background` in the app).
+        var applicationInForeground = true
     }
 
     private struct Setup {
@@ -139,7 +141,7 @@ struct BackgroundProcessingTests {
         let background = BackgroundProcessing(
             scheduler: scheduler, tasks: tasks,
             openDocuments: { instanceIDs in instanceIDs == nil ? open.all : open.ofTracked },
-            registry: BackgroundTaskRegistry())
+            applicationIsInForeground: { open.applicationInForeground }, registry: BackgroundTaskRegistry())
         background.register()
         let submits = TestSignal()
         background.didSubmit = { _, _ in submits.fire() }
@@ -174,11 +176,13 @@ struct BackgroundProcessingTests {
         let tasks = FakeTasks()
         let registry = BackgroundTaskRegistry()
         let first = BackgroundProcessing(
-            scheduler: scheduler, tasks: tasks, openDocuments: { _ in 0 }, registry: registry)
+            scheduler: scheduler, tasks: tasks, openDocuments: { _ in 0 }, applicationIsInForeground: { true },
+            registry: registry)
         first.register()
         first.register()
         let second = BackgroundProcessing(
-            scheduler: scheduler, tasks: tasks, openDocuments: { _ in 0 }, registry: registry)
+            scheduler: scheduler, tasks: tasks, openDocuments: { _ in 0 }, applicationIsInForeground: { true },
+            registry: registry)
         second.register()
 
         #expect(tasks.registrations == BackgroundTaskIdentifier.all)
@@ -311,6 +315,58 @@ struct BackgroundProcessingTests {
         #expect(setup.background.tracked.isEmpty)
         #expect(!setup.scheduler.isPaused, "the foreground keeps processing")
         #expect(runner.interrupts.count == 0)
+    }
+
+    /// A drain while one of the user's documents still waits (its backoff, another device's claim) ends the task
+    /// without success instead of reporting "done" at "2 of 3" (review N3 of #129).
+    @Test func aDrainWithAUserDocumentStillOpenEndsWithoutSuccess() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        defer { setup.scheduler.stop() }
+        setup.open.ofTracked = 1
+        setup.background.userImported([UUID(), UUID(), UUID()])
+        await setup.submits.wait(for: 1)
+
+        let task = launchContinued(setup)
+        await task.completed.wait(for: 1, "the drain did not end the task")
+        #expect(task.completions == [false])
+        #expect(task.reports.last?.completed == 2)
+        #expect(!setup.background.holdsWork)
+    }
+
+    // MARK: - A launch in the background (review B1 of #129)
+
+    /// The system launched the terminated app for the processing task: no scene phase arrives. The expiry gives the
+    /// attempt back and the queue stays paused, so no attempt runs into the suspension.
+    @Test func anExpiryInABackgroundLaunchStaysPaused() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeSetup(runner: runner)
+        defer { setup.scheduler.stop() }
+        setup.open.all = 1
+        setup.open.applicationInForeground = false
+
+        let task = setup.tasks.launch(BackgroundTaskIdentifier.processing)
+        await gate.reached()
+        task.expire()
+        #expect(runner.interrupts.count == 1)
+        #expect(task.completions == [false])
+        #expect(setup.scheduler.isPaused, "after the expiry in a background launch the queue runs on unpaused")
+        await setup.submits.wait(for: 1, "the processing task was not asked for again")
+        #expect(setup.tasks.processingRequests == [BackgroundTaskIdentifier.processing])
+    }
+
+    /// The same launch: when the runs drain, the task completes and the queue is paused again.
+    @Test func aDrainInABackgroundLaunchPauses() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        defer { setup.scheduler.stop() }
+        setup.open.applicationInForeground = false
+
+        let task = setup.tasks.launch(BackgroundTaskIdentifier.processing)
+        await task.completed.wait(for: 1, "the drain did not complete the processing task")
+        #expect(task.completions == [true])
+        #expect(setup.scheduler.isPaused, "after the drain in a background launch the queue stays unpaused")
+        #expect(setup.tasks.processingRequests.isEmpty, "nothing is open")
     }
 
     /// One document: "0 of 1 document", never "1 documents"; the German texts are the catalog's (P3).
