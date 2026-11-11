@@ -699,7 +699,7 @@ struct ShareQueueTests {
         try FileManager.default.moveItem(at: URL(filePath: path), to: url)
     }
 
-    #if canImport(Darwin)
+    #if canImport(Darwin) && !os(macOS)
         /// The process's `phys_footprint` (`task_info`, `TASK_VM_INFO`), in bytes.
         private func physicalFootprint() throws -> Int {
             var info = task_vm_info_data_t()
@@ -717,6 +717,9 @@ struct ShareQueueTests {
         /// footprint right after the copy (before any autorelease pool of the caller drains) may grow by less than
         /// 32 MiB, which leaves room for other tests running at the same time. A copy that kept its chunks grows
         /// by the whole file. The source is sparse (`ftruncate`), so it costs no disk to make.
+        /// It reads the footprint after the copy, not its peak during it (#98, point 2), and the shared test
+        /// process cannot give a reliable peak. On macOS K11 (`aLargeCopyKeepsPeakMemoryBounded`) replaces it with
+        /// the peak in a child process; iOS has no exit tests, so it keeps this weaker check.
         @Test func aLargeCopyKeepsMemoryBounded() throws {
             try withQueue { queue, container in
                 let size = 128 * ShareQueue.copyChunkSize
@@ -738,6 +741,116 @@ struct ShareQueueTests {
             }
         }
     #endif
+
+    // MARK: #98, part 1: the payload is mapped, and memory is measured at its peak
+
+    /// A new temporary folder that stands in for the group container, removed after `body`.
+    private func withContainer(_ body: (ShareQueue, URL) async throws -> Void) async throws {
+        let container = FileManager.default.temporaryDirectory
+            .appending(path: "ShareQueueTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: container) }
+        try await body(ShareQueue(groupContainer: container), container)
+    }
+
+    /// A sparse file of `size` bytes at `url` (`ftruncate`): it costs no disk to make, and reads as zeros.
+    private func makeSparseFile(at url: URL, size: Int) throws {
+        #expect(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let file = open(url.path, O_WRONLY)
+        try #require(file >= 0)
+        defer { close(file) }
+        try #require(ftruncate(file, off_t(size)) == 0)
+    }
+
+    #if os(macOS)
+        /// K10: a 128 MiB payload is mapped, not copied into memory. The item is written by hand with a sparse
+        /// payload, so the test writes no 128 MiB to disk (N5 of the plan review); `readToEnd` still allocates the
+        /// whole file on the heap. In a child process (`peakGrowthChild`): `payload(of:)`, then one byte read per
+        /// 4 KiB page while the `Data` is held, then the peak may have grown by less than 32 MiB.
+        @Test func aLargePayloadIsMappedNotCopied() async throws {
+            try await withContainer { queue, _ in
+                let folder = queue.itemsFolder.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try makeSparseFile(at: folder.appending(path: "payload"), size: largeSize)
+                try Data(
+                    #"{"version":1,"originalFileName":"large.pdf","typeIdentifier":"com.adobe.pdf","createdAt":0}"#
+                        .utf8
+                ).write(to: folder.appending(path: "item.json"))
+
+                let result = await #expect(processExitsWith: .success, observing: [\.standardErrorContent]) {
+                    [root = queue.root as URL] in
+                    peakGrowthChild {
+                        let queue = ShareQueue(root: root)
+                        guard let item = queue.scan().items.first else { throw CocoaError(.fileNoSuchFile) }
+                        let payload = try queue.payload(of: item)
+                        guard payload.count == largeSize else { throw CocoaError(.fileReadCorruptFile) }
+                        var sum: UInt8 = 0
+                        payload.withUnsafeBytes { bytes in
+                            for offset in stride(from: 0, to: bytes.count, by: 4096) { sum &+= bytes[offset] }
+                        }
+                        guard sum == 0 else { throw CocoaError(.fileReadCorruptFile) }
+                    }
+                }
+                recordChildOutput(result)
+            }
+        }
+
+        /// K11: copying a 128 MiB lent file keeps the peak bounded, not only the footprint after the copy (#98,
+        /// point 2). The lent file is sparse; the copy runs in a child process (`peakGrowthChild`).
+        @Test func aLargeCopyKeepsPeakMemoryBounded() async throws {
+            try await withContainer { queue, container in
+                let lent = container.appending(path: "large-sparse.pdf")
+                try makeSparseFile(at: lent, size: largeSize)
+
+                let result = await #expect(processExitsWith: .success, observing: [\.standardErrorContent]) {
+                    [root = queue.root as URL, lent = lent as URL] in
+                    peakGrowthChild {
+                        try ShareQueue(root: root).add(
+                            copyingFileAt: lent, originalFileName: "large.pdf", typeIdentifier: "com.adobe.pdf")
+                    }
+                }
+                recordChildOutput(result)
+                let item = try #require(queue.scan().items.first)
+                let copied = try FileManager.default.attributesOfItem(atPath: queue.payloadURL(of: item).path)[.size]
+                #expect((copied as? NSNumber)?.intValue == largeSize || (copied as? Int) == largeSize)
+            }
+        }
+
+        /// The child's measurements, as a test issue, when the child did not exit with success.
+        private func recordChildOutput(_ result: ExitTest.Result?) {
+            guard let result, result.exitStatus != .exitCode(EXIT_SUCCESS) else { return }
+            Issue.record("child: \(String(decoding: result.standardErrorContent, as: UTF8.self))")
+        }
+    #endif
+
+    /// K12: a payload larger than several pages comes back byte for byte, also after its item was removed: the
+    /// mapping outlives the descriptor and the item (5 MiB and 7 bytes, every byte depending on its offset).
+    @Test func aPayloadIsReadByteForByteAndOutlivesItsItem() throws {
+        try withQueue { queue, _ in
+            let count = 5 * ShareQueue.copyChunkSize + 7
+            let bytes = Data((0..<count).map { UInt8(truncatingIfNeeded: $0 ^ ($0 >> 8) ^ ($0 >> 16) ^ 0x5A) })
+            let id = try queue.add(data: bytes, originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+
+            let payload = try queue.payload(of: item)
+            try queue.remove(id)
+
+            #expect(!FileManager.default.fileExists(atPath: queue.payloadURL(of: item).path))
+            #expect(payload.count == count)
+            #expect(payload == bytes)
+            #expect(payload.last == bytes.last)
+        }
+    }
+
+    /// K13: an empty payload is empty `Data` (`mmap` of length 0 would be `EINVAL`).
+    @Test func anEmptyPayloadIsEmptyData() throws {
+        try withQueue { queue, _ in
+            try queue.add(data: Data(), originalFileName: "empty.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+
+            #expect(try queue.payload(of: item) == Data())
+        }
+    }
 
     /// N8: `writeAll` writes everything through short writes and `EINTR`, and throws any other error.
     @Test func writeAllLoopsOverShortWritesAndInterrupts() throws {
@@ -945,3 +1058,50 @@ struct ShareQueueTests {
         #expect(ShareQueue.fallsBackToData(afterFileError: nil), "no file lent")
     }
 }
+
+/// The size of the large files of K10 and K11: 128 MiB.
+private let largeSize = 128 << 20
+
+#if os(macOS)
+    /// The process's `phys_footprint` and its peak, `ledger_phys_footprint_peak` (`task_info`, `TASK_VM_INFO`), in
+    /// bytes; `nil` when `task_info` fails.
+    private func footprintAndPeak() -> (now: Int, peak: Int)? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return (Int(info.phys_footprint), Int(info.ledger_phys_footprint_peak))
+    }
+
+    /// The body of an exit test (#98, point 2): runs `step` in this fresh child process and exits with how far the
+    /// footprint's peak rose above the footprint before it. The peak only ever rises over a process's lifetime and
+    /// tests run in parallel, so only a fresh process gives the step's own peak. Exits 0 when it rose by less than
+    /// 32 MiB, 3 when not, 2 when the measurement cannot be trusted (no reading, or a peak already 8 MiB or more
+    /// above the footprint before the step), 4 when `step` threw. Writes the numbers to standard error.
+    private func peakGrowthChild(_ step: () throws -> Void) -> Never {
+        func report(_ text: String, exitCode: Int32) -> Never {
+            FileHandle.standardError.write(Data("\(text)\n".utf8))
+            exit(exitCode)
+        }
+        let mebibyte = 1 << 20
+        guard let before = footprintAndPeak() else { report("no task_info", exitCode: 2) }
+        guard before.peak - before.now < 8 * mebibyte else {
+            report("peak \(before.peak / mebibyte) MiB before the step, now \(before.now / mebibyte)", exitCode: 2)
+        }
+        do {
+            try step()
+        } catch {
+            report("the step threw \(error)", exitCode: 4)
+        }
+        guard let after = footprintAndPeak() else { report("no task_info", exitCode: 2) }
+        let growth = after.peak - before.now
+        let numbers =
+            "before \(before.now / mebibyte)/\(before.peak / mebibyte) MiB, after \(after.now / mebibyte)/"
+            + "\(after.peak / mebibyte) MiB (now/peak), peak growth \(growth / mebibyte) MiB"
+        report(numbers, exitCode: growth < 32 * mebibyte ? 0 : 3)
+    }
+#endif

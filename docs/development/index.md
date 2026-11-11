@@ -501,8 +501,13 @@ the group's queue folder and closes, and the app imports the items at launch and
   folder, a FIFO, a socket or a device throws `NotARegularFile`, a missing file `POSIXError(.ENOENT)`, and a
   link swapped in after the open is never followed. The extension copies a lent file from that descriptor with
   `read(2)` and `write(2)` through one 1 MiB buffer, so its memory stays bounded whatever the file's size (a
-  150 MB share, #95); the app reads a payload from the descriptor. Inside an item the app goes only through
-  the descriptor of the item's folder, itself opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`):
+  150 MB share, #95); the app maps a payload read-only from the descriptor, so a large item is not held in
+  memory (#98). The mapping outlives the item's removal and keeps its disk space until released; a payload
+  changed or truncated by another process while mapped may crash the app or give it bytes that differ from
+  the file at the open (it needs group write access; the attempt is counted first, so such an item ends in
+  `Failed/`), and mapping relies on the group container having no `NSFileProtectionComplete`. Inside an item
+  the app goes only through the descriptor of the item's folder, itself opened without following a link
+  (`O_DIRECTORY`, `O_NOFOLLOW`):
   it reads `payload` and `item.json`, and counts an attempt with a new file written in full, synced and
   renamed over `item.json` in that folder (removed again if the rename fails). So an item folder swapped for a
   link is refused, and nothing is read or written through it. A linked `item.json` moves the item to
