@@ -2,7 +2,8 @@ import DokumentumKit
 import Foundation
 import Testing
 
-/// The processing queue's decision table and its clock-skew rules (plan of #4, part 5, B2).
+/// The processing queue's decision table, its clock-skew rules (plan of #4, part 5, B2; #97 point 1, T8) and the
+/// retry backoff (#97 point 2, T9).
 struct ProcessingClaimTests {
     static let me = "DEVICE-A"
     static let other = "DEVICE-B"
@@ -11,14 +12,18 @@ struct ProcessingClaimTests {
     static let interval = ProcessingClaimRules.takeoverInterval
 
     /// The decision for a document claimed by `device` `age` seconds ago (negative: in the future).
+    /// `seenFor`: how long this device has seen the claim (`nil`: first seen now). `retryIn`: when the backoff ends,
+    /// from now (`nil`: no backoff).
     private func decide(
         _ state: ProcessingState, by device: String, age: TimeInterval?, failures: Int = 0, isTrashed: Bool = false,
-        hasFile: Bool = true, hasText: Bool = true
+        hasFile: Bool = true, hasText: Bool = true, seenFor: TimeInterval? = nil, retryIn: TimeInterval? = nil
     ) -> ProcessingDecision {
         ProcessingClaimRules.decide(
             ProcessingClaimInput(
                 state: state, deviceID: device, claimedAt: age.map { Self.now.addingTimeInterval(-$0) },
-                isTrashed: isTrashed, hasFile: hasFile, hasText: hasText),
+                isTrashed: isTrashed, hasFile: hasFile, hasText: hasText,
+                claimSeenSince: seenFor.map { Self.now.addingTimeInterval(-$0) },
+                retryNotBefore: retryIn.map { Self.now.addingTimeInterval($0) }),
             thisDevice: Self.me, failures: failures, now: Self.now)
     }
 
@@ -94,10 +99,47 @@ struct ProcessingClaimTests {
         #expect(decide(.pending, by: Self.other, age: Self.interval - 1).isWait)
     }
 
-    @Test func aClaimUpToSixHoursInTheFutureWaitsAndBeyondIsTakenOver() {
-        #expect(decide(.processing, by: Self.other, age: -(Self.interval - 1)).isWait)
-        #expect(decide(.processing, by: Self.other, age: -Self.interval).isWait, "exactly 6 h ahead still waits")
-        #expect(decide(.processing, by: Self.other, age: -(Self.interval + 1)) == .process(.takeOver))
+    /// T8: a claim in the future is never taken over at once, however far ahead; it waits until this device has
+    /// seen it unchanged for 6 hours by its own clock (#97 point 1).
+    @Test func aFutureClaimWaitsUntilThisDeviceHasSeenItForSixHours() {
+        for ahead in [Self.interval - 1, Self.interval, 7 * Self.hour, 3 * 24 * Self.hour] {
+            #expect(
+                decide(.processing, by: Self.other, age: -ahead)
+                    == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(Self.interval))),
+                "first seen now: \(ahead) s ahead")
+            #expect(
+                decide(.processing, by: Self.other, age: -ahead, seenFor: Self.interval - 1)
+                    == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(1))),
+                "seen one second less than 6 h: \(ahead) s ahead")
+            #expect(
+                decide(.processing, by: Self.other, age: -ahead, seenFor: Self.interval) == .process(.takeOver),
+                "seen for 6 h: \(ahead) s ahead")
+        }
+    }
+
+    /// A past claim still expires at an age of 6 hours, also when this device first sees it late.
+    @Test func aPastClaimStillExpiresAtAnAgeOfSixHours() {
+        #expect(decide(.pending, by: Self.other, age: Self.interval, seenFor: 0) == .process(.takeOver))
+        #expect(decide(.pending, by: Self.other, age: Self.interval - 1, seenFor: 0).isWait)
+        #expect(decide(.pending, by: Self.other, age: Self.interval - 1, seenFor: Self.interval) == .process(.takeOver))
+    }
+
+    /// The wait ends at the earlier of the two expiries: by the claim's age, or by this device's sighting.
+    @Test func theWaitEndsAtTheEarlierExpiry() {
+        let byAge = decide(.pending, by: Self.other, age: 5 * Self.hour, seenFor: 2 * Self.hour)
+        #expect(byAge == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(Self.hour))))
+        let bySighting = decide(.pending, by: Self.other, age: Self.hour, seenFor: 4 * Self.hour)
+        #expect(bySighting == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(2 * Self.hour))))
+        let future = decide(.pending, by: Self.other, age: -Self.hour, seenFor: 3 * Self.hour)
+        #expect(future == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(3 * Self.hour))))
+    }
+
+    /// A sighting in the future (this device's clock was set back) counts from now: the wait is never longer than 6
+    /// hours from here.
+    @Test func aSightingInTheFutureCountsFromNow() {
+        #expect(
+            decide(.pending, by: Self.other, age: -10 * Self.hour, seenFor: -24 * Self.hour)
+                == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(Self.interval))))
     }
 
     /// B2, written out: the claiming device's clock is 7 h slow. It claimed one minute ago in real time, but wrote
@@ -113,10 +155,13 @@ struct ProcessingClaimTests {
         #expect(decision == .process(.takeOver), "the accepted early takeover")
     }
 
-    /// The other half of B2: a clock that is days fast cannot keep a document waiting for ever.
+    /// The other half of B2: a clock that is days or years fast cannot keep a document waiting for ever; its claim
+    /// expires once this device has seen it for 6 hours.
     @Test func aFastClockCannotBlockADocumentForEver() {
-        #expect(decide(.pending, by: Self.other, age: -3 * 24 * Self.hour) == .process(.takeOver))
-        #expect(decide(.pending, by: Self.other, age: -10 * 365 * 24 * Self.hour) == .process(.takeOver))
+        for ahead in [3 * 24 * Self.hour, 10 * 365 * 24 * Self.hour] {
+            #expect(decide(.pending, by: Self.other, age: -ahead, seenFor: Self.interval - 1).isWait)
+            #expect(decide(.pending, by: Self.other, age: -ahead, seenFor: Self.interval) == .process(.takeOver))
+        }
     }
 
     // MARK: Further conditions
@@ -142,9 +187,87 @@ struct ProcessingClaimTests {
         #expect(decision == .process(.takeOver))
     }
 
+    // MARK: Backoff (T9)
+
+    /// Every "process" waits while the backoff runs, and processes from the second it ends.
+    @Test(arguments: [nil, me, other] as [String?])
+    func aProcessWaitsForTheBackoff(device: String?) {
+        // Another device's claim is expired here, so the decision without the backoff is a takeover.
+        let age: TimeInterval? = device == nil ? nil : (device == Self.me ? 0 : Self.interval)
+        let processes = decide(.pending, by: device ?? "", age: age)
+        #expect(processes.isProcess)
+        #expect(
+            decide(.pending, by: device ?? "", age: age, retryIn: 1)
+                == .wait(.retryAfter(Self.now.addingTimeInterval(1))))
+        #expect(decide(.pending, by: device ?? "", age: age, retryIn: 0) == processes)
+        #expect(decide(.pending, by: device ?? "", age: age, retryIn: -1) == processes)
+        #expect(
+            decide(.failed, by: device ?? "", age: age, failures: 1, retryIn: 60)
+                == .wait(.retryAfter(Self.now.addingTimeInterval(60))))
+    }
+
+    /// The backoff never hides a skip, and another device's fresh claim is waited for first.
+    @Test func theBackoffComesAfterTheTable() {
+        #expect(decide(.done, by: Self.me, age: 0, retryIn: 60) == .skip(.done))
+        #expect(decide(.failed, by: Self.me, age: 0, failures: 3, retryIn: 60) == .skip(.failedOnThisDevice))
+        #expect(decide(.pending, by: Self.me, age: 0, isTrashed: true, retryIn: 60) == .skip(.trashed))
+        #expect(
+            decide(.pending, by: Self.other, age: Self.hour, retryIn: 60)
+                == .wait(.claimedElsewhere(until: Self.now.addingTimeInterval(5 * Self.hour))))
+    }
+
+    @Test func theBackoffIsOneMinuteThenTenMinutes() {
+        let last = Self.now.addingTimeInterval(-30)
+        #expect(ProcessingBackoff.retryNotBefore(attempts: 0, lastAttemptAt: last, now: Self.now) == nil)
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 1, lastAttemptAt: last, now: Self.now)
+                == last.addingTimeInterval(60))
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 2, lastAttemptAt: last, now: Self.now)
+                == last.addingTimeInterval(600))
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 3, lastAttemptAt: last, now: Self.now) == nil,
+            "at the limit the next decision gives up at once")
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 1, lastAttemptAt: nil, now: Self.now) == nil,
+            "a counter of the old form has no time")
+    }
+
+    /// N9: a last attempt in the future (the clock was set back) gives `now` plus the delay, never later.
+    @Test func aLastAttemptInTheFutureCountsFromNow() {
+        let future = Self.now.addingTimeInterval(24 * Self.hour)
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 1, lastAttemptAt: future, now: Self.now)
+                == Self.now.addingTimeInterval(60))
+        #expect(
+            ProcessingBackoff.retryNotBefore(attempts: 2, lastAttemptAt: future, now: Self.now)
+                == Self.now.addingTimeInterval(600))
+    }
+
+    // MARK: Sightings (T8)
+
+    @Test func aSightingIsKeptForTheSameClaimAndRestartsForANewOne() {
+        let claimedAt = Self.now.addingTimeInterval(3 * Self.hour)
+        let first = ClaimSighting.seeing(deviceID: Self.other, claimedAt: claimedAt, now: Self.now, after: nil)
+        #expect(first == ClaimSighting(deviceID: Self.other, claimedAt: claimedAt, seenAt: Self.now))
+        let later = Self.now.addingTimeInterval(Self.hour)
+        #expect(ClaimSighting.seeing(deviceID: Self.other, claimedAt: claimedAt, now: later, after: first) == first)
+        let renewed = claimedAt.addingTimeInterval(1)
+        #expect(
+            ClaimSighting.seeing(deviceID: Self.other, claimedAt: renewed, now: later, after: first)
+                == ClaimSighting(deviceID: Self.other, claimedAt: renewed, seenAt: later), "a new claim time")
+        #expect(
+            ClaimSighting.seeing(deviceID: "DEVICE-C", claimedAt: claimedAt, now: later, after: first)
+                == ClaimSighting(deviceID: "DEVICE-C", claimedAt: claimedAt, seenAt: later), "another device")
+        let setBack = Self.now.addingTimeInterval(-Self.hour)
+        #expect(
+            ClaimSighting.seeing(deviceID: Self.other, claimedAt: claimedAt, now: setBack, after: first).seenAt
+                == setBack, "a sighting in the future moves to now")
+    }
+
     // MARK: Property test
 
-    /// 1,000 seeded inputs, both devices' clocks skewed by up to ±48 h. `trueAge` is the real time since the claim;
+    /// 1,000 seeded inputs, both devices' clocks skewed by up to ±48 h, each claim first seen now. `trueAge` is the real time since the claim;
     /// the claiming device wrote `claimedAt` with its clock, this device reads it with its own.
     @Test func noClaimWaitsBeyondTheIntervalAndEqualClocksNeverTakeAYoungClaim() {
         var random = SeededGenerator(seed: 62)
@@ -172,8 +295,9 @@ struct ProcessingClaimTests {
             let age = myNow.timeIntervalSince(claimedAt)
 
             if case .wait(.claimedElsewhere(let until)) = decision {
-                #expect(age < Self.interval && age >= -Self.interval, "waits for a claim beyond the interval: \(age)")
-                #expect(until == claimedAt.addingTimeInterval(Self.interval))
+                #expect(age < Self.interval, "waits for a claim older than the interval: \(age)")
+                #expect(until > myNow && until <= myNow.addingTimeInterval(Self.interval), "waits beyond the interval")
+                #expect(until == min(claimedAt, myNow).addingTimeInterval(Self.interval))
             }
             if state == .unknown { #expect(decision == .skip(.unknownState)) }
             if state == .done { #expect(decision == .skip(.done)) }

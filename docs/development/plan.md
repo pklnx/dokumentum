@@ -198,7 +198,9 @@ queue with one Vision job and one model job at a time (the old app's
   (`processingDeviceID`, `processingClaimedAt`). The importing device claims
   first. Another device takes over a claim older than 6 hours (the Mac
   preferably), so a document never stays "processing" because the iPhone
-  was not opened again.
+  was not opened again. Clocks can differ: a claim that looks younger also
+  expires once the other device has seen it unchanged for 6 hours by its
+  own clock (#97).
 - **Resume at launch** is the normal path; on iOS
   `BGContinuedProcessingTask` / `BGProcessingTask` continue work in the
   background.

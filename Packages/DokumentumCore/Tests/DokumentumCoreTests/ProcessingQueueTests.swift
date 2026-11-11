@@ -65,6 +65,50 @@ struct ProcessingQueueTests {
         #expect(row.claimedAt == clock.now)
     }
 
+    /// T8 (#97 point 1): a claim written by a clock 7 h ahead is not taken over at once; it waits until this device
+    /// has seen it for 6 h by its own clock, also across a relaunch (the sighting is in the per-device defaults), and
+    /// the sighting goes once the document is `done`.
+    @Test func aClaimFromAFastClockIsTakenOverOnceThisDeviceSawItForSixHours() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insert(device: deviceB, claimedAt: processingStart.addingTimeInterval(7 * hour))
+        let failures = store.failures(deviceA)
+        let sightings = ClaimSightings(defaultsSuite: failures.defaultsSuite)
+
+        let first = await store.queue(deviceA, failures: failures, clock: clock).run()
+        #expect(first.waiting == 1)
+        #expect(first.saves == 0)
+        #expect(first.nextExpiry == processingStart.addingTimeInterval(6 * hour), "first seen now, plus 6 h")
+        #expect(sightings.sighting(of: id)?.seenAt == processingStart)
+
+        clock.advance(by: 6 * hour - 1)
+        // A relaunch: a new queue on the same defaults.
+        #expect(await store.queue(deviceA, failures: failures, clock: clock).run().waiting == 1)
+        clock.advance(by: 1)
+        let takeover = await store.queue(deviceA, failures: failures, clock: clock).run()
+        #expect(takeover.done == 1)
+        #expect(try store.row(id).deviceID == deviceA)
+        _ = await store.queue(deviceA, failures: failures, clock: clock).run()
+        #expect(sightings.documents.isEmpty, "the sighting stayed after done")
+    }
+
+    /// A new claim on the document starts a new sighting.
+    @Test func aNewClaimStartsANewSighting() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insert(device: deviceB, claimedAt: processingStart.addingTimeInterval(7 * hour))
+        let queue = store.queue(deviceA, clock: clock)
+        #expect(await queue.run().waiting == 1)
+        clock.advance(by: 5 * hour)
+        let renewed = processingStart.addingTimeInterval(12 * hour)
+        try store.edit(id) { document, _ in document.processingClaimedAt = renewed }
+        let report = await queue.run()
+        #expect(report.waiting == 1)
+        #expect(report.nextExpiry == clock.now.addingTimeInterval(6 * hour))
+    }
+
     /// Two devices on one store, run at the same time: every document ends `done`, and a fresh claim of one device
     /// is never processed by the other.
     @Test func twoQueuesWithDifferentDevicesOnOneStoreEndEveryDocumentDone() async throws {
@@ -153,12 +197,15 @@ struct ProcessingQueueTests {
         let queueA = store.queue(deviceA, failures: failuresA, stage: TestStage(failing: 100), clock: clock)
 
         for attempt in 1...2 {
+            // Past the backoff of the attempt before (1 min, then 10 min).
+            clock.advance(by: 10 * 60)
             let report = await queueA.run()
             #expect(report.failures == 1)
             #expect(report.saves == 0, "a failure below the limit writes nothing")
             #expect(failuresA.count(for: id) == attempt)
             #expect(try store.row(id).stateRaw == "pending")
         }
+        clock.advance(by: 10 * 60)
         let third = await queueA.run()
         #expect(third.failed == 1)
         #expect(third.saves == 1)
@@ -176,6 +223,7 @@ struct ProcessingQueueTests {
         #expect(firstB.saves == 1, "B claimed the failed document")
         #expect(try store.row(id).stateRaw == "processing")
         #expect(failuresB.count(for: id) == 1)
+        clock.advance(by: 60)
         let secondB = await queueB.run()
         #expect(secondB.done == 1)
         #expect(try store.row(id).stateRaw == "done")
@@ -200,6 +248,8 @@ struct ProcessingQueueTests {
         defer { for checkpoint in stuck { checkpoint.release() } }
 
         for (attempt, checkpoint) in stuck.enumerated() {
+            // Past the backoff of the attempt before: each launch is later.
+            clock.advance(by: 10 * 60)
             let queue = store.queue(
                 deviceA, failures: failures, stage: TestStage { _ in await checkpoint.pass() }, clock: clock)
             abandoned.append(Task { await queue.run() })

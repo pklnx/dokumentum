@@ -22,7 +22,8 @@ struct DokumentumApp: App {
     /// imports go through one actor.
     let importer: DocumentImporter
     /// Runs the processing queue (plan of #4, part 5): at launch, after imports, on every activation, after store
-    /// changes and at the next claim expiry. `nil` for an in-memory store, as the repair.
+    /// changes and at the next claim expiry or backoff end; paused in the background on iOS and when the Mac app
+    /// quits (`ProcessingLifecycle`). `nil` for an in-memory store, as the repair.
     let processing: ProcessingScheduler?
     #if os(iOS)
         /// Imports what the share extension queued (plan of #4, part 4): at launch and on every activation, on
@@ -73,8 +74,13 @@ struct DokumentumApp: App {
             #else
                 let takeoverInterval: TimeInterval? = nil
             #endif
-            processing = ProcessingScheduler.start(
+            let processing = ProcessingScheduler.start(
                 for: container, observer: storeChanges, deviceID: deviceID, takeoverInterval: takeoverInterval)
+            #if os(macOS)
+                // Quitting is a known interruption: the running attempt is given back (#97 point 4).
+                ProcessingLifecycle.pauseWhenTerminating(processing)
+            #endif
+            self.processing = processing
         } else {
             processing = nil
         }
@@ -100,13 +106,12 @@ struct DokumentumApp: App {
             #endif
         }
         // A launch is an activation too; the share queue and the processing queue each run one at a time and
-        // queue one more run.
+        // queue one more run. The background pauses processing on iOS (`ProcessingLifecycle`).
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
             #if os(iOS)
-                shareQueue?.requestRun()
+                if phase == .active { shareQueue?.requestRun() }
             #endif
-            processing?.requestRun()
+            ProcessingLifecycle.scenePhaseChanged(to: phase, scheduler: processing)
         }
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)

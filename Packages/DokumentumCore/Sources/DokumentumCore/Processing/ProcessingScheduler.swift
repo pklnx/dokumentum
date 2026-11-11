@@ -6,19 +6,25 @@ import SwiftData
 /// - at launch (`start()`);
 /// - after each import: a save of the app's container that inserts a `Document` (`documentInsertions`), whichever
 ///   context saved it (the importer of any window, the share queue);
-/// - on `scenePhase == .active` (`DokumentumApp` calls `requestRun()`);
+/// - on `scenePhase == .active` (`ProcessingLifecycle` calls `resume()`);
 /// - after each debounced store change (`StoreChangeObserver`, #56): edits, a restore from the trash, a text record
 ///   that arrived, another device's changes. The queue's own saves are store changes too; the run they trigger
 ///   finds nothing to write, so the chain ends there;
-/// - at the next expiry of another device's claim that a run waited for, while the app runs (`nextExpiry`; the
-///   sleep is injected, so tests end it with `ManualDebounce`).
+/// - at the next expiry of another device's claim or the end of a backoff that a run waited for, while the app runs
+///   (`ProcessingReport.nextWake`; the sleep is injected, so tests end it with `ManualDebounce`);
+/// - on `resume()`.
 ///
 /// At most one run at a time: a request during a run queues exactly one more run, however many arrive (#56's
 /// `RepairScheduler`). Only for stores on disk (`StoreChoice.isOnDisk`): the app's in-memory stores of tests and
 /// UI tests never start one.
+///
+/// **Pause and resume (#97 point 4).** `pause()` interrupts the run that is going on (`ProcessingRunning.interruptNow`,
+/// which gives the attempt back synchronously) and cancels it, and no run starts until `resume()`, which starts one.
+/// The app pauses when the scene goes to the background on iOS and when the Mac app quits, and resumes on
+/// `scenePhase == .active` (`ProcessingLifecycle`).
 @MainActor
 public final class ProcessingScheduler {
-    /// Waits until a claim expires; `Task.sleep` in the app.
+    /// Waits until a claim expires or a backoff ends; `Task.sleep` in the app.
     public typealias Sleep = @Sendable (Duration) async throws -> Void
 
     private let runner: any ProcessingRunning
@@ -28,16 +34,23 @@ public final class ProcessingScheduler {
     private let now: @Sendable () -> Date
     private var subscriptions: [Task<Void, Never>] = []
     private var running: Task<Void, Never>?
-    private var expiryTimer: Task<Void, Never>?
+    private var wakeTimer: Task<Void, Never>?
 
     /// Whether a request arrived during the run that is going on, so one more run follows it.
     public private(set) var isQueued = false
+    /// Whether `pause()` holds the runs until `resume()`.
+    public private(set) var isPaused = false
+    /// Whether a run is going on. For tests.
+    public var isRunning: Bool { running != nil }
     /// How many runs ended. For tests.
     public private(set) var completedRuns = 0
-    /// The claim expiry the scheduler waits for, if any. For tests.
-    public private(set) var scheduledExpiry: Date?
+    /// The claim expiry or backoff end the scheduler waits for, if any. For tests.
+    public private(set) var scheduledWake: Date?
     /// Called on the main actor after each run, with its report. For tests, which wait for it instead of polling.
     public var didFinishRun: (@MainActor (ProcessingReport) -> Void)?
+    /// Called on the main actor at each `requestRun()`, whatever its trigger. For tests, which wait for a trigger
+    /// to be handled instead of polling.
+    public var didRequestRun: (@MainActor () -> Void)?
 
     public init(
         runner: any ProcessingRunning, observer: StoreChangeObserver, insertions: AsyncStream<Void>,
@@ -84,22 +97,41 @@ public final class ProcessingScheduler {
         requestRun()
     }
 
-    /// Stops following the triggers and the expiry; a run that is going on finishes.
+    /// Stops following the triggers and the timer; a run that is going on finishes.
     public func stop() {
         for subscription in subscriptions { subscription.cancel() }
         subscriptions = []
-        expiryTimer?.cancel()
-        expiryTimer = nil
-        scheduledExpiry = nil
+        wakeTimer?.cancel()
+        wakeTimer = nil
+        scheduledWake = nil
     }
 
-    /// Runs the queue now, or once more after the run that is going on.
+    /// Runs the queue now, or once more after the run that is going on. Nothing while paused: `resume()` runs.
     public func requestRun() {
+        didRequestRun?()
+        guard !isPaused else { return }
         guard running == nil else {
             isQueued = true
             return
         }
         running = Task { [weak self] in await self?.drain() }
+    }
+
+    /// A known interruption: gives the running attempt back at once (synchronously, before the app is suspended or
+    /// ends), cancels the run, and holds every run until `resume()`.
+    public func pause() {
+        isPaused = true
+        isQueued = false
+        // The run first: a stage the run is about to start then sees the cancellation, and one already started is
+        // interrupted (review B1 of #120).
+        running?.cancel()
+        runner.interruptNow()
+    }
+
+    /// Ends a pause and starts a run. Without a pause, it requests a run like any trigger.
+    public func resume() {
+        isPaused = false
+        requestRun()
     }
 
     private func drain() async {
@@ -108,28 +140,30 @@ public final class ProcessingScheduler {
             // The queue is an actor of its own: the run leaves the main actor.
             let report = await runner.run()
             completedRuns += 1
-            scheduleExpiry(report.nextExpiry)
+            scheduleWake(report.nextWake)
             didFinishRun?(report)
-        } while isQueued
+        } while isQueued && !Task.isCancelled
         running = nil
+        // A `resume()` while a paused run was ending queued this one.
+        if isQueued { requestRun() }
     }
 
-    /// One timer for the earliest claim the last run waited for; each run replaces it.
-    private func scheduleExpiry(_ expiry: Date?) {
-        expiryTimer?.cancel()
-        expiryTimer = nil
-        scheduledExpiry = expiry
-        guard let expiry else { return }
-        let delay = max(0, expiry.timeIntervalSince(now()))
+    /// One timer for the earliest claim expiry or backoff end the last run waited for; each run replaces it.
+    private func scheduleWake(_ wake: Date?) {
+        wakeTimer?.cancel()
+        wakeTimer = nil
+        scheduledWake = wake
+        guard let wake else { return }
+        let delay = max(0, wake.timeIntervalSince(now()))
         let sleep = sleep
-        expiryTimer = Task { [weak self] in
+        wakeTimer = Task { [weak self] in
             do {
                 try await sleep(.seconds(delay))
             } catch {
                 return
             }
             guard !Task.isCancelled else { return }
-            self?.scheduledExpiry = nil
+            self?.scheduledWake = nil
             self?.requestRun()
         }
     }
