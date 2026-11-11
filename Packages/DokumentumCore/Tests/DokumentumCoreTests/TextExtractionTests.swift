@@ -76,6 +76,8 @@ struct TextExtractionTests {
     @Test(arguments: [
         ("ABCDEFGHIJKLMNO", false), ("ABCDEFGHIJKLMNOP", true), ("ABCDE FGHIJ KLMNO", false),
         ("ABCD EFGH IJKL MNOP", true),
+        // Counted as characters (N-c of review 5866563252): 15 decomposed umlauts are 30 scalars but 15 characters.
+        (String(repeating: "a\u{0308}", count: 15), false), (String(repeating: "a\u{0308}", count: 16), true),
     ])
     func sixteenNonWhitespaceCharactersMakeATextPage(line: String, isTextPage: Bool) async throws {
         let recognizer = StubRecognizer()
@@ -195,5 +197,33 @@ struct TextExtractionTests {
             #expect(cut.utf8.count <= limit)
             #expect(String(decoding: Array(cut.utf8), as: UTF8.self) == cut)
         }
+    }
+
+    /// N-b of review 5866563252: blank pages before a first page with text that is alone over the cap keep their
+    /// separators, and that page is cut at a character boundary, instead of storing "".
+    @Test func blankPagesBeforeAPageOverTheCapKeepTheirSeparatorsAndThePageIsCut() {
+        let text = ExtractedText(pages: ["", "ääää", "b"], source: .vision)
+
+        #expect(text.capped(toBytes: 5) == ("\u{0C}ää", true))
+        #expect(text.capped(toBytes: 6) == ("\u{0C}ää", true))
+        #expect(text.capped(toBytes: 9) == ("\u{0C}ääää", true))
+        #expect(text.capped(toBytes: 1) == ("", true))
+        let two = ExtractedText(pages: ["", "", "abc"], source: .vision)
+        #expect(two.capped(toBytes: 4) == ("\u{0C}\u{0C}ab", true))
+        #expect(ExtractedText(pages: ["", ""], source: .vision).capped(toBytes: 0) == ("", false))
+    }
+
+    /// N-a of review 5866563252: a form feed inside one page's text becomes a newline, so the stored text's form
+    /// feeds are exactly the page boundaries (#122 splits on them).
+    @Test func aFormFeedInsideAPageBecomesANewline() async throws {
+        let text = ExtractedText(pages: ["one\u{0C}two", "three"], source: .pdfText)
+        #expect(text.pages == ["one\ntwo", "three"])
+        #expect(text.joined == "one\ntwo\u{0C}three")
+
+        let result = try await process(
+            TestPDF.makeImageOnly(pages: [["x"], ["y"]]), recognizer: StubRecognizer { ["line\u{0C}\($0)"] })
+        let joined = try #require(result.text?.joined)
+        #expect(joined == "line\n1\u{0C}line\n2")
+        #expect(joined.split(separator: "\u{0C}", omittingEmptySubsequences: false).count == 2)
     }
 }

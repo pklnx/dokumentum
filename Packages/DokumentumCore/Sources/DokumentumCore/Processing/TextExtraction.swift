@@ -11,14 +11,16 @@ public struct ExtractedText: Equatable, Sendable {
     /// 1 MB of non-asset fields, and whether the mirror moves a large string to an asset is not verified.
     public static let byteLimit = 500_000
 
-    /// Each page's text, in page order: the PDF's own text (trimmed) or the recognised lines joined by newlines.
+    /// Each page's text, in page order: the PDF's own text (trimmed) or the recognised lines joined by newlines. A
+    /// form feed inside a page's text is a newline here, so `pageSeparator` only ever separates pages (#122 splits
+    /// on it).
     public var pages: [String]
     /// `.pdfText` when every page had text of its own; `.vision` when at least one page was recognised, also when
     /// nothing was found. So `.none` keeps meaning "never extracted" (the re-queue pass relies on it).
     public var source: TextSource
 
     public init(pages: [String], source: TextSource) {
-        self.pages = pages
+        self.pages = pages.map { $0.replacingOccurrences(of: Self.pageSeparator, with: "\n") }
         self.source = source
     }
 
@@ -29,8 +31,10 @@ public struct ExtractedText: Equatable, Sendable {
     }
 
     /// The text to store: all pages when they fit in `limit` UTF-8 bytes; otherwise the most whole pages that fit
-    /// (cut at a page boundary, without a trailing separator); when the first page alone is over the limit, the
-    /// first page cut at its last whole character within the limit, never inside a UTF-8 sequence (N6).
+    /// (cut at a page boundary, without a trailing separator). When the first page with text does not fit whole
+    /// (page 1, or a later one after blank pages), it is cut at its last whole character within the limit, never
+    /// inside a UTF-8 sequence or a character (N6), after the separators of the blank pages before it, so the page
+    /// numbers stay right.
     public func capped(toBytes limit: Int = byteLimit) -> (text: String, isCapped: Bool) {
         var kept = 0
         var bytes = 0
@@ -41,8 +45,13 @@ public struct ExtractedText: Equatable, Sendable {
             kept += 1
         }
         if kept == pages.count { return (joined, false) }
-        if kept > 0 { return (pages.prefix(kept).joined(separator: Self.pageSeparator), true) }
-        return (Self.prefix(of: pages[0], bytes: limit), true)
+        guard let first = pages.firstIndex(where: { !$0.isEmpty }) else { return ("", false) }
+        // Whole pages up to and with the first page with text fit: cut at the last page boundary.
+        if kept > first { return (pages.prefix(kept).joined(separator: Self.pageSeparator), true) }
+        // The first page with text does not fit whole: cut it, after one separator per blank page before it.
+        let separators = String(repeating: Self.pageSeparator, count: first)
+        guard separators.utf8.count < limit else { return ("", true) }
+        return (separators + Self.prefix(of: pages[first], bytes: limit - separators.utf8.count), true)
     }
 
     /// The longest prefix of `text` made of whole characters with at most `limit` UTF-8 bytes.
@@ -74,10 +83,11 @@ public enum PageText {
         return isTextPage(text) ? text : nil
     }
 
-    /// Whether `text` has at least `minimumCharacters` non-whitespace characters.
+    /// Whether `text` has at least `minimumCharacters` non-whitespace characters, counted as `Character`s
+    /// (grapheme clusters): a decomposed "ä" (a + U+0308) counts once, as a reader sees it.
     public static func isTextPage(_ text: String) -> Bool {
         var count = 0
-        for scalar in text.unicodeScalars where !CharacterSet.whitespacesAndNewlines.contains(scalar) {
+        for character in text where !character.isWhitespace {
             count += 1
             if count >= minimumCharacters { return true }
         }

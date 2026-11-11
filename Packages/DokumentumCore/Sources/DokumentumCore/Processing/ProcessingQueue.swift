@@ -311,7 +311,7 @@ public actor ProcessingQueue: ProcessingRunning {
             let outcome = write(.result, id, expecting: held, checksText: text != nil) { document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
                 if let (source, capped) = text {
-                    document.textSource = source
+                    if document.textSource != source { document.textSource = source }
                     if let record = document.text, record.extractedText != capped.text {
                         record.extractedText = capped.text
                     }

@@ -364,14 +364,18 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   power loss during a stage still counts.
 - **The stage** (#6, part 2): `DocumentStage` opens the PDF with PDFKit (unreadable, locked or page-less fails the
   attempt) and keeps the `PDFDocument` alive until it returns, because PDFKit cannot draw a page of a released document
-  (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters is a text page (T2);
+  (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters (counted as
+  `Character`s, so a decomposed umlaut counts once) is a text page (T2);
   every other page is rendered in grayscale at 2400 px on the long side, crop box and rotation applied (T3), and
   recognised by `VisionTextRecognizer`: `RecognizeTextRequest`, `.accurate`, `[de-DE, en-US]`, language correction on
   (T1; the only `import Vision` of the queue). Tests inject a stub recogniser (`TextRecognizing`); the few real-Vision
   tests (`VisionRecognitionTests`) wait with a 120 s safety net, because the first recognition in a process loads the
-  model (24 s measured), and skip with the reason where Vision cannot recognise German and English. The document's
-  text is the pages' texts in page order **joined with a form feed** (`ExtractedText.pageSeparator`; search relies on
-  it), `""` when no page has text. `textSource` is `.pdfText` when every page was a text page, else `.vision`, also for
+  model (24 s measured). They skip with the reason only where Vision itself cannot run: Vision does not list German
+  and English, or a preflight recognition by `VisionTextRecognizer` alone throws (Xcode Cloud's macOS host throws the
+  ML runtime's `e5rtError`); anything the stage throws afterwards fails them, and on the development Mac they pass. The
+  document's text is the pages' texts in page order **joined with a form feed** (`ExtractedText.pageSeparator`; search
+  relies on it), `""` when no page has text. A form feed inside one page's text becomes a newline, so the stored text's
+  form feeds are exactly the page boundaries. `textSource` is `.pdfText` when every page was a text page, else `.vision`, also for
   a blank document, so `.none` means "never extracted". The stage checks for cancellation before each page and reports
   progress after it (and once before the first), one page image alive at a time.
 - **Re-queue of step 3's documents** (#6, part 2, T6, N7): `ProcessingRequeue`, run by the queue at the start of each
@@ -387,8 +391,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
 - **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
   (`pageCount` and `textSource` when they differ, the text record's `extractedText`, `done` or `failed`). The text is
-  capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page alone is
-  over it, at its last whole character; the report counts it (`textsCapped`) and it is logged. The result write's check
+  capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page with text
+  alone is over it, at its last whole character, after one form feed per blank page before it; the report counts it (`textsCapped`) and it is logged. The result write's check
   also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), so a save
   to the text in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
   fetches the document, re-checks what the decision was based on (state, claim device and time, not trashed, the same
