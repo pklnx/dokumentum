@@ -1068,7 +1068,8 @@ struct ShareQueueTests {
 
     /// K8: the extension falls back to the data only when the lent file was not refused. A lent link (absolute or
     /// relative), folder or device is `NotARegularFile`: no fallback, so the link's target is never read. A file
-    /// that is gone (`ENOENT`), any other error and no lent file at all (`nil`) fall back.
+    /// that is gone (`ENOENT`), any other error of the open and no lent file at all (`nil`) fall back; a failure
+    /// after the open is `CopyFailed` and does not (#104, P1 = A: K14 to K16).
     @Test func fallsBackToDataOnlyForFilesThatAreNotRefused() throws {
         try withQueue { queue, container in
             let (_, absoluteLink) = try outsideFileAndLink(in: container)
@@ -1095,6 +1096,116 @@ struct ShareQueueTests {
         #expect(ShareQueue.fallsBackToData(afterFileError: CocoaError(.fileReadNoSuchFile)))
         #expect(ShareQueue.fallsBackToData(afterFileError: POSIXError(.EACCES)))
         #expect(ShareQueue.fallsBackToData(afterFileError: nil), "no file lent")
+    }
+
+    // MARK: #104: the share order in Kit; no data fallback once the lent file was opened (P1 = A)
+
+    /// What the extension's file step reports in K14.
+    enum FileOutcome: String, CaseIterable, Sendable {
+        case saved, notARegularFile, gone, notPermitted, cocoaNoSuchFile, noFileLent, copyFailed
+
+        var step: ShareQueue.FileStep {
+            switch self {
+            case .saved: .saved
+            case .notARegularFile: .notSaved(ShareQueue.NotARegularFile())
+            case .gone: .notSaved(POSIXError(.ENOENT))
+            case .notPermitted: .notSaved(POSIXError(.EACCES))
+            case .cocoaNoSuchFile: .notSaved(CocoaError(.fileReadNoSuchFile))
+            case .noFileLent: .notSaved(nil)
+            case .copyFailed: .notSaved(ShareQueue.CopyFailed(underlying: POSIXError(.ENOSPC)))
+            }
+        }
+
+        /// Whether `saveAttachment` may load the data after this outcome.
+        var fallsBack: Bool {
+            switch self {
+            case .saved, .notARegularFile, .copyFailed: false
+            case .gone, .notPermitted, .cocoaNoSuchFile, .noFileLent: true
+            }
+        }
+    }
+
+    /// K14: `saveAttachment` holds the extension's order. The file step runs once; a saved file is `true` without the
+    /// data; `NotARegularFile` and `CopyFailed` are `false` without the data; no file lent and a lent file that could
+    /// not be opened load the data once, and its result is the attachment's.
+    @Test(arguments: FileOutcome.allCases, [true, false])
+    func theShareOrderFallsBackOnlyWhenAllowed(_ outcome: FileOutcome, dataSaves: Bool) async {
+        var fileCalls = 0
+        var dataCalls = 0
+        let saved = await ShareQueue.saveAttachment(
+            savingFile: {
+                fileCalls += 1
+                return outcome.step
+            },
+            savingData: {
+                dataCalls += 1
+                return dataSaves
+            })
+        #expect(fileCalls == 1)
+        #expect(dataCalls == (outcome.fallsBack ? 1 : 0))
+        #expect(saved == (outcome == .saved || (outcome.fallsBack && dataSaves)))
+    }
+
+    /// K15: a copy that runs out of space after the lent file was opened (`write(2)` fails with `ENOSPC` on the
+    /// second of three 1 MiB chunks) throws `CopyFailed` with `ENOSPC`, leaves nothing in `Incoming/` or `Items/`,
+    /// and does not fall back to the data: `saveAttachment` never calls it.
+    @Test func aCopyThatRunsOutOfSpaceIsNotSavedAndDoesNotFallBack() async throws {
+        try await withContainer { queue, container in
+            let lent = container.appending(path: "lent.pdf")
+            try Data(repeating: 0x25, count: 3 * ShareQueue.copyChunkSize).write(to: lent)
+            var writes = 0
+            var thrown: (any Error)?
+            do {
+                try queue.add(
+                    copyingFileAt: lent, originalFileName: "lent.pdf", typeIdentifier: "com.adobe.pdf",
+                    createdAt: Self.date, afterOpen: nil
+                ) { descriptor, bytes, count in
+                    writes += 1
+                    guard writes < 2 else {
+                        errno = ENOSPC
+                        return -1
+                    }
+                    return write(descriptor, bytes, count)
+                }
+            } catch {
+                thrown = error
+            }
+
+            let copyFailed = try #require(thrown as? ShareQueue.CopyFailed, "\(String(describing: thrown))")
+            #expect((copyFailed.underlying as? POSIXError)?.code == .ENOSPC)
+            #expect(writes == 2, "the copy stopped at the failing chunk")
+            #expect(names(in: queue.incomingFolder).isEmpty)
+            #expect(names(in: queue.itemsFolder).isEmpty)
+            #expect(!ShareQueue.fallsBackToData(afterFileError: thrown))
+
+            var dataCalls = 0
+            let saved = await ShareQueue.saveAttachment(
+                savingFile: { .notSaved(thrown) },
+                savingData: {
+                    dataCalls += 1
+                    return true
+                })
+            #expect(!saved)
+            #expect(dataCalls == 0, "no data fallback after a failed copy")
+        }
+    }
+
+    /// K16: a queue that cannot be written (`Incoming` is a regular file, so the item's folder cannot be made) throws
+    /// `CopyFailed` for a lent file that was opened, writes nothing and does not fall back.
+    @Test func aQueueThatCannotBeWrittenDoesNotFallBack() throws {
+        try withQueue { queue, container in
+            try FileManager.default.createDirectory(at: queue.root, withIntermediateDirectories: true)
+            try Data("not a folder".utf8).write(to: queue.incomingFolder)
+            let lent = container.appending(path: "lent.pdf")
+            try Data("%PDF lent".utf8).write(to: lent)
+
+            let error = addError(copying: lent, to: queue)
+
+            #expect(error is ShareQueue.CopyFailed, "\(String(describing: error))")
+            #expect(!ShareQueue.fallsBackToData(afterFileError: error))
+            #expect(try Data(contentsOf: queue.incomingFolder) == Data("not a folder".utf8))
+            #expect(names(in: queue.itemsFolder).isEmpty)
+        }
     }
 }
 

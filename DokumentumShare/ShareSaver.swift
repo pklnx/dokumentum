@@ -5,16 +5,20 @@ import UniformTypeIdentifiers
 /// Writes shared attachments into the share queue. Only PDFs and images are taken (the activation rule offers
 /// the extension for nothing else); other attachments of the same share are left out.
 ///
-/// For each attachment, in this order (plan review N8):
+/// For each attachment, in this order (plan review N8), held by `ShareQueue.saveAttachment` (tested in Kit, #104);
+/// `save` reaches `saveData` only through it:
 /// 1. `loadFileRepresentation`: a file the system lends for the duration of the call, copied into the queue
 ///    inside the call. The file is never held in memory: `ShareQueue` copies it through one 1 MiB buffer. Only a
 ///    regular file is copied (review of #85).
-/// 2. If no file was lent or it could not be copied, `loadDataRepresentation` for the same type, which most
-///    providers coerce to (`ShareQueue.fallsBackToData(afterFileError:)`). **Not when the lent file was refused**
-///    as `NotARegularFile` (a symbolic link, a folder, a FIFO, a socket or a device): then the attachment is not
-///    saved and the sheet shows its error, so the extension never reads a link's target (#87, the maintainer's
-///    decision on P1). Files lends a link as a link, and the data would be the target's bytes. Every other failure,
-///    a lent file that is gone included, still falls back.
+/// 2. Only if no file was lent or the lent file could not be opened (a file that is gone, `EACCES`),
+///    `loadDataRepresentation` for the same type, which most providers coerce to
+///    (`ShareQueue.fallsBackToData(afterFileError:)`). **Never when the lent file was refused** as `NotARegularFile`
+///    (a symbolic link, a folder, a FIFO, a socket or a device), so the extension never reads a link's target (#87,
+///    the maintainer's decision on P1): Files lends a link as a link, and the data would be the target's bytes.
+///    **Never after `CopyFailed`**, a failure once the lent file was opened (reading it, or writing the queue: a
+///    full device, `EIO`; #104, the maintainer's decision P1 = A): the data would go to the same volume, and loading
+///    it holds the whole attachment in memory. In both cases the attachment is not saved and the sheet shows its
+///    error.
 /// 3. Otherwise (an attachment that offers only an image object) it is not written: decoding an image here could
 ///    run the extension out of memory. The sheet then shows its error.
 enum ShareSaver {
@@ -35,17 +39,10 @@ enum ShareSaver {
                 continue
             }
             let name = provider.suggestedName
-            switch await saveFile(provider, as: type, name: name, to: queue) {
-            case .saved:
-                continue
-            case .notSaved(let error):
-                guard ShareQueue.fallsBackToData(afterFileError: error) else {
-                    notSaved += 1
-                    continue
-                }
-            }
-            if await saveData(provider, as: type, name: name, to: queue) { continue }
-            notSaved += 1
+            let saved = await ShareQueue.saveAttachment(
+                savingFile: { await saveFile(provider, as: type, name: name, to: queue) },
+                savingData: { await saveData(provider, as: type, name: name, to: queue) })
+            if !saved { notSaved += 1 }
         }
         return notSaved
     }
@@ -68,15 +65,8 @@ enum ShareSaver {
         }
     }
 
-    /// What the file step did.
-    private enum FileResult {
-        case saved
-        /// Not saved; `error` is what `ShareQueue` threw, `nil` when no file was lent.
-        case notSaved(_ error: (any Error)?)
-    }
-
     private static func saveFile(_ provider: NSItemProvider, as type: UTType, name: String?, to queue: ShareQueue)
-        async -> FileResult
+        async -> ShareQueue.FileStep
     {
         await withCheckedContinuation { continuation in
             _ = provider.loadFileRepresentation(for: type, openInPlace: false) { url, _, _ in
