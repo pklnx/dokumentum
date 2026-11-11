@@ -25,10 +25,19 @@ struct ProcessingSchedulerTests {
             self.reports = Mutex(reports)
         }
 
+        let interrupts = TestSignal()
+        /// Per run: whether its task was cancelled when the gate let it go.
+        let cancelled = Mutex<[Bool]>([])
+
         func run() async -> ProcessingReport {
             started.fire()
             if let gate { await gate.pass() }
+            cancelled.withLock { $0.append(Task.isCancelled) }
             return reports.withLock { $0.isEmpty ? ProcessingReport() : $0.removeFirst() }
+        }
+
+        func interruptNow() {
+            interrupts.fire()
         }
     }
 
@@ -95,10 +104,15 @@ struct ProcessingSchedulerTests {
             queuedAtEnd.withLock { $0.append(scheduler.isQueued) }
             setup.runs.fire()
         }
+        let requests = TestSignal()
+        scheduler.didRequestRun = { requests.fire() }
 
         scheduler.start()
         await gate.reached()
         setup.insertions.yield()
+        // The insertion reaches the scheduler through its subscription task: wait until it was handled, so it
+        // cannot land after the gate is released and queue a third run (#119).
+        await requests.wait(for: 2, "the insertion was not handled")
         for _ in 0..<5 { scheduler.requestRun() }
         #expect(runner.started.count == 1, "no second run while the first is going on")
         gate.release()
@@ -147,14 +161,125 @@ struct ProcessingSchedulerTests {
 
         setup.scheduler.start()
         await setup.runs.wait(for: 1)
-        #expect(setup.scheduler.scheduledExpiry == waiting.nextExpiry)
+        #expect(setup.scheduler.scheduledWake == waiting.nextExpiry)
         await setup.expiry.waitForStarts(1)
         #expect(sleeps.durations.withLock { $0 } == [.seconds(5 * 60 * 60)], "the timer waits until the claim expires")
         #expect(runner.started.count == 1, "nothing runs before the claim expires")
         setup.expiry.fire()
         await setup.runs.wait(for: 2)
-        #expect(setup.scheduler.scheduledExpiry == nil)
+        #expect(setup.scheduler.scheduledWake == nil)
         #expect(!setup.expiry.isWaiting)
+    }
+
+    /// A backoff the run waited for wakes the scheduler like a claim expiry: the earlier of the two.
+    @Test func theEarlierOfExpiryAndRetryWakesTheScheduler() async throws {
+        let clock = TestClock()
+        var waiting = ProcessingReport()
+        waiting.nextExpiry = clock.now.addingTimeInterval(5 * hour)
+        waiting.nextRetry = clock.now.addingTimeInterval(60)
+        let runner = StubRunner(reports: [waiting])
+        let sleeps = SleepLog()
+        let setup = try makeScheduler(runner: runner, clock: clock, sleeps: sleeps)
+        defer { setup.scheduler.stop() }
+
+        setup.scheduler.start()
+        await setup.runs.wait(for: 1)
+        #expect(setup.scheduler.scheduledWake == waiting.nextRetry)
+        await setup.expiry.waitForStarts(1)
+        #expect(sleeps.durations.withLock { $0 } == [.seconds(60)])
+        setup.expiry.fire()
+        await setup.runs.wait(for: 2)
+    }
+
+    /// `pause()` during a run interrupts it at once (the attempt is given back) and cancels it; no run starts until
+    /// `resume()`, which starts one.
+    @Test func pauseInterruptsTheRunAndHoldsRunsUntilResume() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.pause()
+        #expect(runner.interrupts.count == 1, "the refund is synchronous")
+        #expect(scheduler.isPaused)
+        gate.release()
+        await setup.runs.wait(for: 1)
+        #expect(runner.cancelled.withLock { $0 } == [true], "the run was not cancelled")
+
+        // Every trigger (launch, import, store change, timer, activation) goes through `requestRun()`.
+        scheduler.requestRun()
+        #expect(!scheduler.isRunning, "a run started while paused")
+        #expect(!scheduler.isQueued)
+        #expect(runner.started.count == 1)
+
+        scheduler.resume()
+        #expect(!scheduler.isPaused)
+        await setup.runs.wait(for: 2)
+        #expect(runner.started.count == 2)
+        #expect(runner.cancelled.withLock { $0 } == [true, false])
+    }
+
+    /// A `resume()` that comes while the paused run is still ending starts one more run after it.
+    @Test func aResumeWhileThePausedRunEndsRunsAgain() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.pause()
+        scheduler.resume()
+        gate.release()
+        await setup.runs.wait(for: 2)
+        #expect(runner.cancelled.withLock { $0 } == [true, false])
+        #expect(runner.interrupts.count == 1)
+    }
+
+    /// With the real queue: a failed attempt (#97 point 2) names its backoff, and the scheduler's timer runs the
+    /// queue again when it ends, not before.
+    @Test func aFailedAttemptWakesTheSchedulerWhenItsBackoffEnds() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let seeded = remoteChange(of: store.container)
+        try store.insert(device: deviceA, claimedAt: processingStart)
+        await seeded.signal.wait(for: 1)
+        NotificationCenter.default.removeObserver(seeded.token)
+        let clock = TestClock()
+        let stage = TestStage(failing: 100)
+        let wake = ManualDebounce()
+        let sleeps = SleepLog()
+        let (insertions, _) = AsyncStream<Void>.makeStream()
+        let wakeSleep = wake.sleep
+        let scheduler = ProcessingScheduler(
+            runner: store.queue(deviceA, stage: stage, clock: clock),
+            observer: StoreChangeObserver(container: store.container, sleep: ManualDebounce().sleep),
+            insertions: insertions,
+            sleep: { duration in
+                sleeps.durations.withLock { $0.append(duration) }
+                try await wakeSleep(duration)
+            }, now: clock.function)
+        defer { scheduler.stop() }
+        let runs = TestSignal()
+        scheduler.didFinishRun = { _ in runs.fire() }
+
+        scheduler.start()
+        await runs.wait(for: 1)
+        #expect(stage.count == 1)
+        #expect(scheduler.scheduledWake == processingStart.addingTimeInterval(60))
+        await wake.waitForStarts(1)
+        #expect(sleeps.durations.withLock { $0 } == [.seconds(60)])
+        clock.advance(by: 60)
+        wake.fire()
+        await runs.wait(for: 2)
+        #expect(stage.count == 2)
+        #expect(scheduler.scheduledWake == clock.now.addingTimeInterval(10 * 60))
     }
 
     /// `ModelContext.didSave` names an inserted `Document` for an import, and only then.

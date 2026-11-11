@@ -21,9 +21,23 @@ public struct ProcessingReport: Equatable, Sendable {
     public var backedOff = 0
     /// Saves of this run: claim writes and result writes.
     public var saves = 0
-    /// When the first fresh claim of another device that this run waited for expires, by this device's clock: the
-    /// scheduler runs the queue again then.
+    /// Attempts whose stage reported no progress for the stall timeout (#97 point 3): cancelled, left behind and
+    /// counted as failed, so they are in `failures` or `failed` too.
+    public var timedOut = 0
+    /// Attempts ended by `interruptNow()` (#97 point 4): given back, not counted. The run ends with one.
+    public var interrupted = 0
+    /// The run ended early because a second stage was left behind after a timeout while the first had not
+    /// returned yet (N1). The next run waits for one of them before it starts a stage.
+    public var stalled = false
+    /// When the first fresh claim of another device that this run waited for expires, by this device's clock.
     public var nextExpiry: Date?
+    /// When the first backoff this run waited for, or started with a failed attempt, ends, by this device's clock.
+    public var nextRetry: Date?
+
+    /// When the scheduler runs the queue again: the earlier of `nextExpiry` and `nextRetry`.
+    public var nextWake: Date? {
+        [nextExpiry, nextRetry].compactMap(\.self).min()
+    }
 
     public init() {}
 }
@@ -31,6 +45,9 @@ public struct ProcessingReport: Equatable, Sendable {
 /// Something that runs the queue once; `ProcessingQueue` in the app, a stub in tests.
 public protocol ProcessingRunning: Sendable {
     func run() async -> ProcessingReport
+    /// Ends the stage that is going on at once and gives its attempt back (a known interruption: the app goes to the
+    /// background or quits). Synchronous, from any thread.
+    func interruptNow()
 }
 
 /// The processing queue (plan of #4, part 5): one document at a time, off the main actor.
@@ -45,9 +62,10 @@ public protocol ProcessingRunning: Sendable {
 /// 3. **the stages**, with no context open (`ProcessingStage`; step 3 has one, `InspectStage`). **The attempt is
 ///    counted before the stage runs** (`ProcessingFailures`), so a crash or an out-of-memory kill during the stage
 ///    counts as well: an attempt that never returned stays counted. A stage that returns clears the counter; one
-///    that throws keeps its attempt. The third failed attempt writes `.failed`; an attempt beyond the third (the
-///    earlier ones never returned) writes `.failed` without running the stage again, so such a PDF cannot crash
-///    every launch. `.failed` syncs, but another device whose own counter is below 3 still tries it;
+///    that throws or times out keeps its attempt and starts the backoff (1 min, then 10 min, `ProcessingBackoff`).
+///    The third failed attempt writes `.failed`; an attempt beyond the third (the earlier ones never returned)
+///    writes `.failed` without running the stage again, so such a PDF cannot crash every launch. `.failed` syncs,
+///    but another device whose own counter is below 3 still tries it;
 /// 4. **result write**: `pageCount` if it differs and `processingState = .done`.
 ///
 /// **A result is dropped** when the row no longer holds the claim the work ran under (another device took it
@@ -72,9 +90,29 @@ public protocol ProcessingRunning: Sendable {
 /// record (#31's C1/C2, T6). The window is one document row's read plus its save (docs/development/index.md,
 /// "The processing queue").
 ///
+/// **Stall watchdog (#97 point 3, T10).** The stage reports progress per page; when none came for 300 s (on the
+/// suspending clock, so a sleeping device never stalls), the queue cancels the stage without waiting for it, counts
+/// the attempt as failed (`timedOut`) and goes on with the next document. A cancelled stage stops after its page,
+/// but a framework call that ignores cancellation keeps running until it returns, and its result is always
+/// dropped. So that there is never more than one extra job (N1, `StageTracker`): a stage starts only when every
+/// stage cancelled by `interruptNow()` has returned and at most one timed-out stage is still alive, and a run whose
+/// second timeout would leave two alive ends as `stalled`.
+///
+/// **Interruptions (#97 point 4, T11).** `interruptNow()` is synchronous and callable from any thread: it gives the
+/// running attempt back (the counter returns to its value before the attempt, no backoff), cancels the stage and
+/// ends the wait for it, so a stage that returns later writes nothing. The scheduler calls it through `pause()`
+/// when the app goes to the background on iOS and when it quits on the Mac, and cancels the run, which ends before
+/// its next document. A crash, a kill or a power loss during the stage still counts, as before.
+///
 /// **Resume after quit** is the next run: a document left in `.processing` with this device's claim is processed
 /// again.
 public actor ProcessingQueue: ProcessingRunning {
+    /// Sleeps the stall watchdog's timeout; the suspending clock in the app.
+    public typealias Sleep = @Sendable (Duration) async throws -> Void
+
+    /// No progress for this long ends an attempt (T10).
+    public static let stallTimeout: Duration = .seconds(300)
+
     /// Test hooks; empty in the app.
     public struct Hooks: Sendable {
         /// Runs once per run after the scan, before the first document is processed.
@@ -82,12 +120,16 @@ public actor ProcessingQueue: ProcessingRunning {
         /// Runs in each write after its fields were set and before the check reads the row again (step 3 to 4):
         /// where a test saves another context's edit, or #56's repair.
         public var beforeCheck: (@Sendable (Write) throws -> Void)?
+        /// Runs each time a run starts to wait for a stage that was let go before it starts its own (N1).
+        public var waitsForStage: (@Sendable () -> Void)?
 
         public init(
-            afterScan: (@Sendable () async -> Void)? = nil, beforeCheck: (@Sendable (Write) throws -> Void)? = nil
+            afterScan: (@Sendable () async -> Void)? = nil, beforeCheck: (@Sendable (Write) throws -> Void)? = nil,
+            waitsForStage: (@Sendable () -> Void)? = nil
         ) {
             self.afterScan = afterScan
             self.beforeCheck = beforeCheck
+            self.waitsForStage = waitsForStage
         }
     }
 
@@ -100,24 +142,50 @@ public actor ProcessingQueue: ProcessingRunning {
     /// This device's `processingDeviceID` (`DeviceIdentity`).
     public let deviceID: String
     private let failures: ProcessingFailures
+    private let sightings: ClaimSightings
     private let stage: any ProcessingStage
     private let now: @Sendable () -> Date
     private let takeoverInterval: TimeInterval
+    private let stallTimeout: Duration
+    private let watchdogSleep: Sleep
     private let hooks: Hooks
+    /// The stage this queue waits for and the ones it let go.
+    let stages: StageTracker
 
+    /// - Parameters:
+    ///   - sightings: this device's claim sightings; by default in the failure counter's defaults suite.
+    ///   - watchdogSleep: sleeps the stall timeout; `Task.sleep` on the suspending clock in the app.
     public init(
-        container: ModelContainer, deviceID: String, failures: ProcessingFailures,
+        container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
         stage: any ProcessingStage = InspectStage(),
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
+        stallTimeout: Duration = ProcessingQueue.stallTimeout,
+        watchdogSleep: @escaping Sleep = { try await Task.sleep(for: $0, clock: .suspending) },
         now: @escaping @Sendable () -> Date = { Date() }, hooks: Hooks = Hooks()
     ) {
         self.container = container
         self.deviceID = deviceID
         self.failures = failures
+        self.sightings = sightings ?? ClaimSightings(defaultsSuite: failures.defaultsSuite)
         self.stage = stage
         self.takeoverInterval = takeoverInterval
+        self.stallTimeout = stallTimeout
+        self.watchdogSleep = watchdogSleep
         self.now = now
         self.hooks = hooks
+        stages = StageTracker(onWait: hooks.waitsForStage)
+    }
+
+    /// A known interruption (#97 point 4): gives the running attempt back, cancels its stage and ends the wait for
+    /// it, at once and without waiting for the stage. Callable from any thread; the refund is done when it returns.
+    /// The run that waited ends; a run that is also cancelled (the scheduler's `pause()`) starts no further
+    /// document.
+    public nonisolated func interruptNow() {
+        guard let current = stages.interruptCurrent() else { return }
+        let refunded = failures.refund(current.attempt)
+        current.task?.cancel()
+        current.outcome.resolve(.interrupted)
+        Log.processing.notice("Processing interrupted; attempt given back: \(refunded, privacy: .public)")
     }
 
     /// One run over every document that is not `done`.
@@ -126,16 +194,20 @@ public actor ProcessingQueue: ProcessingRunning {
         var report = ProcessingReport()
         let candidates: [Candidate]
         do {
-            try Self.forgetCounters(failures, in: container)
+            try Self.forgetCounters(failures, sightings: sightings, in: container)
             candidates = try Self.scan(in: container)
         } catch {
             Log.processing.error("Processing scan failed: \(Log.code(of: error), privacy: .public)")
             return report
         }
         if let afterScan = hooks.afterScan { await afterScan() }
-        for candidate in candidates {
+        documents: for candidate in candidates {
+            // Cancelled: the scheduler paused (the app goes to the background or quits).
+            if Task.isCancelled { break }
+            let now = now()
+            let input = decisionInput(for: candidate, now: now)
             let decision = ProcessingClaimRules.decide(
-                candidate.input, thisDevice: deviceID, failures: failures.count(for: candidate.instanceID), now: now(),
+                input, thisDevice: deviceID, failures: failures.count(for: candidate.instanceID), now: now,
                 takeoverInterval: takeoverInterval)
             switch decision {
             case .skip:
@@ -143,29 +215,51 @@ public actor ProcessingQueue: ProcessingRunning {
             case .wait(.claimedElsewhere(let until)):
                 report.waiting += 1
                 report.nextExpiry = min(report.nextExpiry ?? until, until)
+            case .wait(.retryAfter(let date)):
+                report.waiting += 1
+                report.nextRetry = min(report.nextRetry ?? date, date)
             case .wait:
                 report.waiting += 1
             case .process(let claim):
-                await process(candidate, claim: claim, into: &report)
+                guard await process(candidate, claim: claim, into: &report) else { break documents }
             }
         }
         Self.log(report)
         return report
     }
 
+    /// The scan's input with this device's own knowledge: since when it has seen another device's claim (recorded
+    /// now), and its backoff.
+    private func decisionInput(for candidate: Candidate, now: Date) -> ProcessingClaimInput {
+        var input = candidate.input
+        let id = candidate.instanceID
+        if input.state == .pending || input.state == .processing, !input.deviceID.isEmpty, input.deviceID != deviceID,
+            let claimedAt = input.claimedAt
+        {
+            input.claimSeenSince = sightings.see(id, deviceID: input.deviceID, claimedAt: claimedAt, now: now)
+        } else if sightings.sighting(of: id) != nil {
+            sightings.forget([id])
+        }
+        input.retryNotBefore = failures.backoff(for: id, now: now).retryNotBefore
+        return input
+    }
+
+    /// Processes one document; `false` ends the run (interrupted, cancelled, or stalled).
     private func process(
         _ candidate: Candidate, claim: ProcessingDecision.ClaimWrite, into report: inout ProcessingReport
-    ) async {
+    ) async -> Bool {
         let id = candidate.instanceID
+        // One job at a time (N1): a stage that was let go and has not returned blocks the next one.
+        guard await stages.waitUntilStartable(), !Task.isCancelled else { return false }
         let loaded: LoadedFile
         switch Self.loadFile(of: id, in: container) {
         case .file(let file): loaded = file
         case .noData:
             report.waiting += 1
-            return
+            return true
         case .changed:
             report.dropped += 1
-            return
+            return true
         }
         // The writes expect the file whose data was loaded: one relinked or replaced later drops the result.
         var held = candidate.held(file: loaded.file)
@@ -176,44 +270,125 @@ public actor ProcessingQueue: ProcessingRunning {
                 document.processingClaimedAt = claimedAt
                 document.processingState = .processing
             }
-            guard count(outcome, into: &report) else { return }
+            guard count(outcome, into: &report) else { return true }
             held = Held(
                 stateRaw: ProcessingState.processing.storedValue ?? "", deviceID: deviceID, claimedAt: claimedAt,
                 file: loaded.file)
         }
         // Counted before the stage: an attempt that never returns (a crash, a memory kill) stays counted.
-        let attempts = failures.increment(for: id)
-        guard attempts <= ProcessingClaimRules.failureLimit else {
+        let attempt = failures.begin(id, at: now())
+        guard attempt.number <= ProcessingClaimRules.failureLimit else {
+            failures.fail(attempt)
             Log.processing.error(
-                "Processing gave up: \(attempts - 1, privacy: .public) attempts on this device never returned")
-            let outcome = write(.result, id, expecting: held) { $0.processingState = .failed }
-            if count(outcome, into: &report) { report.failed += 1 }
-            return
+                "Processing gave up: \(attempt.number - 1, privacy: .public) attempts on this device never returned")
+            writeFailed(id, expecting: held, into: &report)
+            return true
         }
-        let result: ProcessingResult
-        do {
-            result = try await stage.process(pdfData: loaded.data)
-        } catch {
+        switch await runStage(pdfData: loaded.data, attempt: attempt) {
+        case .returned(let result):
+            // Finished before the counter goes, in one step: a late interruption changes nothing (N2).
+            guard failures.succeed(attempt) else {
+                report.interrupted += 1
+                return false
+            }
+            let outcome = write(.result, id, expecting: held) { document in
+                if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
+                document.processingState = .done
+            }
+            if count(outcome, into: &report) { report.done += 1 }
+            return true
+        case .threw(let error):
+            guard failures.fail(attempt) else {
+                report.interrupted += 1
+                return false
+            }
             Log.processing.error(
                 """
-                Processing failed: \(Log.code(of: error), privacy: .public), attempt \(attempts, privacy: .public) \
+                Processing failed: \(Log.code(of: error), privacy: .public), attempt \(attempt.number, privacy: .public) \
                 on this device
                 """)
-            guard attempts >= ProcessingClaimRules.failureLimit else {
-                report.failures += 1
-                return
+            failed(attempt, expecting: held, into: &report)
+            return true
+        case .timedOut:
+            guard failures.fail(attempt) else {
+                report.interrupted += 1
+                return false
             }
-            let outcome = write(.result, id, expecting: held) { $0.processingState = .failed }
-            if count(outcome, into: &report) { report.failed += 1 }
+            report.timedOut += 1
+            Log.processing.error(
+                "Processing timed out: no progress, attempt \(attempt.number, privacy: .public) on this device")
+            failed(attempt, expecting: held, into: &report)
+            guard stages.timedOutAlive < 2 else {
+                report.stalled = true
+                Log.processing.error("Processing stalled: two stages that timed out have not returned")
+                return false
+            }
+            return true
+        case .interrupted:
+            report.interrupted += 1
+            return false
+        }
+    }
+
+    /// A failed attempt (thrown or timed out): below the limit nothing is written and the backoff starts; the third
+    /// writes `failed`.
+    private func failed(
+        _ attempt: ProcessingFailures.Attempt, expecting held: Held, into report: inout ProcessingReport
+    ) {
+        guard attempt.number >= ProcessingClaimRules.failureLimit else {
+            report.failures += 1
+            if let retry = failures.backoff(for: attempt.document, now: now()).retryNotBefore {
+                report.nextRetry = min(report.nextRetry ?? retry, retry)
+            }
             return
         }
-        // The stage returned: this device is not failing on the document.
-        failures.remove(id)
-        let outcome = write(.result, id, expecting: held) { document in
-            if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
-            document.processingState = .done
+        writeFailed(attempt.document, expecting: held, into: &report)
+    }
+
+    private func writeFailed(_ id: UUID, expecting held: Held, into report: inout ProcessingReport) {
+        let outcome = write(.result, id, expecting: held) { $0.processingState = .failed }
+        if count(outcome, into: &report) { report.failed += 1 }
+    }
+
+    /// Runs the stage in a task of its own, raced by the stall watchdog and `interruptNow()`. A stage that loses the
+    /// race is cancelled and not waited for; whatever it returns later is dropped.
+    private func runStage(pdfData: Data, attempt: ProcessingFailures.Attempt) async -> StageOutcome {
+        let outcome = FirstOutcome()
+        let watchdog = StallWatchdog(timeout: stallTimeout, sleep: watchdogSleep) { outcome.resolve(.timedOut) }
+        let stages = stages
+        let stage = stage
+        let id = stages.begin(attempt: attempt, outcome: outcome)
+        // A pause that came before `begin` found no stage to interrupt; it cancelled the run first, so it is seen
+        // here, and the stage never starts (review B1 of #120). One that comes after `begin` interrupts the stage.
+        if Task.isCancelled {
+            _ = stages.cancelBeforeStart(id)
+            failures.refund(attempt)
+            return .interrupted
         }
-        if count(outcome, into: &report) { report.done += 1 }
+        watchdog.kick()
+        let task = Task.detached {
+            let result: StageOutcome
+            do {
+                result = .returned(try await stage.process(pdfData: pdfData) { _, _ in watchdog.kick() })
+            } catch {
+                result = .threw(error)
+            }
+            outcome.resolve(result)
+            stages.ended(id)
+        }
+        stages.attach(task, to: id)
+        let result = await outcome.value
+        watchdog.stop()
+        switch result {
+        case .returned, .threw:
+            stages.finish(id)
+        case .timedOut:
+            stages.abandonAfterTimeout(id)
+            task.cancel()
+        case .interrupted:
+            break
+        }
+        return result
     }
 
     /// Adds a write's outcome to `report`; `true` when it saved.
@@ -244,7 +419,9 @@ public actor ProcessingQueue: ProcessingRunning {
             Processing run: done \(report.done, privacy: .public), failed \(report.failed, privacy: .public), \
             failures \(report.failures, privacy: .public), waiting \(report.waiting, privacy: .public), skipped \
             \(report.skipped, privacy: .public), dropped \(report.dropped, privacy: .public), backed off \
-            \(report.backedOff, privacy: .public), saves \(report.saves, privacy: .public)
+            \(report.backedOff, privacy: .public), saves \(report.saves, privacy: .public), timed out \
+            \(report.timedOut, privacy: .public), interrupted \(report.interrupted, privacy: .public), stalled \
+            \(report.stalled, privacy: .public)
             """)
     }
 }
@@ -325,15 +502,21 @@ extension ProcessingQueue {
         return candidates
     }
 
-    /// Removes the failure counters of documents that are `done` or gone, so the keys do not grow.
-    static func forgetCounters(_ failures: ProcessingFailures, in container: ModelContainer) throws {
-        let tracked = failures.documents
+    /// Removes the failure counters and claim sightings of documents that are `done` or gone, so the keys do not
+    /// grow.
+    static func forgetCounters(
+        _ failures: ProcessingFailures, sightings: ClaimSightings, in container: ModelContainer
+    ) throws {
+        let tracked = Array(Set(failures.documents + sightings.documents))
         guard !tracked.isEmpty else { return }
         let context = ModelContext(container)
         let documents = try context.fetch(
             FetchDescriptor<Document>(predicate: #Predicate { tracked.contains($0.instanceID) }))
         let open = Set(documents.filter { $0.processingState != .done }.map(\.instanceID))
-        for id in tracked where !open.contains(id) { failures.remove(id) }
+        let gone = tracked.filter { !open.contains($0) }
+        guard !gone.isEmpty else { return }
+        failures.forget(gone)
+        sightings.forget(gone)
     }
 
     /// The document's PDF, in a context of its own that ends with the load: the one blob read of a run.

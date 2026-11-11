@@ -68,13 +68,15 @@ final class ProcessingStore: Sendable {
         return ProcessingFailures(defaultsSuite: suite)
     }
 
+    /// A queue whose stall watchdog sleeps on `watchdog`: a `ManualDebounce` nobody fires unless the test passes
+    /// its own.
     func queue(
         _ device: String, failures: ProcessingFailures? = nil, stage: any ProcessingStage = InspectStage(),
-        clock: TestClock, hooks: ProcessingQueue.Hooks = .init()
+        clock: TestClock, watchdog: ManualDebounce = ManualDebounce(), hooks: ProcessingQueue.Hooks = .init()
     ) -> ProcessingQueue {
         ProcessingQueue(
             container: container, deviceID: device, failures: failures ?? self.failures(device), stage: stage,
-            now: clock.function, hooks: hooks)
+            watchdogSleep: watchdog.sleep, now: clock.function, hooks: hooks)
     }
 
     /// Inserts one document as the importer does (file and text in the same save), in the given queue state.
@@ -155,7 +157,7 @@ final class TestStage: ProcessingStage {
 
     var count: Int { calls.withLock { $0 } }
 
-    func process(pdfData: Data) async throws -> ProcessingResult {
+    func process(pdfData: Data, progress: @escaping ProcessingProgress) async throws -> ProcessingResult {
         let call = calls.withLock {
             $0 += 1
             return $0
@@ -168,6 +170,15 @@ final class TestStage: ProcessingStage {
             return true
         }
         if fails { throw Failure() }
-        return try await InspectStage().process(pdfData: pdfData)
+        return try await InspectStage().process(pdfData: pdfData, progress: progress)
+    }
+}
+
+/// A stage that is a closure, for the tests that report progress themselves.
+struct ClosureStage: ProcessingStage {
+    let body: @Sendable (Data, ProcessingProgress) async throws -> ProcessingResult
+
+    func process(pdfData: Data, progress: @escaping ProcessingProgress) async throws -> ProcessingResult {
+        try await body(pdfData, progress)
     }
 }
