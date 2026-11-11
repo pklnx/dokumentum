@@ -18,6 +18,9 @@ import Foundation
 ///   Leftovers in `Incoming/` (the extension ended before the rename) are removed after a day.
 /// - **A file name is data, never a path.** The payload is always `payload`. `originalFileName` is used for the
 ///   title only, and only through `fileName(fromShared:)`: `../../x.pdf` gives `x.pdf`.
+/// - **Regular files only, never links** (review of #85). The writer copies only a regular file (a lent symbolic
+///   link would be copied as a link and then followed by the app, out of the queue); the reader reads a payload
+///   only when it is a regular file, and an entry of `Items/` only when it is a real folder.
 /// - **Versions.** An `item.json` with a newer `version` (a newer extension than app) is left alone; one that
 ///   cannot be read moves to `Failed/`.
 /// - **Attempts.** The reader counts an attempt in `item.json` (written `.atomic`) before it imports an item;
@@ -59,14 +62,27 @@ public struct ShareQueue: Sendable {
     // MARK: Writing (the share extension)
 
     /// Adds a copy of the file at `source` (a file the system lends for the duration of a call) and returns
-    /// the item's identifier. The item appears in `Items/` complete or not at all.
+    /// the item's identifier. The item appears in `Items/` complete or not at all. Throws `NotARegularFile`, and
+    /// writes nothing, when `source` is a symbolic link, a folder or anything else that is not a regular file.
     @discardableResult
     public func add(
         copyingFileAt source: URL, originalFileName: String, typeIdentifier: String, createdAt: Date = Date()
     ) throws -> UUID {
-        try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
+        guard Self.isRegularFile(source) else { throw NotARegularFile() }
+        return try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
             try FileManager.default.copyItem(at: source, to: $0)
         }
+    }
+
+    /// A file to copy, or a payload to read, that is not a regular file (a symbolic link, a folder, a device).
+    public struct NotARegularFile: Error, Equatable {
+        public init() {}
+    }
+
+    /// Whether `url` itself (not what a link at it points to) is a regular file.
+    static func isRegularFile(_ url: URL) -> Bool {
+        let type = try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType
+        return type == .typeRegular
     }
 
     /// Adds `data` as an item; see `add(copyingFileAt:…)`.
@@ -74,13 +90,28 @@ public struct ShareQueue: Sendable {
     public func add(data: Data, originalFileName: String, typeIdentifier: String, createdAt: Date = Date()) throws
         -> UUID
     {
-        try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
+        try add(
+            data: data, originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt,
+            beforeHandOver: nil)
+    }
+
+    /// `add(data:…)` with a hook for tests: `beforeHandOver` gets the finished item's folder right before the
+    /// rename into `Items/`.
+    func add(
+        data: Data, originalFileName: String, typeIdentifier: String, createdAt: Date = Date(),
+        beforeHandOver: ((URL) throws -> Void)? = nil
+    ) throws -> UUID {
+        try add(
+            originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt,
+            beforeHandOver: beforeHandOver
+        ) {
             try data.write(to: $0)
         }
     }
 
     private func add(
-        originalFileName: String, typeIdentifier: String, createdAt: Date, writePayload: (URL) throws -> Void
+        originalFileName: String, typeIdentifier: String, createdAt: Date,
+        beforeHandOver: ((URL) throws -> Void)? = nil, writePayload: (URL) throws -> Void
     ) throws -> UUID {
         let id = UUID()
         let fileManager = FileManager.default
@@ -93,6 +124,7 @@ public struct ShareQueue: Sendable {
                 createdAt: createdAt, attempts: 0)
             try Self.write(info, to: building)
             try fileManager.createDirectory(at: itemsFolder, withIntermediateDirectories: true)
+            try beforeHandOver?(building)
             // The last step: from here on the reader sees the item, complete.
             try fileManager.moveItem(at: building, to: itemFolder(id))
         } catch {
@@ -121,7 +153,9 @@ public struct ShareQueue: Sendable {
         let fileManager = FileManager.default
         guard let names = try? fileManager.contentsOfDirectory(atPath: itemsFolder.path) else { return scan }
         for name in names.sorted() {
-            guard let id = UUID(uuidString: name) else {
+            // A link or a file among the item folders is not an item the writer made.
+            let entryType = try? fileManager.attributesOfItem(atPath: itemsFolder.appending(path: name).path)[.type]
+            guard let id = UUID(uuidString: name), entryType as? FileAttributeType == .typeDirectory else {
                 if (try? moveToFailed(named: name)) != nil { scan.movedToFailed.append(name) }
                 continue
             }
@@ -154,6 +188,14 @@ public struct ShareQueue: Sendable {
     /// Where the item's bytes are.
     public func payloadURL(of item: ShareQueueItem) -> URL {
         itemFolder(item.id).appending(path: Self.payloadName)
+    }
+
+    /// The item's bytes. Throws `NotARegularFile` when the payload is not a regular file (never follows a link out
+    /// of the queue), or the read's error.
+    public func payload(of item: ShareQueueItem) throws -> Data {
+        let url = payloadURL(of: item)
+        guard Self.isRegularFile(url) else { throw NotARegularFile() }
+        return try Data(contentsOf: url, options: .mappedIfSafe)
     }
 
     /// Removes the item. An item that is gone already is no error.
@@ -202,6 +244,45 @@ public struct ShareQueue: Sendable {
         let last = name.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? ""
         let scalars = last.unicodeScalars.filter { $0.properties.generalCategory != .control }
         return String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The name the share extension gives an item (the rule of #85, round 2), as data (`fileName(fromShared:)`):
+    /// - the suggested name, else the lent file's name;
+    /// - a name that would give an empty title (none, or only an extension such as ".pdf") is replaced by the
+    ///   share's date and time, `yyyy-MM-dd HH:mm`, keeping its extension;
+    /// - the type's preferred extension is added only when the name has no extension of an importable type
+    ///   (`isImportableExtension`: a PDF or an image type). "Rechnung 2024.03" becomes "Rechnung 2024.03.pdf", so
+    ///   the title keeps ".03"; "scan.jpg" stays "scan.jpg" when the bytes are HEIC, and "photo.png" stays when they
+    ///   are JPEG: the importer goes by the item's type, the name only gives the title.
+    public static func itemFileName(
+        suggested: String?, lentFileName: String?, preferredExtension: String?, date: Date,
+        timeZone: TimeZone = .current, isImportableExtension: (String) -> Bool
+    ) -> String {
+        let candidates = [suggested, lentFileName].compactMap { $0.map(fileName(fromShared:)) }
+        var name = candidates.first { !$0.isEmpty } ?? ""
+        let pathExtension = Self.pathExtension(of: name)
+        if importTitle(fromFileName: name).isEmpty {
+            name = fallbackName(date: date, timeZone: timeZone) + (pathExtension.map { ".\($0)" } ?? "")
+        }
+        if let current = pathExtension, isImportableExtension(current.lowercased()) { return name }
+        guard let preferredExtension, !preferredExtension.isEmpty else { return name }
+        return "\(name).\(preferredExtension)"
+    }
+
+    /// The part after the last dot, when it is one (not empty, no whitespace), as `importTitle` sees it.
+    static func pathExtension(of name: String) -> String? {
+        guard let dot = name.lastIndex(of: ".") else { return nil }
+        let part = String(name[name.index(after: dot)...])
+        return part.isEmpty || part.contains(where: \.isWhitespace) ? nil : part
+    }
+
+    /// `yyyy-MM-dd HH:mm` in `timeZone`, the same in every language.
+    static func fallbackName(date: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 
     // MARK: Private

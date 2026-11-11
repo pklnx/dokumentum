@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 ///
 /// For each attachment, in this order (plan review N8):
 /// 1. `loadFileRepresentation`: a file the system lends for the duration of the call, copied into the queue
-///    inside the call. The bytes never pass through memory.
+///    inside the call. The bytes never pass through memory. Only a regular file is copied: a lent symbolic link
+///    is refused by `ShareQueue`, so it is never followed (review of #85), and the next step takes over.
 /// 2. If that fails, `loadDataRepresentation` for the same type, which most providers coerce to.
 /// 3. Otherwise (an attachment that offers only an image object) it is not written: decoding an image here could
 ///    run the extension out of memory. The sheet then shows its error.
@@ -23,7 +24,7 @@ enum ShareSaver {
     static func save(_ providers: [NSItemProvider], to queue: ShareQueue?) async -> Int {
         var notSaved = 0
         for provider in providers {
-            guard let type = type(of: provider) else { continue }
+            guard let type = shareType(of: provider) else { continue }
             guard let queue else {
                 notSaved += 1
                 continue
@@ -37,21 +38,21 @@ enum ShareSaver {
     }
 
     /// The attachment's own PDF type, else its own image type (such as `public.jpeg`); `nil` for anything else.
-    static func type(of provider: NSItemProvider) -> UTType? {
+    static func shareType(of provider: NSItemProvider) -> UTType? {
         let types = provider.registeredTypeIdentifiers.compactMap(UTType.init)
         return types.first { $0.conforms(to: .pdf) } ?? types.first { $0.conforms(to: .image) }
     }
 
-    /// The name the item gets: the suggested one, else the lent file's, with the type's extension when it has
-    /// none of that type (so the title keeps a part after a dot). The queue treats it as data, never as a path.
+    /// The name the item gets: `ShareQueue.itemFileName`'s rule (tested in Kit), with the type information only
+    /// this side has. The queue treats the name as data, never as a path.
     static func fileName(suggested: String?, fileURL: URL?, type: UTType) -> String {
-        let base = suggested.flatMap { $0.isEmpty ? nil : $0 } ?? fileURL?.lastPathComponent ?? ""
-        let pathExtension = (base as NSString).pathExtension
-        if !pathExtension.isEmpty, UTType(filenameExtension: pathExtension)?.conforms(to: type) == true {
-            return base
+        ShareQueue.itemFileName(
+            suggested: suggested, lentFileName: fileURL?.lastPathComponent,
+            preferredExtension: type.preferredFilenameExtension, date: Date()
+        ) { pathExtension in
+            guard let type = UTType(filenameExtension: pathExtension) else { return false }
+            return type.conforms(to: .pdf) || type.conforms(to: .image)
         }
-        guard let preferred = type.preferredFilenameExtension else { return base }
-        return "\(base).\(preferred)"
     }
 
     private static func saveFile(_ provider: NSItemProvider, as type: UTType, name: String?, to queue: ShareQueue)

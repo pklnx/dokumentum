@@ -417,8 +417,13 @@ the group's queue folder and closes, and the app imports the items at launch and
   A failure keeps the item; its third failure moves it to `Failed/`, which nothing empties, and the notice
   names it once. Share-queue imports never select or open a document (PQ12); duplicates and items moved to
   `Failed/` appear as the usual import notice. A run that stays away from real data (`TestEnvironment.isIsolated`)
-  refuses the group container (`ArchiveStore.isLiveStorePath`), so unit tests and in-memory UI-test launches never
-  touch the queue; tests pass a temporary folder.
+  and every `-UITestLocalStore` launch refuse the group container (`ArchiveStore.isLiveStorePath`), so unit tests
+  and UI-test launches never touch the queue; tests pass a temporary folder.
+- **Regular files only.** The extension copies a lent file only when it is a regular file, never a symbolic
+  link (a link would be followed by the app, out of the queue); the app reads a payload only when it is a regular
+  file and an `Items/` entry only when it is a real folder. The item's name follows `ShareQueue.itemFileName`:
+  the suggested name, else the lent file's, else the share's date and time; the type's extension is added only
+  when the name has no PDF or image extension.
 - **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the
   entitlements file. The app group on a device (both App IDs, the profiles) is the maintainer's (#4, M2 and M3).
 

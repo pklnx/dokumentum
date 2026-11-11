@@ -1,6 +1,7 @@
-import DokumentumKit
 import Foundation
 import Testing
+
+@testable import DokumentumKit
 
 /// The share queue's format (plan of #4, part 4): the hand-over, the order, versions, unreadable items, attempts,
 /// names that are never paths, removal. Every test works in a new temporary folder of its own; nothing here
@@ -266,4 +267,173 @@ struct ShareQueueTests {
             #expect(!removed)
         }
     }
+
+    // MARK: Round 2 of #85: links, the writer's hand-over, the cleanup's clock edges, names
+
+    /// A file outside the queue and a symbolic link to it, as a sharing app could lend one.
+    private func outsideFileAndLink(in container: URL) throws -> (file: URL, link: URL) {
+        let outside = container.appending(path: "outside-secret.pdf")
+        try Data("%PDF outside the queue".utf8).write(to: outside)
+        let link = container.appending(path: "lent.pdf")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        return (outside, link)
+    }
+
+    /// Review A's `aLentSymlinkBecomesThePayload`, inverted: a lent link is refused and nothing is written.
+    @Test func aLentSymbolicLinkIsRefusedAndNothingIsWritten() throws {
+        try withQueue { queue, container in
+            let (_, link) = try outsideFileAndLink(in: container)
+
+            #expect(throws: ShareQueue.NotARegularFile.self) {
+                try queue.add(copyingFileAt: link, originalFileName: "lent.pdf", typeIdentifier: "com.adobe.pdf")
+            }
+
+            #expect(queue.scan().items.isEmpty)
+            #expect(names(in: queue.incomingFolder).isEmpty && names(in: queue.itemsFolder).isEmpty)
+        }
+    }
+
+    @Test func aLentFolderIsRefused() throws {
+        try withQueue { queue, container in
+            let folder = container.appending(path: "folder.pdf", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+            #expect(throws: ShareQueue.NotARegularFile.self) {
+                try queue.add(copyingFileAt: folder, originalFileName: "folder.pdf", typeIdentifier: "com.adobe.pdf")
+            }
+            #expect(queue.scan().items.isEmpty)
+        }
+    }
+
+    @Test func aPayloadThatIsASymbolicLinkIsNotRead() throws {
+        try withQueue { queue, container in
+            let (_, link) = try outsideFileAndLink(in: container)
+            try queue.add(
+                data: Data("%PDF in the queue".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            #expect(try queue.payload(of: item) == Data("%PDF in the queue".utf8), "a regular payload is read")
+            try FileManager.default.removeItem(at: queue.payloadURL(of: item))
+            try FileManager.default.createSymbolicLink(
+                at: queue.payloadURL(of: item), withDestinationURL: link.resolvingSymlinksInPath())
+
+            #expect(throws: ShareQueue.NotARegularFile.self) { try queue.payload(of: item) }
+        }
+    }
+
+    @Test func anItemsEntryThatIsALinkToAFolderMovesToFailedAndItsTargetStays() throws {
+        try withQueue { queue, container in
+            let outside = container.appending(path: "outside", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+            try Data("%PDF".utf8).write(to: outside.appending(path: "payload"))
+            try Data(#"{"version":1,"originalFileName":"a.pdf","typeIdentifier":"com.adobe.pdf","createdAt":0}"#.utf8)
+                .write(to: outside.appending(path: "item.json"))
+            try FileManager.default.createDirectory(at: queue.itemsFolder, withIntermediateDirectories: true)
+            let id = UUID()
+            try FileManager.default.createSymbolicLink(
+                at: queue.itemsFolder.appending(path: id.uuidString), withDestinationURL: outside)
+
+            let scan = queue.scan()
+
+            #expect(scan.items.isEmpty)
+            #expect(scan.movedToFailed == [id.uuidString])
+            #expect(FileManager.default.fileExists(atPath: outside.appending(path: "payload").path))
+        }
+    }
+
+    /// The writer's hand-over (review B, N2): the item is complete in `Incoming/` and invisible until the rename,
+    /// then it is in `Items/` and `Incoming/` is empty.
+    @Test func theWriterBuildsInIncomingAndHandsOverByOneRename() throws {
+        try withQueue { queue, _ in
+            var seen: URL?
+            let id = try queue.add(
+                data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf",
+                createdAt: Self.date
+            ) { building in
+                seen = building
+                #expect(
+                    building.deletingLastPathComponent().standardizedFileURL == queue.incomingFolder.standardizedFileURL
+                )
+                #expect(names(in: building) == ["item.json", "payload"], "complete before the hand-over")
+                #expect(queue.scan().items.isEmpty, "invisible before the hand-over")
+            }
+
+            #expect(seen?.lastPathComponent == id.uuidString)
+            #expect(names(in: queue.incomingFolder).isEmpty)
+            #expect(queue.scan().items.map(\.id) == [id])
+        }
+    }
+
+    /// `item.json` is replaced, not written in place (review B, N2): a reader never sees half a file.
+    @Test func anAttemptReplacesItemJSONAtomically() throws {
+        try withQueue { queue, _ in
+            let id = try queue.add(data: Data("a".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let info = queue.itemsFolder.appending(path: id.uuidString).appending(path: "item.json")
+            // The inode: a value type that differs between Foundation on Apple systems and on Linux.
+            func fileNumber() throws -> UInt64? {
+                let value = try FileManager.default.attributesOfItem(atPath: info.path)[.systemFileNumber]
+                if let number = value as? NSNumber { return number.uint64Value }
+                if let number = value as? UInt64 { return number }
+                return (value as? Int).map(UInt64.init)
+            }
+            let before = try #require(try fileNumber())
+            let item = try #require(queue.scan().items.first)
+
+            _ = try queue.recordAttempt(item)
+
+            let after = try #require(try fileNumber())
+            #expect(after != before, "a new file renamed over the old one")
+        }
+    }
+
+    /// Review A's `incomingCleanupAtTheClockEdges`: a leftover dated in the future stays, one exactly a day old
+    /// stays (strict), one a day and a second old goes.
+    @Test func incomingCleanupAtTheClockEdges() throws {
+        try withQueue { queue, _ in
+            let now = Date()
+            let (future, exact, old) = (UUID().uuidString, UUID().uuidString, UUID().uuidString)
+            for (name, age) in [
+                (future, -3 * 86_400.0), (exact, ShareQueue.incomingMaxAge), (old, ShareQueue.incomingMaxAge + 1),
+            ] {
+                let url = queue.incomingFolder.appending(path: name)
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                try FileManager.default.setAttributes(
+                    [.modificationDate: now.addingTimeInterval(-age)], ofItemAtPath: url.path)
+            }
+
+            #expect(queue.removeStaleIncoming(now: now) == 1)
+            #expect(Set(names(in: queue.incomingFolder)) == [future, exact])
+        }
+    }
+
+    /// The share extension's name rule (`itemFileName`, deviation 5, reviews A-N3 and B-N3).
+    @Test(
+        arguments: [
+            ("Rechnung.pdf", nil, "pdf", "Rechnung.pdf", "Rechnung"),
+            ("scan.PDF", nil, "pdf", "scan.PDF", "scan"),
+            ("Rechnung 2024.03", nil, "pdf", "Rechnung 2024.03.pdf", "Rechnung 2024.03"),
+            ("scan.jpg", nil, "heic", "scan.jpg", "scan"),
+            ("photo.png", nil, "jpeg", "photo.png", "photo"),
+            ("notes.txt", nil, "pdf", "notes.txt.pdf", "notes.txt"),
+            (nil, "lent.pdf", "pdf", "lent.pdf", "lent"),
+            ("", "IMG_0001.HEIC", "heic", "IMG_0001.HEIC", "IMG_0001"),
+            ("../../x", nil, "pdf", "x.pdf", "x"),
+            (nil, nil, "pdf", "2027-01-15 08:00.pdf", "2027-01-15 08:00"),
+            ("", "", "jpeg", "2027-01-15 08:00.jpeg", "2027-01-15 08:00"),
+            (".pdf", nil, "pdf", "2027-01-15 08:00.pdf", "2027-01-15 08:00"),
+            (nil, nil, nil, "2027-01-15 08:00", "2027-01-15 08:00"),
+        ] as [(String?, String?, String?, String, String)])
+    func theItemsNameKeepsATitle(
+        suggested: String?, lent: String?, preferred: String?, fileName: String, title: String
+    ) {
+        let importable: Set<String> = ["pdf", "jpg", "jpeg", "png", "heic"]
+
+        let name = ShareQueue.itemFileName(
+            suggested: suggested, lentFileName: lent, preferredExtension: preferred, date: Self.date,
+            timeZone: TimeZone(identifier: "UTC")!, isImportableExtension: importable.contains)
+
+        #expect(name == fileName)
+        #expect(importTitle(fromFileName: name) == title)
+        #expect(!importTitle(fromFileName: name).isEmpty, "never an empty title")
+    }
+
 }

@@ -23,7 +23,8 @@
     ///   notice (PQ4). Failures that are tried again are not reported yet, so a notice names each such item once.
     /// - **Where:** the group container from `containerURL(forSecurityApplicationGroupIdentifier:)`. Without one
     ///   (no entitlement) the importer is off. A run that stays away from real data (`TestEnvironment.isIsolated`:
-    ///   unit tests in the app host, UI tests' in-memory stores) refuses the real group container
+    ///   unit tests in the app host, UI tests' in-memory stores; and every `-UITestLocalStore` launch) refuses the
+    ///   real group container
     ///   (`ArchiveStore.isLiveStorePath`), as the store does; tests pass a temporary folder.
     @MainActor @Observable
     final class ShareQueueImporter {
@@ -50,7 +51,9 @@
         static func forApp(importer: any DocumentImporting) -> ShareQueueImporter? {
             let container = FileManager.default.containerURL(
                 forSecurityApplicationGroupIdentifier: ShareQueue.appGroupIdentifier)
-            guard let queue = queue(groupContainer: container, isIsolated: TestEnvironment.isIsolated) else {
+            let isolated = isIsolatedLaunch(
+                isIsolated: TestEnvironment.isIsolated, arguments: ProcessInfo.processInfo.arguments)
+            guard let queue = queue(groupContainer: container, isIsolated: isolated) else {
                 return nil
             }
             return ShareQueueImporter(runner: ShareQueueRunner(queue: queue, importer: importer))
@@ -69,6 +72,17 @@
                 return nil
             }
             return ShareQueue(groupContainer: groupContainer)
+        }
+
+        /// Whether this launch must leave the real queue alone: a run that stays away from real data
+        /// (`TestEnvironment.isIsolated`), and also a UI test's launch with a local store on disk
+        /// (`-UITestLocalStore`, DEBUG), which is not isolated for the store but must not take the device's shared
+        /// items into its throwaway store (review of #85, B-N1).
+        nonisolated static func isIsolatedLaunch(isIsolated: Bool, arguments: [String]) -> Bool {
+            #if DEBUG
+                if arguments.contains(UITestLocalStore.argument) { return true }
+            #endif
+            return isIsolated
         }
 
         /// Runs now, or once more after the run that is going on.
@@ -167,7 +181,8 @@
             if let willImport { await willImport(attempted) }
             let outcome: ImportOutcome
             do {
-                let data = try Data(contentsOf: queue.payloadURL(of: attempted), options: .mappedIfSafe)
+                // Only a regular file: a link is never followed out of the queue (review of #85).
+                let data = try queue.payload(of: attempted)
                 outcome = await importer.importFile(
                     data: data, fileName: fileName, contentType: UTType(attempted.info.typeIdentifier),
                     source: .file)

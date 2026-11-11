@@ -264,6 +264,64 @@
             }
         }
 
+        /// Review B, B1: the attempt is on disk before the import starts, so a payload that crashes the importer
+        /// uses up its attempts instead of looping at every launch.
+        @Test func theAttemptIsWrittenBeforeTheImport() async throws {
+            try await withQueue { queue in
+                let stub = StubImporter(["a.pdf": .imported(instanceID: UUID())])
+                try queue.add(data: Data("a".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+                let held = Checkpoint()
+                defer { held.release() }
+                let importer = ShareQueueImporter(
+                    runner: ShareQueueRunner(queue: queue, importer: stub, willImport: { _ in await held.pass() }))
+                let finished = TestSignal()
+                importer.didFinishRun = { _ in finished.fire() }
+
+                importer.requestRun()
+                await held.reached()
+
+                #expect(queue.scan().items.map(\.info.attempts) == [1], "counted on disk before the import")
+                #expect(stub.fileNames.isEmpty, "the import has not started")
+                held.release()
+                await finished.wait()
+                #expect(stub.fileNames == ["a.pdf"])
+            }
+        }
+
+        /// Review A, B1 (`aLinkedPayloadIsReadThroughTheLink`): a payload that is a symbolic link to a PDF outside
+        /// the queue is never read; it fails like an unreadable file and ends in `Failed/`.
+        @Test func aPayloadThatIsALinkIsNotFollowedOutOfTheQueue() async throws {
+            try await withQueue { queue in
+                let container = try makeInMemoryContainer()
+                let outside = queue.root.deletingLastPathComponent().appending(path: "outside.pdf")
+                try SyntheticPDF.make(pages: [["Ausserhalb"]]).write(to: outside)
+                let id = try queue.add(
+                    data: Data("%PDF".utf8), originalFileName: "lent.pdf", typeIdentifier: "com.adobe.pdf")
+                var item = try #require(queue.scan().items.first)
+                try FileManager.default.removeItem(at: queue.payloadURL(of: item))
+                try FileManager.default.createSymbolicLink(at: queue.payloadURL(of: item), withDestinationURL: outside)
+                // Two earlier attempts, so this run is its last.
+                for _ in 1..<ShareQueue.maxAttempts { item = try queue.recordAttempt(item) }
+                let importer = ShareQueueImporter(
+                    runner: ShareQueueRunner(
+                        queue: queue, importer: DocumentImporter(container: container, deviceID: "DEVICE-A")))
+
+                let report = try #require(await runOnce(importer))
+
+                #expect(try documents(in: container).isEmpty, "the file outside the queue is not imported")
+                #expect(report.failures.map { $0.failure } == [.couldNotRead])
+                #expect(names(in: queue.failedFolder) == [id.uuidString])
+                #expect(FileManager.default.fileExists(atPath: outside.path))
+            }
+        }
+
+        /// Review B, N1: a `-UITestLocalStore` launch leaves the real queue alone too.
+        @Test func aUITestLaunchWithALocalStoreIsIsolatedForTheQueue() {
+            #expect(ShareQueueImporter.isIsolatedLaunch(isIsolated: false, arguments: ["-UITestLocalStore", "probe"]))
+            #expect(ShareQueueImporter.isIsolatedLaunch(isIsolated: true, arguments: []))
+            #expect(!ShareQueueImporter.isIsolatedLaunch(isIsolated: false, arguments: ["-AppleLanguages", "(de)"]))
+        }
+
         @Test func withoutAGroupContainerNothingRuns() {
             #expect(ShareQueueImporter.queue(groupContainer: nil, isIsolated: false) == nil)
             #expect(ShareQueueImporter.queue(groupContainer: nil, isIsolated: true) == nil)
