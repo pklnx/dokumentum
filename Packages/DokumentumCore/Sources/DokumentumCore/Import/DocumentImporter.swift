@@ -26,6 +26,15 @@ public protocol DocumentImporting: Sendable {
     ///   - title: the document's title, such as "Photo <date, time>" (PQ2); `nil` takes it from `fileName`.
     func importImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
         -> ImageImportResult
+
+    /// Imports edited photos as one document (#5, step 4): a page per `EditedPage`, in order, each cleaned with
+    /// its edit (`PageCleanup`). The duplicate hash is today's rule for photos: the original bytes of each
+    /// image that keeps at least one page, once per image, in order; the edits do not enter it. So identity
+    /// edits, and any other edits, of the same photos are a duplicate of `importImages` of them.
+    /// - Parameters:
+    ///   - title: the document's title, such as "Photo <date, time>"; `originalFileName` stays empty.
+    func importEditedImages(_ items: [EditedImage], title: String, source: DocumentSource) async
+        -> ImageImportResult
 }
 
 /// The one import pipeline (plan of #4, parts 2 and 3). **One instance for the whole app**, created next to
@@ -81,6 +90,17 @@ public actor DocumentImporter: DocumentImporting {
         Self.log(
             result.outcome, items: items.count, bytes: items.reduce(0) { $0 + $1.count }, leftOut: result.leftOut,
             fileName: fileName)
+        return result
+    }
+
+    public func importEditedImages(_ items: [EditedImage], title: String, source: DocumentSource = .image) async
+        -> ImageImportResult
+    {
+        let kept = items.filter { !$0.pages.isEmpty }
+        let result = await runEditedImages(kept, title: title, source: source)
+        Self.log(
+            result.outcome, items: kept.count, bytes: kept.reduce(0) { $0 + $1.data.count },
+            leftOut: result.leftOut, fileName: "")
         return result
     }
 
@@ -157,6 +177,30 @@ public actor DocumentImporter: DocumentImporting {
             pdfData: built.data, hash: hash, title: title ?? importTitle(fromFileName: fileName),
             fileName: fileName, source: source, pageCount: pageCount)
         // Left out counts only for the document saved here.
+        guard case .imported = outcome else { return ImageImportResult(outcome: outcome) }
+        return ImageImportResult(outcome: outcome, leftOut: built.leftOut)
+    }
+
+    /// Edited photos to one PDF, in the order of `runImages`: the hash over the kept images' original bytes
+    /// (each image once, finding 2 of the plan review on #5), the first duplicate check, the PDF built with
+    /// the edits, PDFKit's check, then `commit`. `items` are the images that keep a page.
+    private func runEditedImages(_ items: [EditedImage], title: String, source: DocumentSource) async
+        -> ImageImportResult
+    {
+        guard items.contains(where: { !$0.data.isEmpty }) else { return ImageImportResult(outcome: .failed(.empty)) }
+        let hash = await Self.hash(concatenating: items.map(\.data))
+        if let duplicate = firstDuplicateCheck(hash) { return ImageImportResult(outcome: duplicate) }
+        guard let built = await Self.buildPDF(edited: items) else {
+            return ImageImportResult(outcome: .failed(.unreadableImage))
+        }
+        let pageCount: Int
+        switch await Self.validate(built.data) {
+        case .failure: return ImageImportResult(outcome: .failed(.unreadableImage))
+        case .success(let pages): pageCount = pages
+        }
+        if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
+        let outcome = commit(
+            pdfData: built.data, hash: hash, title: title, fileName: "", source: source, pageCount: pageCount)
         guard case .imported = outcome else { return ImageImportResult(outcome: outcome) }
         return ImageImportResult(outcome: outcome, leftOut: built.leftOut)
     }
@@ -250,6 +294,12 @@ public actor DocumentImporter: DocumentImporting {
     @concurrent
     static func buildPDF(_ items: [Data]) async -> PDFBuilder.Result? {
         PDFBuilder.makePDF(fromImageData: items)
+    }
+
+    /// `PDFBuilder` for edited photos, off the actor.
+    @concurrent
+    static func buildPDF(edited items: [EditedImage]) async -> PDFBuilder.Result? {
+        PDFBuilder.makePDF(fromEditedImages: items)
     }
 
     /// PDFKit's check: the PDF opens, is not locked by a password (PQ9) and has a page. Off the actor. A PDF
