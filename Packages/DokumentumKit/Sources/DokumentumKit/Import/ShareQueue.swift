@@ -175,9 +175,14 @@ public struct ShareQueue: Sendable {
     /// The share extension's order for one attachment (#104): `savingFile` (the lent file, copied with
     /// `add(copyingFileAt:…)`), then `savingData` (`loadDataRepresentation`, then `add(data:…)`) only when the file
     /// step did not save it and `fallsBackToData(afterFileError:)` allows it: no file lent, or a lent file that could
-    /// not be opened. Never after `NotARegularFile` or `CopyFailed`. Each closure runs at most once.
+    /// not be opened. Never after `NotARegularFile` or `CopyFailed`. Each closure runs at most once, one after the
+    /// other, in the caller's isolation (`nonisolated(nonsending)`): the closures never leave it, so they may capture
+    /// what is not `Sendable` (the extension builds with `NonisolatedNonsendingByDefault`, this package does not).
     /// - Returns: whether the attachment was saved.
-    public static func saveAttachment(savingFile: () async -> FileStep, savingData: () async -> Bool) async -> Bool {
+    public nonisolated(nonsending) static func saveAttachment(
+        savingFile: nonisolated(nonsending) () async -> FileStep,
+        savingData: nonisolated(nonsending) () async -> Bool
+    ) async -> Bool {
         switch await savingFile() {
         case .saved:
             return true
