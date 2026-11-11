@@ -53,8 +53,11 @@ public actor SearchIndexer: DocumentSearching {
 
     /// How long the steps of the last finished build took (the benchmark reports them).
     public struct BuildReport: Sendable, Equatable {
+        /// Steps 1 and 2.
         public var metadata: Duration
+        /// Step 3.
         public var texts: Duration
+        /// Steps 1 to 5, until `.ready`.
         public var total: Duration
         public var textCount: Int
     }
@@ -168,12 +171,8 @@ public actor SearchIndexer: DocumentSearching {
             next = await indexTexts(ids, from: next, aside: aside, publishing: ids.count)
             if let afterBatch = hooks.afterBatch { await afterBatch(next) }
         }
-        let textsDone = clock.now
         await finishBuild(
-            aside: aside,
-            report: BuildReport(
-                metadata: metadataDone - start, texts: textsDone - metadataDone, total: textsDone - start,
-                textCount: ids.count))
+            aside: aside, textCount: ids.count, start: start, metadataDone: metadataDone, textsDone: clock.now)
     }
 
     /// Steps 1 and 2, and the text identifiers for step 3.
@@ -199,7 +198,10 @@ public actor SearchIndexer: DocumentSearching {
     }
 
     /// Steps 4 and 5; a rebuild swaps its index in.
-    private func finishBuild(aside: Bool, report: BuildReport) {
+    private func finishBuild(
+        aside: Bool, textCount: Int, start: ContinuousClock.Instant, metadataDone: ContinuousClock.Instant,
+        textsDone: ContinuousClock.Instant
+    ) {
         withContents(aside: aside) { contents in
             do {
                 try applyHistory(to: &contents)
@@ -214,6 +216,9 @@ public actor SearchIndexer: DocumentSearching {
             live = fresh
             self.aside = nil
         }
+        let report = BuildReport(
+            metadata: metadataDone - start, texts: textsDone - metadataDone, total: ContinuousClock.now - start,
+            textCount: textCount)
         lastBuild = report
         Log.search.notice(
             """
