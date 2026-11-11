@@ -418,13 +418,13 @@ On the iPhone, sharing a PDF or an image to Dokumentum (#4, part 4) goes through
 `group.space.pklnx.dokumentum`. **The extension never opens the store**: it copies each shared file into
 the group's queue folder and closes, and the app imports the items at launch and on every activation.
 
-- **The format** is `ShareQueue` (`DokumentumKit`, Foundation only, tested on Linux), the one piece both
-  sides link. `ShareQueue/Items/<UUID>/` holds `payload` (the bytes, always under this name) and `item.json`
-  (`version` 1, `originalFileName`, `typeIdentifier`, `createdAt`, `attempts`). The writer builds an item in
-  `Incoming/<UUID>/` and renames the folder into `Items/` as its last step, so the reader never sees a
-  half-written item; the app removes `Incoming/` leftovers older than a day. The file name is data, never a
-  path: it only becomes the title, without path components and control characters (`../../x.pdf` gives "x").
-  An `item.json` of a newer version is left alone; an unreadable one moves to `Failed/`.
+- **The format** is `ShareQueue` (`DokumentumKit`, Foundation and the C library only, tested on Linux), the
+  one piece both sides link. `ShareQueue/Items/<UUID>/` holds `payload` (the bytes, always under this name)
+  and `item.json` (`version` 1, `originalFileName`, `typeIdentifier`, `createdAt`, `attempts`). The writer
+  builds an item in `Incoming/<UUID>/` and renames the folder into `Items/` as its last step, so the reader
+  never sees a half-written item; the app removes `Incoming/` leftovers older than a day. The file name is
+  data, never a path: it only becomes the title, without path components and control characters (`../../x.pdf`
+  gives "x"). An `item.json` of a newer version is left alone; an unreadable one moves to `Failed/`.
 - **The extension** (`DokumentumShare/`) takes each attachment's PDF type, else its image type, through
   `loadFileRepresentation` (copied inside the call), else `loadDataRepresentation`. It never decodes an
   image, so an attachment that offers only an image object is not saved and the sheet shows "This item
@@ -442,11 +442,17 @@ the group's queue folder and closes, and the app imports the items at launch and
   `Failed/` appear as the usual import notice. A run that stays away from real data (`TestEnvironment.isIsolated`)
   and every `-UITestLocalStore` launch refuse the group container (`ArchiveStore.isLiveStorePath`), so unit tests
   and UI-test launches never touch the queue; tests pass a temporary folder.
-- **Regular files only.** The extension copies a lent file only when it is a regular file, never a symbolic
-  link (a link would be followed by the app, out of the queue); the app reads a payload only when it is a regular
-  file and an `Items/` entry only when it is a real folder. The item's name follows `ShareQueue.itemFileName`:
-  the suggested name, else the lent file's, else the share's date and time; the type's extension is added only
-  when the name has no PDF or image extension.
+- **Regular files only, opened once, never through a link** (#85, #87). Every file is opened once
+  (`O_NOFOLLOW`, `O_NONBLOCK`) and checked on the open descriptor (`fstat`); a symbolic link, a folder, a FIFO
+  or a device throws `NotARegularFile`, a missing file `POSIXError(.ENOENT)`, and a link swapped in after the
+  open is never followed. The extension copies a lent file from that descriptor, 1 MiB at a time; the app reads
+  a payload from it. Inside an item the app goes only through the descriptor of the item's folder, itself
+  opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`): it reads `payload` and `item.json`, and counts
+  an attempt with a new file written in full, synced and renamed over `item.json` in that folder. So an item
+  folder swapped for a link is refused, and nothing is read or written through it. A linked `item.json` moves
+  the item to `Failed/`, and an `Items/` entry is read only when it is a real folder. The item's name follows
+  `ShareQueue.itemFileName`: the suggested name, else the lent file's, else the share's date and time; the
+  type's extension is added only when the name has no PDF or image extension.
 - **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the
   entitlements file. The app group on a device (both App IDs, the profiles) is the maintainer's (#4, M2 and M3).
 
