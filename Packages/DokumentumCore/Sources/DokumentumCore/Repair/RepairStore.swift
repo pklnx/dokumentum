@@ -12,8 +12,8 @@ import SwiftData
 /// alike (`RepairPropertyTests` in DokumentumKit).
 ///
 /// **The re-check read covers only what a pass writes** (`touched(by:in:)`): every metadata record (few, and
-/// chains need them all), the documents its operations name or that reference a merge's loser (through the
-/// loser's own `documents`), and the unlinked blobs it relinks. So the time from that read to the pass's save
+/// chains need them all), the documents its operations name or that reference a merge's loser (found through the
+/// loser's own `documents`, then read by `instanceID`), and the unlinked blobs it relinks. So the time from that read to the pass's save
 /// grows with the pass, not with the archive. `RepairSQLTests` pins it.
 ///
 /// Records sharing an `instanceID` (a copied record) keep the first one read, as `RepairPlan.apply` indexes
@@ -48,7 +48,7 @@ public enum RepairStore {
     }
 
     /// What `plan` writes: every metadata record, the documents its operations name or that reference a merge's
-    /// loser, and the unlinked blobs it relinks. A blob linked meanwhile is not read, so its relink is skipped.
+    /// loser (by their `instanceID`s, in `RowRecords.oldestFirst` order), and the unlinked blobs it relinks. A blob linked meanwhile is not read, so its relink is skipped.
     static func touched(by plan: RepairPlan, in context: ModelContext) throws -> (
         snapshot: RepairSnapshot, records: RowRecords
     ) {
@@ -71,7 +71,9 @@ public enum RepairStore {
                 break
             }
         }
-        for document in try RowRecords.fetchDocuments(named, in: context) { reader.add(document) }
+        // A merge's loser names its documents through its relationship; they are read again by `instanceID`, so
+        // that of copies sharing one the `RowRecords.oldestFirst` copy is moved and checked, as everywhere else
+        // (review A of #96, D2-1; review B, B-D3).
         for (kind, loser) in losers {
             let documents: [Document]? =
                 switch kind {
@@ -79,8 +81,9 @@ public enum RepairStore {
                 case .documentType: reader.records.documentTypes[loser]?.documents
                 case .tag: reader.records.tags[loser]?.documents
                 }
-            for document in documents ?? [] { reader.add(document) }
+            named.formUnion((documents ?? []).map(\.instanceID))
         }
+        for document in try RowRecords.fetchDocuments(named, in: context) { reader.add(document) }
         if !blobs.isEmpty {
             let ids = Array(blobs)
             for file in try context.fetch(

@@ -312,9 +312,11 @@ The check before the save (`RowState`, `RowState.read`) lives in `DokumentumCore
 both background writers: the repair and the processing queue. `RowStateTests` pins its fields against the schema.
 **Copies sharing an `instanceID`** (a copied record) are read by one rule, `RowRecords.oldestFirst`: every reader keeps
 the oldest `createdAt`, and among equal dates the first row the store returns. The repair's plan (`RepairStore.read`),
-its apply and check, and the queue's scan, fetches and check all follow it, so a plan, its write and the check before
-the save meet the same row; the other copy takes part in neither (`SharedInstanceIDTests`). The order is applied in
-memory after the fetch, so the SQL the tests pin stays as it is.
+its apply and check (`RepairStore.touched`, where a merge's loser names its documents through its relationship and
+they are read again by `instanceID`; `RowState.read`), and the queue's scan, fetches and check all follow it, so a plan,
+its write and the check before the save meet the same row. The other copy is neither written nor checked by either:
+its references stay as they are, also one to a record that a merge made a tombstone (`SharedInstanceIDTests`). The
+order is applied in memory after the fetch, so the SQL the tests pin stays as it is.
 
 **The processing queue** (#4, part 5). `ProcessingClaimRules` (DokumentumKit) decides per document; `ProcessingQueue`
 (DokumentumCore, an actor) carries it out, one document at a time, off the main actor. Every document is claimed at
