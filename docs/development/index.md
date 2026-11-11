@@ -318,9 +318,13 @@ until the claim is 6 hours old by its own clock, then takes it over. A claim mor
 expired, so a device with a fast clock that never comes back cannot keep a document waiting; a device with a slow clock
 can be taken over early. Both cost at most a double processing with the same result. `done` and a state of a newer
 build (`unknown`) are never touched; a trashed document waits for its restore; a document without its file data or its
-text record waits, and processing never creates a text. A stage that throws counts a failure in this device's
-`UserDefaults` (`ProcessingFailures`, never synced); the third writes `failed`, which another device whose own counter
-is below 3 still tries. A counter goes when its document is `done`.
+text record waits, and processing never creates a text. Each attempt is counted in this device's `UserDefaults`
+(`ProcessingFailures`, never synced) **before** its stage runs, so a crash or an out-of-memory kill during the stage
+counts too; a stage that returns clears the counter. The third failed attempt writes `failed`, and an attempt beyond
+the third (the earlier ones never returned) writes `failed` without running the stage, so such a PDF cannot crash every
+launch. Another device whose own counter is below 3 still tries a `failed` document. A counter also goes when its
+document is seen `done` or gone. Every fetch of the queue, and the check before its save, picks the oldest row by
+`createdAt`, as the scan does, so a copy sharing a document's `instanceID` never mixes into its writes.
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.

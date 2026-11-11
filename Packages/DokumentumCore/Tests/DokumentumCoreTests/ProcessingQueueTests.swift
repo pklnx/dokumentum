@@ -186,6 +186,81 @@ struct ProcessingQueueTests {
         #expect(failuresA.documents.isEmpty, "A's key went when A saw the document done")
     }
 
+    /// The attempt is counted before the stage, so an attempt that never returns (a crash or a memory kill in the
+    /// stage) counts too (review B of #96, N3). Three runs whose stage never returns, each by a new queue as after a
+    /// relaunch, leave the counter at 3; the fourth writes `failed` without running the stage again.
+    @Test func attemptsThatNeverReturnedAreCountedAndTheFourthGivesUp() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insert(device: deviceA, claimedAt: processingStart)
+        let failures = store.failures(deviceA)
+        let stuck = (0..<3).map { _ in Checkpoint() }
+        var abandoned: [Task<ProcessingReport, Never>] = []
+        defer { for checkpoint in stuck { checkpoint.release() } }
+
+        for (attempt, checkpoint) in stuck.enumerated() {
+            let queue = store.queue(
+                deviceA, failures: failures, stage: TestStage { _ in await checkpoint.pass() }, clock: clock)
+            abandoned.append(Task { await queue.run() })
+            await checkpoint.reached()  // the stage runs and never returns, as in a crash
+            #expect(failures.count(for: id) == attempt + 1, "the attempt was not counted before the stage")
+        }
+        let stage = TestStage()
+        let report = await store.queue(deviceA, failures: failures, stage: stage, clock: clock).run()
+
+        #expect(stage.count == 0, "the fourth attempt ran the stage again")
+        #expect(report.failed == 1)
+        #expect(report.saves == 1)
+        #expect(try store.row(id).stateRaw == "failed")
+        // The abandoned runs, let go: their results are dropped, as the row is no longer what they ran under.
+        for checkpoint in stuck { checkpoint.release() }
+        for task in abandoned { #expect(await task.value.dropped == 1) }
+        #expect(try store.row(id).stateRaw == "failed")
+    }
+
+    /// A stage that returns clears the attempt it counted.
+    @Test func aStageThatReturnsClearsItsAttempt() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insert(device: deviceA, claimedAt: processingStart)
+        let failures = store.failures(deviceA)
+        let counted = Mutex<[Int]>([])
+        let stage = TestStage { _ in counted.withLock { $0.append(failures.count(for: id)) } }
+
+        let report = await store.queue(deviceA, failures: failures, stage: stage, clock: clock).run()
+
+        #expect(counted.withLock { $0 } == [1], "counted before the stage")
+        #expect(report.done == 1)
+        #expect(failures.documents.isEmpty)
+    }
+
+    /// Two rows sharing an `instanceID` (a copied record): the scan decides on the oldest, and every fetch of the
+    /// queue and the check before its save pick that same row, so it is processed (review A of #96, N2). The newer
+    /// row is inserted first, so a fetch without a sort finds it first.
+    @Test func aCopySharingTheInstanceIDDoesNotMixIntoTheWrites() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let newer = try store.insert(
+            title: "Newer copy", created: processingStart.addingTimeInterval(60), device: deviceA,
+            claimedAt: processingStart, pages: 3)
+        let older = try store.insert(
+            title: "Older", created: processingStart, device: deviceA, claimedAt: processingStart)
+        try store.edit(newer) { document, _ in document.instanceID = older }
+
+        let report = await store.queue(deviceA, clock: clock).run()
+
+        #expect(report.done == 1, "\(report)")
+        #expect(report.dropped == 0 && report.backedOff == 0)
+        let rows = try ModelContext(store.container).fetch(
+            FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == older }))
+        #expect(rows.first { $0.title == "Older" }?.processingStateRaw == "done")
+        #expect(rows.first { $0.title == "Older" }?.pageCount == 2)
+        #expect(rows.first { $0.title == "Newer copy" }?.processingStateRaw == "pending")
+    }
+
     /// A document left in `.processing` with this device's claim (the app quit during the work) is processed by the
     /// next queue, as the launch run does.
     @Test func aNewQueueResumesItsDevicesDocument() async throws {

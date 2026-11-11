@@ -42,10 +42,13 @@ public protocol ProcessingRunning: Sendable {
 ///    written;
 /// 2. **claim write**, unless the claim is already this device's and fresh (a document this device imported):
 ///    `processingDeviceID`, `processingClaimedAt`, `processingState = .processing`;
-/// 3. **the stages**, with no context open (`ProcessingStage`; step 3 has one, `InspectStage`);
-/// 4. **result write**: `pageCount` if it differs and `processingState = .done`, and this device's failure counter
-///    goes. A stage that throws counts a failure on this device (`ProcessingFailures`); the third writes
-///    `.failed`. `.failed` syncs, but another device whose own counter is below 3 still tries it.
+/// 3. **the stages**, with no context open (`ProcessingStage`; step 3 has one, `InspectStage`). **The attempt is
+///    counted before the stage runs** (`ProcessingFailures`), so a crash or an out-of-memory kill during the stage
+///    counts as well: an attempt that never returned stays counted. A stage that returns clears the counter; one
+///    that throws keeps its attempt. The third failed attempt writes `.failed`; an attempt beyond the third (the
+///    earlier ones never returned) writes `.failed` without running the stage again, so such a PDF cannot crash
+///    every launch. `.failed` syncs, but another device whose own counter is below 3 still tries it;
+/// 4. **result write**: `pageCount` if it differs and `processingState = .done`.
 ///
 /// **A result is dropped** when the row no longer holds the claim the work ran under (another device took it
 /// over, whatever its clock says) or links another file than the one whose data was processed (a replaced or
@@ -178,11 +181,19 @@ public actor ProcessingQueue: ProcessingRunning {
                 stateRaw: ProcessingState.processing.storedValue ?? "", deviceID: deviceID, claimedAt: claimedAt,
                 file: loaded.file)
         }
+        // Counted before the stage: an attempt that never returns (a crash, a memory kill) stays counted.
+        let attempts = failures.increment(for: id)
+        guard attempts <= ProcessingClaimRules.failureLimit else {
+            Log.processing.error(
+                "Processing gave up: \(attempts - 1, privacy: .public) attempts on this device never returned")
+            let outcome = write(.result, id, expecting: held) { $0.processingState = .failed }
+            if count(outcome, into: &report) { report.failed += 1 }
+            return
+        }
         let result: ProcessingResult
         do {
             result = try await stage.process(pdfData: loaded.data)
         } catch {
-            let attempts = failures.increment(for: id)
             Log.processing.error(
                 """
                 Processing failed: \(Log.code(of: error), privacy: .public), attempt \(attempts, privacy: .public) \
@@ -196,14 +207,13 @@ public actor ProcessingQueue: ProcessingRunning {
             if count(outcome, into: &report) { report.failed += 1 }
             return
         }
+        // The stage returned: this device is not failing on the document.
+        failures.remove(id)
         let outcome = write(.result, id, expecting: held) { document in
             if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
             document.processingState = .done
         }
-        if count(outcome, into: &report) {
-            report.done += 1
-            failures.remove(id)
-        }
+        if count(outcome, into: &report) { report.done += 1 }
     }
 
     /// Adds a write's outcome to `report`; `true` when it saved.
@@ -374,9 +384,11 @@ extension ProcessingQueue {
         }
     }
 
-    /// The first document with `instanceID`, without its blobs.
+    /// The document with `instanceID`, without its blobs: the oldest by `createdAt`, as the scan and
+    /// `RowState.read` pick it, so a copy sharing the `instanceID` never mixes into one write (review A of #96, N2).
     static func fetch(_ instanceID: UUID, in context: ModelContext) throws -> Document? {
-        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == instanceID })
+        var descriptor = FetchDescriptor<Document>(
+            predicate: #Predicate { $0.instanceID == instanceID }, sortBy: [SortDescriptor(\.createdAt)])
         descriptor.fetchLimit = 1
         return try context.fetch(descriptor).first
     }

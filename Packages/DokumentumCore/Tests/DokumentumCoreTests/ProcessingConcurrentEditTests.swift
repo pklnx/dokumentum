@@ -119,6 +119,52 @@ struct ProcessingConcurrentEditTests {
         #expect(try store.row(other).title == "Other, edited")
     }
 
+    /// What the re-check (step 2) catches on its own: a change saved before the write's fetch, so the write
+    /// context already reads it and the `RowState` re-read finds nothing new (review A of #96, B1; review B, N1).
+    enum EarlyChange: String, CaseIterable, CustomTestStringConvertible {
+        case trash, textUnlinked
+
+        var testDescription: String { rawValue }
+
+        func apply(to document: Document) {
+            switch self {
+            case .trash: document.deletedAt = processingStart
+            case .textUnlinked: document.text = nil
+            }
+        }
+    }
+
+    /// For the claim write the change is saved after the scan (`Hooks.afterScan`), before the claim write's fetch;
+    /// for the result write it is saved while the stage runs, before the result write's fetch. Either way the queue
+    /// writes nothing: a document trashed or without its text record is never claimed or written `done`.
+    @Test(arguments: [ProcessingQueue.Write.claim, .result], EarlyChange.allCases)
+    func aChangeBeforeTheWritesFetchIsCaughtByTheReCheck(write: ProcessingQueue.Write, change: EarlyChange)
+        async throws
+    {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try insert(for: write, in: store)
+        let before = try store.row(id)
+        let edit: @Sendable () throws -> Void = { try store.edit(id) { document, _ in change.apply(to: document) } }
+        let stage = TestStage { _ in if write == .result { try edit() } }
+        let hooks = ProcessingQueue.Hooks(afterScan: { if write == .claim { try? edit() } })
+        let queue = store.queue(deviceA, stage: stage, clock: clock, hooks: hooks)
+
+        let report = await queue.run()
+
+        #expect(report.saves == 0, "the queue wrote over the change")
+        #expect(report.dropped == 1)
+        #expect(report.backedOff == 0, "the re-check, not the re-read, caught it")
+        #expect(stage.count == (write == .claim ? 0 : 1))
+        let row = try store.row(id)
+        #expect(row.stateRaw == before.stateRaw)
+        #expect(row.deviceID == before.deviceID)
+        #expect(row.claimedAt == before.claimedAt)
+        #expect(row.pageCount == before.pageCount)
+        #expect(row.isTrashed == (change == .trash))
+    }
+
     // MARK: Two background writers
 
     /// A live correspondent (10) and a tombstone merged into it (11), and a document pointing at the tombstone:

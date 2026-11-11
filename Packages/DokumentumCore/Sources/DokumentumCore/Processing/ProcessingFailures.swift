@@ -1,10 +1,11 @@
 import Foundation
 
-/// This device's failure counter per document (plan of #4, part 5, N10): how often processing a document failed
-/// here. Kept in the per-device `UserDefaults` (`ProcessingEnvironment.defaultsSuite`), never synced: a synced
+/// This device's attempt counter per document (plan of #4, part 5, N10; review B of #96, N3): how many attempts
+/// on this device started and did not succeed. The queue counts an attempt before its stage runs, so an attempt
+/// that never returned (a crash, an out-of-memory kill) counts too, and clears the counter when the stage returns. Kept in the per-device `UserDefaults` (`ProcessingEnvironment.defaultsSuite`), never synced: a synced
 /// counter would be one more field both devices write. One dictionary under `defaultsKey`, keyed by the document's
-/// `instanceID`. A key is removed when the document reaches `done` (on this device's write, or when the queue sees
-/// it `done` or gone), so the keys do not grow.
+/// `instanceID`. A key is removed when a stage returns, and when the queue sees the document `done` or gone, so the
+/// keys do not grow.
 ///
 /// Only the processing queue writes it, one document at a time, so it needs no lock.
 public struct ProcessingFailures: Sendable {

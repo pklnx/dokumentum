@@ -32,6 +32,11 @@ struct ProcessingSchedulerTests {
         }
     }
 
+    /// The durations the expiry timer asked to sleep.
+    final class SleepLog: Sendable {
+        let durations = Mutex<[Duration]>([])
+    }
+
     private struct Setup {
         let scheduler: ProcessingScheduler
         let runs: TestSignal
@@ -42,15 +47,22 @@ struct ProcessingSchedulerTests {
         let insertions: AsyncStream<Void>.Continuation
     }
 
-    private func makeScheduler(runner: any ProcessingRunning, clock: TestClock = TestClock()) throws -> Setup {
+    private func makeScheduler(
+        runner: any ProcessingRunning, clock: TestClock = TestClock(), sleeps: SleepLog? = nil
+    ) throws -> Setup {
         let container = try TestSupport.makeContainer()
         let center = NotificationCenter()
         let debounce = ManualDebounce()
         let expiry = ManualDebounce()
         let observer = StoreChangeObserver(container: container, center: center, sleep: debounce.sleep)
         let (stream, insertions) = AsyncStream<Void>.makeStream()
+        let expirySleep = expiry.sleep
         let scheduler = ProcessingScheduler(
-            runner: runner, observer: observer, insertions: stream, sleep: expiry.sleep, now: clock.function)
+            runner: runner, observer: observer, insertions: stream,
+            sleep: { duration in
+                sleeps?.durations.withLock { $0.append(duration) }
+                try await expirySleep(duration)
+            }, now: clock.function)
         let runs = TestSignal()
         scheduler.didFinishRun = { _ in runs.fire() }
         return Setup(
@@ -129,13 +141,15 @@ struct ProcessingSchedulerTests {
         waiting.waiting = 1
         waiting.nextExpiry = clock.now.addingTimeInterval(5 * hour)
         let runner = StubRunner(reports: [waiting])
-        let setup = try makeScheduler(runner: runner, clock: clock)
+        let sleeps = SleepLog()
+        let setup = try makeScheduler(runner: runner, clock: clock, sleeps: sleeps)
         defer { setup.scheduler.stop() }
 
         setup.scheduler.start()
         await setup.runs.wait(for: 1)
         #expect(setup.scheduler.scheduledExpiry == waiting.nextExpiry)
         await setup.expiry.waitForStarts(1)
+        #expect(sleeps.durations.withLock { $0 } == [.seconds(5 * 60 * 60)], "the timer waits until the claim expires")
         #expect(runner.started.count == 1, "nothing runs before the claim expires")
         setup.expiry.fire()
         await setup.runs.wait(for: 2)

@@ -232,11 +232,13 @@ struct RowRecords {
     }
 
     /// The documents with these `instanceID`s, with their metadata but never `file`, `thumbnail` or `text`:
-    /// prefetching them would load the blobs.
+    /// prefetching them would load the blobs. Oldest first by `createdAt`, so of two copies sharing an `instanceID`
+    /// the first one kept is the one the processing queue fetches (review A of #96, N2).
     static func fetchDocuments(_ instanceIDs: Set<UUID>, in context: ModelContext) throws -> [Document] {
         guard !instanceIDs.isEmpty else { return [] }
         let ids = Array(instanceIDs)
-        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { ids.contains($0.instanceID) })
+        var descriptor = FetchDescriptor<Document>(
+            predicate: #Predicate { ids.contains($0.instanceID) }, sortBy: [SortDescriptor(\.createdAt)])
         descriptor.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
         return try context.fetch(descriptor)
     }
