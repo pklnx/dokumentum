@@ -20,6 +20,11 @@ final class ImportController {
     var isPickingFiles = false
     /// Whether the Photos picker is open (the "+" menu opens it, part 3).
     var isPickingPhotos = false
+    /// Whether the document camera is open (the "+" menu's "Scan…" on the iPhone, #5, part 2).
+    var isScanning = false
+    /// Whether a scan is being encoded and imported: a long scan takes a moment after the camera closes, and the
+    /// window shows that it is being saved (plan review of #5, finding 6).
+    private(set) var isSavingScan = false
     /// The time a photo document's title names.
     private let now: () -> Date
 
@@ -90,6 +95,45 @@ final class ImportController {
         return report
     }
 
+    /// Imports a scan as one document (#5, part 2), a page per scanned page in order, titled "Scan <date, time>",
+    /// with the source `.scan`. It becomes an Inbox document pending processing like any photo import, and opens
+    /// (PQ1). A page that cannot be read is left out and counted in the notice; when none can be read, the scan
+    /// is one failure. A scan without pages imports nothing and shows nothing.
+    @discardableResult
+    func importScan(_ scan: some ScannedPages) async -> ImportReport {
+        isScanning = false
+        var report = ImportReport()
+        guard scan.pageCount > 0 else { return report }
+        isSavingScan = true
+        defer { isSavingScan = false }
+        let title = Self.scanTitle(at: now())
+        let encoded = await ScanEncoder.jpegPages(scan)
+        if encoded.pages.isEmpty {
+            Log.importing.error("Scan not imported: none of \(scan.pageCount, privacy: .public) pages could be read")
+            report.add(fileName: title, outcome: .failed(.couldNotRead))
+        } else {
+            let result = await importer.importImages(encoded.pages, fileName: "", title: title, source: .scan)
+            let leftOut = if case .imported = result.outcome { result.leftOut + encoded.unreadable } else { 0 }
+            report.add(fileName: title, outcome: result.outcome, leftOut: leftOut)
+        }
+        finish(report, strings: .scan)
+        return report
+    }
+
+    /// The document camera failed (VisionKit's `didFailWithError`): it closes, nothing is imported, and the
+    /// notice says so.
+    func scanFailed(_ error: any Error) {
+        Log.importing.error("Scan failed: \(Log.code(of: error), privacy: .public)")
+        isScanning = false
+        notices.add(ImportNotice(title: String(localized: "Scanning failed"), message: ""))
+    }
+
+    /// "Scan <date, time>" in the app's language (P4).
+    static func scanTitle(at date: Date) -> String {
+        let time = date.formatted(date: .numeric, time: .shortened)
+        return String(localized: "Scan \(time)")
+    }
+
     /// "Photo <date, time>" in the app's language (PQ2).
     static func photoTitle(at date: Date) -> String {
         let time = date.formatted(date: .numeric, time: .shortened)
@@ -106,7 +150,7 @@ final class ImportController {
     /// PQ1: after something was imported the library shows the Inbox; one new document is selected and
     /// opened; one duplicate alone selects the existing document where it is (Inbox, All Documents or Trash);
     /// several are not selected. Then the notice (PQ4).
-    private func finish(_ report: ImportReport) {
+    private func finish(_ report: ImportReport, strings: ImportNoticeStrings = .app) {
         guard !report.entries.isEmpty else { return }
         // Read now, not at the next change event: the new document must be in the list to be selected.
         library.reload()
@@ -122,7 +166,7 @@ final class ImportController {
         case nil:
             if !report.imported.isEmpty { library.selection = .inbox }
         }
-        notices.add(report.notice(.app))
+        notices.add(report.notice(strings))
     }
 
     /// The share queue's runs (part 4): their notices, like any other import's (PQ4), but nothing is selected or
@@ -177,4 +221,17 @@ extension ImportNoticeStrings {
                 ? String(localized: "One photo could not be read and was left out.")
                 : String(localized: "\(count) photos could not be read and were left out.")
         })
+}
+
+extension ImportNoticeStrings {
+    /// A scan's notice: the app's words, with pages instead of photos left out (#5, part 2).
+    static let scan: ImportNoticeStrings = {
+        var strings = ImportNoticeStrings.app
+        strings.leftOutLine = { count in
+            count == 1
+                ? String(localized: "One page could not be read and was left out.")
+                : String(localized: "\(count) pages could not be read and were left out.")
+        }
+        return strings
+    }()
 }

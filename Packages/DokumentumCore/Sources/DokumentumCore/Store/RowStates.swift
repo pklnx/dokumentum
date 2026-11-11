@@ -187,6 +187,15 @@ enum RowState: Equatable, Sendable {
     static func read(_ keys: Set<RowKey>, in container: ModelContainer) throws -> [RowKey: RowState] {
         try capture(RowRecords.read(keys, in: ModelContext(container)))
     }
+
+    /// The current state of one text record, linked or not, read by its key through a new context: the check of
+    /// the processing queue's result write, the only background writer of a linked text (#6, part 2). `nil` when
+    /// the record is gone.
+    static func readText(_ id: PersistentIdentifier, in container: ModelContainer) throws -> RowState? {
+        var descriptor = FetchDescriptor<DocumentText>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return try ModelContext(container).fetch(descriptor).first.map { capture($0) }
+    }
 }
 
 /// Records by `instanceID`: the handles the repair's operations name, and what `RowState.read` captures. Records

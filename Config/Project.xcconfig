@@ -53,7 +53,10 @@ PRODUCT_BUNDLE_IDENTIFIER = space.pklnx.Dokumentum$(DOKUMENTUM_BUNDLE_ID_SUFFIX_
 // Info.plist: generated from the build settings. Only what has no setting comes from a file, merged
 // into the generated one: the app's background mode for CloudKit pushes (iOS only, none on macOS) and
 // the extension's NSExtension. These files live in Config/: a plist inside the synchronized
-// DokumentumShare/ folder fails with "Multiple commands produce".
+// DokumentumShare/ folder fails with "Multiple commands produce". The iOS app's camera usage text
+// (#5, part 2) is in Config/Info-iOS.plist too, not an INFOPLIST_KEY_ setting: such a setting reaches
+// every target's Info.plist, also where it resolves empty (the extension then had an empty
+// NSCameraUsageDescription). Its German is in Dokumentum/InfoPlist.xcstrings.
 GENERATE_INFOPLIST_FILE = YES
 DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
 DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =

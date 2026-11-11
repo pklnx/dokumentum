@@ -1,3 +1,4 @@
+import CoreGraphics
 import DokumentumCore
 import DokumentumCoreTestSupport
 import DokumentumKit
@@ -71,7 +72,8 @@ final class ProcessingStore: Sendable {
     /// A queue whose stall watchdog sleeps on `watchdog`: a `ManualDebounce` nobody fires unless the test passes
     /// its own.
     func queue(
-        _ device: String, failures: ProcessingFailures? = nil, stage: any ProcessingStage = InspectStage(),
+        _ device: String, failures: ProcessingFailures? = nil,
+        stage: any ProcessingStage = DocumentStage(recognizer: StubRecognizer()),
         clock: TestClock, watchdog: ManualDebounce = ManualDebounce(), hooks: ProcessingQueue.Hooks = .init()
     ) -> ProcessingQueue {
         ProcessingQueue(
@@ -85,7 +87,8 @@ final class ProcessingStore: Sendable {
     func insert(
         title: String = "Document", created: Date = processingStart, stateRaw: String = "pending",
         device: String = "", claimedAt: Date? = nil, pages: Int = 2, pageCount: Int = 0, file: Bool = true,
-        fileData: Bool = true, text: Bool = true, trashed: Bool = false
+        fileData: Bool = true, text: Bool = true, trashed: Bool = false, pdf: Data? = nil,
+        textSource: TextSource = .none, thumbnail: Bool = false
     ) throws -> UUID {
         let context = ModelContext(container)
         let document = Document(title: title, createdAt: created)
@@ -93,10 +96,11 @@ final class ProcessingStore: Sendable {
         document.processingDeviceID = device
         document.processingClaimedAt = claimedAt
         document.pageCount = pageCount
+        document.textSource = textSource
         if trashed { document.deletedAt = created }
         context.insert(document)
         if file {
-            let data = fileData ? TestPDF.make(pages: (1...pages).map { "Page \($0)" }) : nil
+            let data = fileData ? pdf ?? TestPDF.make(pages: (1...pages).map { "Page \($0)" }) : nil
             let record = DocumentFile(documentID: document.id, pdfData: data, createdAt: created)
             context.insert(record)
             document.file = record
@@ -105,6 +109,11 @@ final class ProcessingStore: Sendable {
             let record = DocumentText(documentID: document.id, createdAt: created)
             context.insert(record)
             document.text = record
+        }
+        if thumbnail {
+            let record = DocumentThumbnail(documentID: document.id, imageData: Data(count: 100), createdAt: created)
+            context.insert(record)
+            document.thumbnail = record
         }
         try context.save()
         return document.instanceID
@@ -127,6 +136,12 @@ final class ProcessingStore: Sendable {
             fileInstanceID: document.file?.instanceID)
     }
 
+    /// The document's `textSource` and its text record's `extractedText` (`nil` without a text record).
+    func text(of id: UUID) throws -> (source: TextSource, text: String?) {
+        let document = try #require(try Self.fetch(id, in: ModelContext(container)))
+        return (document.textSource, document.text?.extractedText)
+    }
+
     /// The identifier of the document's linked file row.
     func fileIdentifier(of id: UUID) throws -> PersistentIdentifier? {
         try Self.fetch(id, in: ModelContext(container))?.file?.persistentModelID
@@ -137,7 +152,7 @@ final class ProcessingStore: Sendable {
     }
 }
 
-/// `InspectStage` with a count per call, an optional action in the middle (after the PDF was handed over, before
+/// `DocumentStage` with a stub recogniser, with a count per call, an optional action in the middle (after the PDF was handed over, before
 /// the result is written) and an optional number of failures first.
 final class TestStage: ProcessingStage {
     private let calls = Mutex(0)
@@ -170,7 +185,7 @@ final class TestStage: ProcessingStage {
             return true
         }
         if fails { throw Failure() }
-        return try await InspectStage().process(pdfData: pdfData, progress: progress)
+        return try await DocumentStage(recognizer: StubRecognizer()).process(pdfData: pdfData, progress: progress)
     }
 }
 
@@ -180,5 +195,31 @@ struct ClosureStage: ProcessingStage {
 
     func process(pdfData: Data, progress: @escaping ProcessingProgress) async throws -> ProcessingResult {
         try await body(pdfData, progress)
+    }
+}
+
+/// A recogniser that answers without Vision: `lines(call)` for its `call`-th page (from 1), by default one line
+/// "Recognised <call>". Counts its calls and the pixel size of each image; `checkpoint`, when set, stops each call
+/// at its `pass()` before it answers.
+final class StubRecognizer: TextRecognizing {
+    private let calls = Mutex<[CGSize]>([])
+    private let lines: @Sendable (Int) -> [String]
+    let checkpoint: Checkpoint?
+
+    init(checkpoint: Checkpoint? = nil, lines: @escaping @Sendable (Int) -> [String] = { ["Recognised \($0)"] }) {
+        self.checkpoint = checkpoint
+        self.lines = lines
+    }
+
+    var count: Int { calls.withLock { $0.count } }
+    var imageSizes: [CGSize] { calls.withLock { $0 } }
+
+    func recognizeText(in image: CGImage) async throws -> [RecognizedLine] {
+        let call = calls.withLock {
+            $0.append(CGSize(width: image.width, height: image.height))
+            return $0.count
+        }
+        if let checkpoint { await checkpoint.pass() }
+        return lines(call).map { RecognizedLine(text: $0) }
     }
 }

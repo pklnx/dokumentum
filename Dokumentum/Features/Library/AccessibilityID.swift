@@ -56,9 +56,12 @@ enum AccessibilityID {
     /// The sidebar footer's "Sync off" line.
     static let syncOffLine = "sidebar.syncOff"
 
-    /// The list toolbar's "+" menu, its "Files…" and "Photos…" items, and the import notice's OK button (#4,
-    /// parts 2 and 3).
+    /// The list toolbar's "+" menu, its "Scan…" (#5, part 2), "Files…" and "Photos…" items, and the import
+    /// notice's OK button (#4, parts 2 and 3).
     static let importMenu = "import.menu"
+    static let importScan = "import.scan"
+    /// The "Saving scan…" indicator while a scan is encoded and imported.
+    static let importSavingScan = "import.savingScan"
     static let importFiles = "import.files"
     static let importPhotos = "import.photos"
     static let importNoticeOK = "import.notice.ok"

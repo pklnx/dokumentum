@@ -117,4 +117,56 @@ struct ProcessingSQLTests {
             expectNoBlobTable(statements)
         }
     }
+
+    /// The result write with the text (#6, part 2): it reads the text row by key, in the write and in the check
+    /// before the save, and no other blob table.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theResultWriteReadsTheTextByKeyAndNoOtherBlob() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try seed(store)
+        let file = try #require(try store.fileIdentifier(of: id))
+
+        let recording = try SQLLog.Recording()
+        let result = ProcessingQueue.write(
+            .result, id,
+            expecting: .init(stateRaw: "pending", deviceID: deviceA, claimedAt: processingStart, file: file),
+            in: store.container, checksText: true, beforeCheck: nil
+        ) { document in
+            document.textSource = .vision
+            document.text?.extractedText = "recognised"
+            document.processingState = .done
+        }
+        let statements = try recording.statements()
+
+        #expect(result == .saved)
+        #expect(try store.text(of: id) == (.vision, "recognised"))
+        let textReads = statements.filter { SQLLog.statement($0, names: "ZDOCUMENTTEXT") && $0.contains("SELECT") }
+        #expect(textReads.count >= 2, "the write's fault and the check's re-read: \(textReads)")
+        #expect(
+            textReads.allSatisfy { $0.contains("t0.Z_PK = ?") || $0.contains("t0.Z_PK IN  (?)") },
+            "not by key: \(textReads)")
+        #expect(statements.contains { $0.contains("UPDATE OR FAIL ZDOCUMENTTEXT SET") }, "\(statements)")
+        for statement in statements {
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
+        }
+    }
+
+    /// The re-queue pass's scan reads only `Document` rows; its writes no blob table.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theReQueuePassReadsNoBlobTable() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        _ = try seed(store)
+        let pass = ProcessingRequeue(defaultsSuite: store.failures(deviceA).defaultsSuite)
+
+        let recording = try SQLLog.Recording()
+        let report = pass.run(in: store.container, deviceID: deviceA, now: processingStart)
+        let statements = try recording.statements()
+
+        #expect(report.requeued == 1, "the one `done` document")
+        #expect(statements.contains { $0.contains("FROM ZDOCUMENT t0") }, "\(statements)")
+        expectNoBlobTable(statements)
+    }
 }
