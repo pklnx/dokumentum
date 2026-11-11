@@ -114,6 +114,15 @@ public struct ShareQueue: Sendable {
         public init() {}
     }
 
+    /// Whether the share extension may load the attachment's data (`loadDataRepresentation`) after the lent file
+    /// could not be copied with `add(copyingFileAt:…)`; `error` is what that threw, `nil` when no file was lent.
+    /// Never after `NotARegularFile`: a lent symbolic link, folder, FIFO, socket or device is not saved, so the
+    /// extension never reads through a link (#87, the maintainer's decision on P1). Every other failure, a lent file
+    /// that is gone (`POSIXError(.ENOENT)`) included, falls back to the data.
+    public static func fallsBackToData(afterFileError error: (any Error)?) -> Bool {
+        !(error is NotARegularFile)
+    }
+
     /// Adds `data` as an item; see `add(copyingFileAt:…)`.
     @discardableResult
     public func add(data: Data, originalFileName: String, typeIdentifier: String, createdAt: Date = Date()) throws
