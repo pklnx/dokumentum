@@ -233,14 +233,14 @@ struct RowRecords {
 
     /// The documents with these `instanceID`s, with their metadata but never `file`, `thumbnail` or `text`:
     /// prefetching them would load the blobs. Oldest first by `createdAt`, so of two copies sharing an `instanceID`
-    /// the first one kept is the one the processing queue fetches (review A of #96, N2).
+    /// the first one kept is the one the processing queue fetches (review A of #96, N2). Sorted after the fetch, so
+    /// the SQL stays the one `RepairSQLTests` pins.
     static func fetchDocuments(_ instanceIDs: Set<UUID>, in context: ModelContext) throws -> [Document] {
         guard !instanceIDs.isEmpty else { return [] }
         let ids = Array(instanceIDs)
-        var descriptor = FetchDescriptor<Document>(
-            predicate: #Predicate { ids.contains($0.instanceID) }, sortBy: [SortDescriptor(\.createdAt)])
+        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { ids.contains($0.instanceID) })
         descriptor.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
-        return try context.fetch(descriptor)
+        return try context.fetch(descriptor).sorted { $0.createdAt < $1.createdAt }
     }
 
     /// The records `keys` name, with every metadata record. Blobs only while unlinked (`#Predicate { $0.document ==
