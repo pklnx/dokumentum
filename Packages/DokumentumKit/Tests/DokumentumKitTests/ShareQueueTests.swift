@@ -902,4 +902,46 @@ struct ShareQueueTests {
         }
     }
 
+    // MARK: #87, part 2: the extension's data fallback (option B)
+
+    /// What `add(copyingFileAt:…)` threw for `source`; `nil` when it copied.
+    private func addError(copying source: URL, to queue: ShareQueue) -> (any Error)? {
+        do {
+            try queue.add(copyingFileAt: source, originalFileName: "lent.pdf", typeIdentifier: "com.adobe.pdf")
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    /// K8: the extension falls back to the data only when the lent file was not refused. A lent link (absolute or
+    /// relative), folder or device is `NotARegularFile`: no fallback, so the link's target is never read. A file
+    /// that is gone (`ENOENT`), any other error and no lent file at all (`nil`) fall back.
+    @Test func fallsBackToDataOnlyForFilesThatAreNotRefused() throws {
+        try withQueue { queue, container in
+            let (_, absoluteLink) = try outsideFileAndLink(in: container)
+            let relativeLink = container.appending(path: "relative-link.pdf")
+            try FileManager.default.createSymbolicLink(
+                atPath: relativeLink.path, withDestinationPath: "outside-secret.pdf")
+            let folder = container.appending(path: "folder.pdf", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+            for refused in [absoluteLink, relativeLink, folder, URL(filePath: "/dev/null")] {
+                let error = addError(copying: refused, to: queue)
+                #expect(
+                    error is ShareQueue.NotARegularFile, "\(refused.lastPathComponent): \(String(describing: error))")
+                #expect(!ShareQueue.fallsBackToData(afterFileError: error), "\(refused.lastPathComponent)")
+            }
+
+            let gone = addError(copying: container.appending(path: "gone.pdf"), to: queue)
+            #expect((gone as? POSIXError)?.code == .ENOENT)
+            #expect(ShareQueue.fallsBackToData(afterFileError: gone), "a lent file that is gone")
+            #expect(names(in: queue.incomingFolder).isEmpty && names(in: queue.itemsFolder).isEmpty)
+        }
+        #expect(!ShareQueue.fallsBackToData(afterFileError: ShareQueue.NotARegularFile()))
+        #expect(ShareQueue.fallsBackToData(afterFileError: POSIXError(.ENOENT)))
+        #expect(ShareQueue.fallsBackToData(afterFileError: CocoaError(.fileReadNoSuchFile)))
+        #expect(ShareQueue.fallsBackToData(afterFileError: POSIXError(.EACCES)))
+        #expect(ShareQueue.fallsBackToData(afterFileError: nil), "no file lent")
+    }
 }

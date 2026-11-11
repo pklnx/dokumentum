@@ -474,9 +474,15 @@ the group's queue folder and closes, and the app imports the items at launch and
   data, never a path: it only becomes the title, without path components and control characters (`../../x.pdf`
   gives "x"). An `item.json` of a newer version is left alone; an unreadable one moves to `Failed/`.
 - **The extension** (`DokumentumShare/`) takes each attachment's PDF type, else its image type, through
-  `loadFileRepresentation` (copied inside the call), else `loadDataRepresentation`. It never decodes an
-  image, so an attachment that offers only an image object is not saved and the sheet shows "This item
-  cannot be saved" with OK. Otherwise it shows "Saving to Dokumentum…" and closes on its own. It does not log
+  `loadFileRepresentation` (copied inside the call), else `loadDataRepresentation`. **A lent file that is not
+  a regular file is not saved** (#87, the maintainer's decision on P1): when `ShareQueue` refuses it as
+  `NotARegularFile` (a symbolic link, a folder, a FIFO, a socket or a device), there is no fallback to the
+  data, so the extension never reads a link's target (Files lends a link as a link, for example one unpacked
+  from a zip). Every other failure of the file, a lent file that is gone (`ENOENT`) included, and an attachment
+  that lends no file still fall back to the data (`ShareQueue.fallsBackToData(afterFileError:)`). It never
+  decodes an image, so an attachment that offers only an image object is not saved. An attachment that is not
+  saved makes the sheet show "This item cannot be saved" with OK. Otherwise it shows "Saving to Dokumentum…"
+  and closes on its own. It does not log
   (`Log` lives in Core). Its strings are in its own catalog, `DokumentumShare/Localizable.xcstrings`.
   `check-project.py` holds it to linking exactly `DokumentumKit` and fails on the words `SwiftData` and
   `DokumentumCore` in its sources.
