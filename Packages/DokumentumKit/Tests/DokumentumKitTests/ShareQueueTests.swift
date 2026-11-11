@@ -884,9 +884,8 @@ struct ShareQueueTests {
                     }()
                     guard let range else { throw CocoaError(.fileReadCorruptFile) }
                     // The `Data` is released when the closure above returns.
-                    guard msync(range.base, range.count, MS_ASYNC) == -1, errno == ENOMEM else {
-                        throw POSIXError(.EEXIST)
-                    }
+                    // Still mapped: exit 5, so a leak reads as `.exitCode(5)`, not as a trap.
+                    if !(msync(range.base, range.count, MS_ASYNC) == -1 && errno == ENOMEM) { exit(5) }
                 }
             }
         }
