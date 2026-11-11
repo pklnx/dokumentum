@@ -777,7 +777,7 @@ struct ShareQueueTests {
                         .utf8
                 ).write(to: folder.appending(path: "item.json"))
 
-                let result = await #expect(processExitsWith: .success, observing: [\.standardErrorContent]) {
+                await #expect(processExitsWith: .success) {
                     [root = queue.root as URL] in
                     peakGrowthChild {
                         let queue = ShareQueue(root: root)
@@ -791,7 +791,6 @@ struct ShareQueueTests {
                         guard sum == 0 else { throw CocoaError(.fileReadCorruptFile) }
                     }
                 }
-                recordChildOutput(result)
             }
         }
 
@@ -802,24 +801,17 @@ struct ShareQueueTests {
                 let lent = container.appending(path: "large-sparse.pdf")
                 try makeSparseFile(at: lent, size: largeSize)
 
-                let result = await #expect(processExitsWith: .success, observing: [\.standardErrorContent]) {
+                await #expect(processExitsWith: .success) {
                     [root = queue.root as URL, lent = lent as URL] in
                     peakGrowthChild {
                         try ShareQueue(root: root).add(
                             copyingFileAt: lent, originalFileName: "large.pdf", typeIdentifier: "com.adobe.pdf")
                     }
                 }
-                recordChildOutput(result)
                 let item = try #require(queue.scan().items.first)
                 let copied = try FileManager.default.attributesOfItem(atPath: queue.payloadURL(of: item).path)[.size]
                 #expect((copied as? NSNumber)?.intValue == largeSize || (copied as? Int) == largeSize)
             }
-        }
-
-        /// The child's measurements, as a test issue, when the child did not exit with success.
-        private func recordChildOutput(_ result: ExitTest.Result?) {
-            guard let result, result.exitStatus != .exitCode(EXIT_SUCCESS) else { return }
-            Issue.record("child: \(String(decoding: result.standardErrorContent, as: UTF8.self))")
         }
     #endif
 
@@ -1081,7 +1073,8 @@ private let largeSize = 128 << 20
     /// footprint's peak rose above the footprint before it. The peak only ever rises over a process's lifetime and
     /// tests run in parallel, so only a fresh process gives the step's own peak. Exits 0 when it rose by less than
     /// 32 MiB, 3 when not, 2 when the measurement cannot be trusted (no reading, or a peak already 8 MiB or more
-    /// above the footprint before the step), 4 when `step` threw. Writes the numbers to standard error.
+    /// above the footprint before the step), 4 when `step` threw. Writes the numbers to standard error (an exit test
+    /// shows them with `observing: [\.standardErrorContent]` when it expects the exit code it got).
     private func peakGrowthChild(_ step: () throws -> Void) -> Never {
         func report(_ text: String, exitCode: Int32) -> Never {
             FileHandle.standardError.write(Data("\(text)\n".utf8))
