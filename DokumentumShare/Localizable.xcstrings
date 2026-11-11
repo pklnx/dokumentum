@@ -24,7 +24,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wird in Dokumentum gesichert …"
+            "value" : "Wird in Dokumentum gespeichert …"
           }
         },
         "en" : {
@@ -41,7 +41,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dieses Objekt kann nicht gesichert werden"
+            "value" : "Dieses Objekt kann nicht gespeichert werden"
           }
         },
         "en" : {
