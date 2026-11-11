@@ -442,15 +442,20 @@ the group's queue folder and closes, and the app imports the items at launch and
   `Failed/` appear as the usual import notice. A run that stays away from real data (`TestEnvironment.isIsolated`)
   and every `-UITestLocalStore` launch refuse the group container (`ArchiveStore.isLiveStorePath`), so unit tests
   and UI-test launches never touch the queue; tests pass a temporary folder.
-- **Regular files only, opened once, never through a link** (#85, #87). Every file is opened once
-  (`O_NOFOLLOW`, `O_NONBLOCK`) and checked on the open descriptor (`fstat`); a symbolic link, a folder, a FIFO
-  or a device throws `NotARegularFile`, a missing file `POSIXError(.ENOENT)`, and a link swapped in after the
-  open is never followed. The extension copies a lent file from that descriptor, 1 MiB at a time; the app reads
-  a payload from it. Inside an item the app goes only through the descriptor of the item's folder, itself
-  opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`): it reads `payload` and `item.json`, and counts
-  an attempt with a new file written in full, synced and renamed over `item.json` in that folder. So an item
-  folder swapped for a link is refused, and nothing is read or written through it. A linked `item.json` moves
-  the item to `Failed/`, and an `Items/` entry is read only when it is a real folder. The item's name follows
+- **Regular files only, opened once, no symbolic link from the item's folder down** (#85, #87). Every file is
+  opened once (`O_NOFOLLOW`, `O_NONBLOCK`) and checked on the open descriptor (`fstat`); a symbolic link, a
+  folder, a FIFO, a socket or a device throws `NotARegularFile`, a missing file `POSIXError(.ENOENT)`, and a
+  link swapped in after the open is never followed. The extension copies a lent file from that descriptor with
+  `read(2)` and `write(2)` through one 1 MiB buffer, so its memory stays bounded whatever the file's size (a
+  150 MB share, #95); the app reads a payload from the descriptor. Inside an item the app goes only through
+  the descriptor of the item's folder, itself opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`):
+  it reads `payload` and `item.json`, and counts an attempt with a new file written in full, synced and
+  renamed over `item.json` in that folder (removed again if the rename fails). So an item folder swapped for a
+  link is refused, and nothing is read or written through it. A linked `item.json` moves the item to
+  `Failed/`, and an `Items/` entry is read only when it is a real folder. Not covered, by design: a symbolic
+  link at `ShareQueue/` or `Items/` is followed (both are reached by path, our code creates them, and swapping
+  them needs the same group access), so is one among the folders above a lent file (`/var` is a link to
+  `/private/var`), and a hard link counts as a regular file. The item's name follows
   `ShareQueue.itemFileName`: the suggested name, else the lent file's, else the share's date and time; the
   type's extension is added only when the name has no PDF or image extension.
 - **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the

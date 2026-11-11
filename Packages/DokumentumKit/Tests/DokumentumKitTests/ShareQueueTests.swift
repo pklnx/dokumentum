@@ -655,4 +655,251 @@ struct ShareQueueTests {
         }
     }
 
+    // MARK: Round 2 of #95: bounded memory, the attempt's hooks, descriptors, sockets
+
+    /// How many descriptors this process has open.
+    private func openDescriptorCount() -> Int {
+        let limit = Int32(clamping: min(Int(getdtablesize()), 1 << 16))
+        return (0..<limit).filter { fcntl($0, F_GETFD) != -1 }.count
+    }
+
+    /// A Unix domain socket file at `url`. `bind` takes a path of about 100 bytes at most, so the socket is
+    /// bound in a short folder of its own (`/tmp` when the temporary folder's path is too long, as in the iOS
+    /// simulator) and then moved to `url`.
+    private func makeSocket(at url: URL) throws {
+        let base =
+            FileManager.default.temporaryDirectory.path.utf8.count < 60
+            ? FileManager.default.temporaryDirectory.path : "/tmp"
+        let folder = URL(filePath: base).appending(
+            path: "sq-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appending(path: "s").path
+        #if canImport(Glibc)
+            let descriptor = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0)
+        #else
+            let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        #endif
+        try #require(descriptor >= 0)
+        defer { close(descriptor) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        try #require(bytes.count < MemoryLayout.size(ofValue: address.sun_path))
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            buffer.copyBytes(from: bytes)
+            buffer[bytes.count] = 0
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        try #require(bound == 0, "bind: \(errno)")
+        try FileManager.default.moveItem(at: URL(filePath: path), to: url)
+    }
+
+    #if canImport(Darwin)
+        /// The process's `phys_footprint` (`task_info`, `TASK_VM_INFO`), in bytes.
+        private func physicalFootprint() throws -> Int {
+            var info = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            try #require(result == KERN_SUCCESS)
+            return Int(info.phys_footprint)
+        }
+
+        /// B1 of the reviews of #95: copying a large lent file keeps memory bounded. 128 MiB are copied; the
+        /// footprint right after the copy (before any autorelease pool of the caller drains) may grow by less than
+        /// 32 MiB, which leaves room for other tests running at the same time. A copy that kept its chunks grows
+        /// by the whole file. The source is sparse (`ftruncate`), so it costs no disk to make.
+        @Test func aLargeCopyKeepsMemoryBounded() throws {
+            try withQueue { queue, container in
+                let size = 128 * ShareQueue.copyChunkSize
+                let lent = container.appending(path: "large-sparse.pdf")
+                #expect(FileManager.default.createFile(atPath: lent.path, contents: nil))
+                let file = open(lent.path, O_WRONLY)
+                try #require(file >= 0)
+                #expect(ftruncate(file, off_t(size)) == 0)
+                close(file)
+                let before = try physicalFootprint()
+
+                try queue.add(copyingFileAt: lent, originalFileName: "large.pdf", typeIdentifier: "com.adobe.pdf")
+
+                let growth = try physicalFootprint() - before
+                #expect(growth < 32 * ShareQueue.copyChunkSize, "the footprint grew by \(growth >> 20) MiB")
+                let item = try #require(queue.scan().items.first)
+                let copied = try FileManager.default.attributesOfItem(atPath: queue.payloadURL(of: item).path)[.size]
+                #expect((copied as? NSNumber)?.intValue == size || (copied as? Int) == size)
+            }
+        }
+    #endif
+
+    /// N8: `writeAll` writes everything through short writes and `EINTR`, and throws any other error.
+    @Test func writeAllLoopsOverShortWritesAndInterrupts() throws {
+        try withQueue { _, container in
+            let url = container.appending(path: "written")
+            let bytes = Data((0..<1000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+            #expect(FileManager.default.createFile(atPath: url.path, contents: nil))
+            let file = open(url.path, O_WRONLY)
+            try #require(file >= 0)
+            defer { close(file) }
+            var calls = 0
+            try bytes.withUnsafeBytes { buffer in
+                try ShareQueue.writeAll(buffer, to: file) { descriptor, start, count in
+                    calls += 1
+                    if calls == 2 {
+                        errno = EINTR
+                        return -1
+                    }
+                    return write(descriptor, start, min(count, 3))
+                }
+            }
+            #expect(try Data(contentsOf: url) == bytes)
+            #expect(calls > 300, "short writes were looped over")
+
+            let failing = posixCode {
+                try bytes.withUnsafeBytes { buffer in
+                    try ShareQueue.writeAll(buffer, to: file) { _, _, _ in
+                        errno = EIO
+                        return -1
+                    }
+                }
+            }
+            #expect(failing == .EIO)
+            #expect(
+                posixCode { try bytes.withUnsafeBytes { try ShareQueue.writeAll($0, to: file) { _, _, _ in 0 } } }
+                    == .EIO)
+        }
+    }
+
+    /// A0 of review A: the item's folder swapped for a link during the attempt (after the check, before the write):
+    /// the write still goes into the folder that was opened, never into the outside folder.
+    @Test func anItemFolderSwappedDuringTheAttemptGetsTheWriteNotTheOutside() throws {
+        try withQueue { queue, container in
+            let outside = container.appending(path: "outside", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+            let outsideJSON = Data(
+                #"{"attempts":0,"createdAt":0,"originalFileName":"o.pdf","typeIdentifier":"com.adobe.pdf","version":1}"#
+                    .utf8)
+            try outsideJSON.write(to: outside.appending(path: "item.json"))
+            let id = try queue.add(data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            let original = queue.itemsFolder.appending(path: id.uuidString)
+            let movedAway = container.appending(path: "moved-away", directoryHint: .isDirectory)
+
+            let counted = try queue.recordAttempt(item) {
+                try FileManager.default.moveItem(at: original, to: movedAway)
+                try FileManager.default.createSymbolicLink(at: original, withDestinationURL: outside)
+            }
+
+            #expect(counted.info.attempts == 1)
+            #expect(try Data(contentsOf: outside.appending(path: "item.json")) == outsideJSON)
+            #expect(names(in: outside) == ["item.json"])
+            let written = try Data(contentsOf: movedAway.appending(path: "item.json"))
+            #expect(String(decoding: written, as: UTF8.self).contains(#""attempts":1"#), "written where it was opened")
+        }
+    }
+
+    /// A1 of review A, R3 of review B: when the new `item.json` cannot be renamed into place (here `item.json` became
+    /// a folder after the check), the attempt throws and its temporary file is removed.
+    @Test func aFailedAttemptLeavesNoTemporaryFile() throws {
+        try withQueue { queue, _ in
+            let id = try queue.add(data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            let folder = queue.itemsFolder.appending(path: id.uuidString)
+            let info = folder.appending(path: "item.json")
+
+            #expect(throws: (any Error).self) {
+                try queue.recordAttempt(item) {
+                    try FileManager.default.removeItem(at: info)
+                    try FileManager.default.createDirectory(at: info, withIntermediateDirectories: true)
+                    try Data("x".utf8).write(to: info.appending(path: "inside"))
+                }
+            }
+
+            #expect(names(in: folder) == ["item.json", "payload"], "no .item.json.* is left")
+        }
+    }
+
+    /// R1 of review B: an `item.json` swapped for a link to outside JSON after `scan()` is not counted (`fstatat`
+    /// does not follow it), and neither the link nor its target changes.
+    @Test func anItemJSONSwappedForALinkAfterTheScanIsNotCounted() throws {
+        try withQueue { queue, container in
+            let outside = container.appending(path: "outside.json")
+            let outsideJSON = Data(
+                #"{"attempts":0,"createdAt":0,"originalFileName":"o.pdf","typeIdentifier":"com.adobe.pdf","version":1}"#
+                    .utf8)
+            try outsideJSON.write(to: outside)
+            let id = try queue.add(data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            let info = queue.itemsFolder.appending(path: id.uuidString).appending(path: "item.json")
+            try swapForALink(info, to: outside, keepingIn: container)
+
+            var code: CocoaError.Code?
+            do {
+                _ = try queue.recordAttempt(item)
+            } catch let error as CocoaError {
+                code = error.code
+            }
+
+            #expect(code == .fileNoSuchFile)
+            #expect(try Data(contentsOf: outside) == outsideJSON)
+            let type = try FileManager.default.attributesOfItem(atPath: info.path)[.type] as? FileAttributeType
+            #expect(type == .typeSymbolicLink, "the link itself stays")
+        }
+    }
+
+    /// A2 of review A: a refused file's descriptor is closed. 50 rounds of a lent folder, a lent device and a folder
+    /// as payload leave the number of open descriptors where it was (a little room for other tests running at the
+    /// same time; a leak adds 150).
+    @Test func refusedFilesLeaveNoOpenDescriptor() throws {
+        try withQueue { queue, container in
+            let folder = container.appending(path: "folder.pdf", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try queue.add(data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            try FileManager.default.removeItem(at: queue.payloadURL(of: item))
+            try FileManager.default.createDirectory(at: queue.payloadURL(of: item), withIntermediateDirectories: true)
+            let before = openDescriptorCount()
+
+            for _ in 0..<50 {
+                for source in [folder, URL(filePath: "/dev/null")] {
+                    #expect(throws: ShareQueue.NotARegularFile.self) {
+                        try queue.add(copyingFileAt: source, originalFileName: "x.pdf", typeIdentifier: "com.adobe.pdf")
+                    }
+                }
+                #expect(throws: ShareQueue.NotARegularFile.self) { try queue.payload(of: item) }
+            }
+
+            let after = openDescriptorCount()
+            #expect(after - before < 25, "\(before) open descriptors before, \(after) after")
+        }
+    }
+
+    /// N2 of review A: a socket, lent or as payload, is `NotARegularFile` (`open` gives `EOPNOTSUPP` on Apple
+    /// platforms and `ENXIO` on Linux), and nothing is written.
+    @Test func aSocketLentOrAsPayloadIsRefused() throws {
+        try withQueue { queue, container in
+            let lent = container.appending(path: "lent-socket.pdf")
+            try makeSocket(at: lent)
+
+            #expect(throws: ShareQueue.NotARegularFile.self) {
+                try queue.add(copyingFileAt: lent, originalFileName: "s.pdf", typeIdentifier: "com.adobe.pdf")
+            }
+            #expect(names(in: queue.incomingFolder).isEmpty && names(in: queue.itemsFolder).isEmpty)
+
+            try queue.add(data: Data("%PDF".utf8), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            let item = try #require(queue.scan().items.first)
+            try FileManager.default.removeItem(at: queue.payloadURL(of: item))
+            try makeSocket(at: queue.payloadURL(of: item))
+
+            #expect(throws: ShareQueue.NotARegularFile.self) { try queue.payload(of: item) }
+        }
+    }
+
 }
