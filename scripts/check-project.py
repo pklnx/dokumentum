@@ -14,8 +14,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   fails `lint`. A signed build adds keys of its own beyond these files (for example
   application-identifier, the team identifier and get-task-allow).
 - The share extension is embedded in the iOS app only (both platform filters, in either form Xcode
-  and xcodebuild accept), into PlugIns. It links no package, and its Info.plist holds exactly the
-  placeholder's keys and activation rule.
+  and xcodebuild accept), into PlugIns. It links exactly the package product DokumentumKit, for the
+  share queue's format (plan of #4, part 4, T8), and nothing else, and its Info.plist holds exactly the
+  reviewed keys and activation rule.
 - No .swift file under DokumentumShare/ contains the words SwiftData or DokumentumCore anywhere, as whole
   words, in code, strings or comments: the extension must never touch the store. On purpose a plain word
   search and no parser. It has no misses, where anything short of a real Swift lexer misreads raw strings,
@@ -147,7 +148,9 @@ SHARE_TARGET = "DokumentumShare"
 SHARE_FOLDER = "DokumentumShare"
 # The store and the model stay out of the extension (CLAUDE.md, plan.md section 3.4).
 SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
-# The placeholder's whole Info.plist file. Step 3 changes the rule here, on purpose.
+# The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
+SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
+# The extension's whole Info.plist file: PDFs and images only. A change of the rule is a change here, on purpose.
 SHARE_INFO_CONTENT = {"NSExtension": {
     "NSExtensionAttributes": {
         "NSExtensionActivationRule": (
@@ -491,7 +494,7 @@ def check_info_plists(root):
     if problem:
         problems.append(problem)
     elif actual != SHARE_INFO_CONTENT:
-        problems.append(f"{SHARE_INFO}: must hold exactly the placeholder's keys and activation rule "
+        problems.append(f"{SHARE_INFO}: must hold exactly the reviewed keys and activation rule "
                         f"(SHARE_INFO_CONTENT in scripts/check-project.py), found {actual}")
     return problems
 
@@ -553,8 +556,13 @@ def embeds_into_plugins(phase):
     return destination and not phase.get("dstPath")
 
 
+def product_names(objects, identifiers):
+    """The productName of each XCSwiftPackageProductDependency, sorted (a missing one as its identifier)."""
+    return sorted(str(objects.get(identifier, {}).get("productName", identifier)) for identifier in identifiers)
+
+
 def check_share_extension(objects, project):
-    """Embedded in the iOS app only, through both platform filters, into PlugIns; no package linked."""
+    """Embedded in the iOS app only, through both platform filters, into PlugIns; links exactly DokumentumKit."""
     by_name = {objects.get(target_id, {}).get("name"): target_id for target_id in project.get("targets", [])}
     if APP_TARGET not in by_name or SHARE_TARGET not in by_name:
         return []  # check_targets reports it.
@@ -587,13 +595,20 @@ def check_share_extension(objects, project):
             problems.append(f"target {APP_TARGET}: the embedded {SHARE_TARGET} must be filtered to ios, "
                             f"found {sorted(platform_filters(entry))}")
 
-    if share.get("packageProductDependencies"):
-        problems.append(f"target {SHARE_TARGET}: links a package; the extension links neither (plan.md, section 3.4)")
+    linked = product_names(objects, share.get("packageProductDependencies", []))
+    if linked != SHARE_PACKAGE_PRODUCTS:
+        problems.append(f"target {SHARE_TARGET}: must link exactly the package products {SHARE_PACKAGE_PRODUCTS}, "
+                        f"found {linked}; the extension never links the store's package (plan.md, section 3.4)")
+    in_phases = []
     for phase_id in share.get("buildPhases", []):
         for identifier in objects.get(phase_id, {}).get("files", []):
-            if "productRef" in objects.get(identifier, {}):
-                problems.append(f"target {SHARE_TARGET}: links a package in a build phase; the extension links "
-                                "neither (plan.md, section 3.4)")
+            entry = objects.get(identifier, {})
+            if "productRef" in entry:
+                in_phases.append(entry["productRef"])
+    in_phases = product_names(objects, in_phases)
+    if in_phases != SHARE_PACKAGE_PRODUCTS:
+        problems.append(f"target {SHARE_TARGET}: its build phases must link exactly the package products "
+                        f"{SHARE_PACKAGE_PRODUCTS}, found {in_phases} (plan.md, section 3.4)")
     return problems
 
 
@@ -721,12 +736,17 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		B0 = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DokumentumKit; sourceTree = "<group>";};
 		B1 = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DokumentumCore; sourceTree = "<group>";};
 		B2 = {isa = PBXFileReference; path = Project.xcconfig; sourceTree = "<group>";};
-		C0 = {isa = PBXNativeTarget; name = DokumentumShare; buildPhases = (C5, ); productReference = C1;};
+		C0 = {isa = PBXNativeTarget; name = DokumentumShare; buildPhases = (C5, ); packageProductDependencies = (D1, );
+			productReference = C1;};
 		C1 = {isa = PBXFileReference; path = DokumentumShare.appex; sourceTree = BUILT_PRODUCTS_DIR;};
 		C2 = {isa = PBXCopyFilesBuildPhase; dstPath = ""; dstSubfolderSpec = 13; files = (C4, ); name = "Embed Foundation Extensions";};
 		C3 = {isa = PBXTargetDependency; platformFilters = (ios, ); target = C0;};
 		C4 = {isa = PBXBuildFile; fileRef = C1; platformFilters = (ios, );};
-		C5 = {isa = PBXFrameworksBuildPhase; files = ();};
+		C5 = {isa = PBXFrameworksBuildPhase; files = (C6, );};
+		C6 = {isa = PBXBuildFile; productRef = D2;};
+		D0 = {isa = XCSwiftPackageProductDependency; productName = DokumentumCore;};
+		D1 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
+		D2 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
 	};
 	rootObject = A0;
 }
@@ -1011,9 +1031,14 @@ def self_test():
         ("no dependency on the extension", edit(PROJECT, "dependencies = (C3, );", "dependencies = ();"),
          "needs one dependency on DokumentumShare"),
         ("the extension not embedded", edit(PROJECT, "files = (C4, );", "files = ();"), "needs to embed DokumentumShare once"),
-        ("the extension links a package", edit(PROJECT, "buildPhases = (C5, ); productReference",
-                                               "buildPhases = (C5, ); packageProductDependencies = (D0, ); productReference"),
-         "links a package"),
+        ("the extension links DokumentumCore instead", edit(PROJECT, "packageProductDependencies = (D1, );",
+                                                            "packageProductDependencies = (D0, );"),
+         "must link exactly the package products ['DokumentumKit'], found ['DokumentumCore']"),
+        ("the extension links DokumentumCore too", edit(PROJECT, "packageProductDependencies = (D1, );",
+                                                        "packageProductDependencies = (D1, D0, );"),
+         "found ['DokumentumCore', 'DokumentumKit']"),
+        ("the extension links no package", edit(PROJECT, "packageProductDependencies = (D1, );", ""),
+         "must link exactly the package products ['DokumentumKit'], found []"),
         # Signing.
         ("target identity", in_target("CODE_SIGN_IDENTITY"), "sets CODE_SIGN_IDENTITY"),
         ("target identity with a condition", in_target('"CODE_SIGN_IDENTITY[sdk=macosx*]"'), "sets CODE_SIGN_IDENTITY[sdk=macosx*]"),
@@ -1079,14 +1104,14 @@ def self_test():
         ("another background mode", write(IOS_APP_INFO, plistlib.dumps({"UIBackgroundModes": ["audio"]}).decode()), "holds only UIBackgroundModes"),
         ("another extension point", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
             **SHARE_INFO_CONTENT["NSExtension"], "NSExtensionPointIdentifier": "x"}}).decode()),
-         "must hold exactly the placeholder's keys"),
+         "must hold exactly the reviewed keys"),
         ("an activation rule that offers everything", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
             **SHARE_INFO_CONTENT["NSExtension"],
             "NSExtensionAttributes": {"NSExtensionActivationRule": "TRUEPREDICATE"}}}).decode()),
-         "must hold exactly the placeholder's keys"),
+         "must hold exactly the reviewed keys"),
         ("a background mode in the extension", write(SHARE_INFO, plistlib.dumps(
             {**SHARE_INFO_CONTENT, "UIBackgroundModes": ["remote-notification"]}).decode()),
-         "must hold exactly the placeholder's keys"),
+         "must hold exactly the reviewed keys"),
         # Forms Xcode accepts that a plain parser overlooks.
         ("capability with a space before the condition", in_xcconfig("ENABLE_OUTGOING_NETWORK_CONNECTIONS [sdk=*] = YES"),
          "sets ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=*] = YES"),
@@ -1147,9 +1172,14 @@ def self_test():
         ("a committed Local.xcconfig", committed_local, f"{LOCAL_XCCONFIG} is committed"),
         ("a personal Local.xcconfig is fine", write(LOCAL_XCCONFIG, "// personal\n"), None),
         # The extension.
-        ("a package linked in the extension's phase only", edit(PROJECT, "C5 = {isa = PBXFrameworksBuildPhase; files = ();};",
-                                                                "C5 = {isa = PBXFrameworksBuildPhase; files = (C6, );};\n\t\tC6 = {isa = PBXBuildFile; productRef = D0;};"),
-         "links a package in a build phase"),
+        ("DokumentumCore linked in the extension's phase only", edit(PROJECT, "C6 = {isa = PBXBuildFile; productRef = D2;};",
+                                                                     "C6 = {isa = PBXBuildFile; productRef = D0;};"),
+         "its build phases must link exactly the package products ['DokumentumKit'], found ['DokumentumCore']"),
+        ("DokumentumCore linked in the extension's phase too", edit(PROJECT, "files = (C6, );",
+                                                                    "files = (C6, C7, );};\n\t\tC7 = {isa = PBXBuildFile; productRef = D0;"),
+         "found ['DokumentumCore', 'DokumentumKit']"),
+        ("Kit not linked in the extension's phase", edit(PROJECT, "files = (C6, );", "files = ();"),
+         "its build phases must link exactly the package products ['DokumentumKit'], found []"),
         ("embedded into another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolderSpec = 10;"), "must copy DokumentumShare into PlugIns"),
         ("embedded without a destination", edit(PROJECT, "dstSubfolderSpec = 13;", ""), "must copy DokumentumShare into PlugIns"),
         ("embedded into a subfolder", edit(PROJECT, 'dstPath = "";', "dstPath = x;"), "must copy DokumentumShare into PlugIns"),

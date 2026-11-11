@@ -125,6 +125,12 @@ final class ImportController {
         notices.add(report.notice(.app))
     }
 
+    /// The share queue's runs (part 4): their notices, like any other import's (PQ4), but nothing is selected or
+    /// opened, also for one document (PQ12); the Inbox lists the new documents.
+    func showShareQueueReports(_ reports: [ImportReport]) {
+        for report in reports { notices.add(report.notice(.app)) }
+    }
+
     /// The shown notice was dismissed; the next waiting one follows in a later update (presenting it in the
     /// same update as the dismissal would be lost).
     /// - Returns: the task that shows it; tests await it.

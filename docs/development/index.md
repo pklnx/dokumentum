@@ -47,9 +47,10 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 ## The project
 
 `Dokumentum.xcodeproj` has one multiplatform app target (`Dokumentum`: iOS and native
-macOS, iPhone only), the share extension `DokumentumShare` (iOS only, a placeholder until
-step 3, embedded through platform filters), `DokumentumTests` (Swift Testing, hosted by the
-app) and `DokumentumUITests`. Two local packages live in `Packages/`.
+macOS, iPhone only), the share extension `DokumentumShare` (iOS only, embedded through platform
+filters; it links `DokumentumKit` and nothing else, see "Share extension and queue"),
+`DokumentumTests` (Swift Testing, hosted by the app) and `DokumentumUITests`. Two local packages
+live in `Packages/`.
 
 - **Folders are synchronized** (`objectVersion = 77`, `PBXFileSystemSynchronizedRootGroup`):
   adding a file to `Dokumentum/`, `DokumentumShare/`, `DokumentumTests/` or `DokumentumUITests/`
@@ -388,6 +389,39 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
 - A window screenshot can still show another window lying over the app's; whoever passes PNGs on opens each
   first. PNGs never go into the repository: a PR lists each with its SHA-256.
 
+## Share extension and queue
+
+On the iPhone, sharing a PDF or an image to Dokumentum (#4, part 4) goes through the app group
+`group.space.pklnx.dokumentum`. **The extension never opens the store**: it copies each shared file into
+the group's queue folder and closes, and the app imports the items at launch and on every activation.
+
+- **The format** is `ShareQueue` (`DokumentumKit`, Foundation only, tested on Linux), the one piece both
+  sides link. `ShareQueue/Items/<UUID>/` holds `payload` (the bytes, always under this name) and `item.json`
+  (`version` 1, `originalFileName`, `typeIdentifier`, `createdAt`, `attempts`). The writer builds an item in
+  `Incoming/<UUID>/` and renames the folder into `Items/` as its last step, so the reader never sees a
+  half-written item; the app removes `Incoming/` leftovers older than a day. The file name is data, never a
+  path: it only becomes the title, without path components and control characters (`../../x.pdf` gives "x").
+  An `item.json` of a newer version is left alone; an unreadable one moves to `Failed/`.
+- **The extension** (`DokumentumShare/`) takes each attachment's PDF type, else its image type, through
+  `loadFileRepresentation` (copied inside the call), else `loadDataRepresentation`. It never decodes an
+  image, so an attachment that offers only an image object is not saved and the sheet shows "This item
+  cannot be saved" with OK. Otherwise it shows "Saving to Dokumentum…" and closes on its own. It does not log
+  (`Log` lives in Core). Its strings are in its own catalog, `DokumentumShare/Localizable.xcstrings`.
+  `check-project.py` holds it to linking exactly `DokumentumKit` and fails on the words `SwiftData` and
+  `DokumentumCore` in its sources.
+- **The app** (`ShareQueueImporter`, iOS only) reads `Items/` oldest first and imports each item through the
+  app's one `DocumentImporter`. One run at a time: a launch also produces `.active`, and a request during a
+  run queues exactly one more run. Before each import it counts an attempt in `item.json` (written
+  atomically). **An item is removed only after its document was saved or the importer reported a
+  duplicate**; a crash in between imports it again next time, which becomes a duplicate, and then it goes.
+  A failure keeps the item; its third failure moves it to `Failed/`, which nothing empties, and the notice
+  names it once. Share-queue imports never select or open a document (PQ12); duplicates and items moved to
+  `Failed/` appear as the usual import notice. A run that stays away from real data (`TestEnvironment.isIsolated`)
+  refuses the group container (`ArchiveStore.isLiveStorePath`), so unit tests and in-memory UI-test launches never
+  touch the queue; tests pass a temporary folder.
+- **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the
+  entitlements file. The app group on a device (both App IDs, the profiles) is the maintainer's (#4, M2 and M3).
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, subsystem
@@ -400,7 +434,7 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 | Check | Where | What it does |
 |---|---|---|
 | `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
-| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
+| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` and of the share extension's `DokumentumShare/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
 | Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |
@@ -422,9 +456,10 @@ python3 scripts/check-schema-snapshots.py --self-test
 python3 scripts/check-schema-snapshots.py --base origin/main
 ```
 
-`--catalog` only reads the catalog. `python3 scripts/check-localization.py <derived data path>` also
-finds strings the code uses that never reached the catalog: `xcodebuild` does not add them, only
-Xcode's IDE does. Run it after a build with `-derivedDataPath <derived data path>`.
+`--catalog` only reads the catalogs. `python3 scripts/check-localization.py <derived data path>` also
+finds strings the code uses that never reached their target's catalog: `xcodebuild` does not add them, only
+Xcode's IDE does. Run it after a build with `-derivedDataPath <derived data path>`. A macOS build has no
+strings of the iOS-only extension, so they are checked only once its target was built.
 
 ### Xcode Cloud
 

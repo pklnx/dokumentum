@@ -1,0 +1,57 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "OK" : {
+      "comment" : "Button that closes the share extension after its error.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
+    },
+    "Saving to Dokumentum…" : {
+      "comment" : "Share extension: shown while the shared files are copied for the app.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird in Dokumentum gesichert …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving to Dokumentum…"
+          }
+        }
+      }
+    },
+    "This item cannot be saved" : {
+      "comment" : "Share extension: a shared PDF or image could not be copied for the app.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Objekt kann nicht gesichert werden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This item cannot be saved"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.1"
+}

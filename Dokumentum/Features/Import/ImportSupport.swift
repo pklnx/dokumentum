@@ -13,6 +13,10 @@ struct ImportSupport: ViewModifier {
     let launchStore: LaunchStore
     /// The photos just picked, in selection order; emptied as soon as they are handed to the controller.
     @State private var pickedPhotos: [PhotosPickerItem] = []
+    #if os(iOS)
+        /// The share queue's imports (part 4); their reports become this window's notices.
+        @Environment(ShareQueueImporter.self) private var shareQueue: ShareQueueImporter?
+    #endif
 
     func body(content: Content) -> some View {
         content
@@ -44,6 +48,12 @@ struct ImportSupport: ViewModifier {
             #if os(macOS)
                 .dropDestination(for: ImportedFile.self) { files, _ in
                     Task { await controller.importDropped(files) }
+                }
+            #else
+                // Also the reports that arrived before the window appeared.
+                .onChange(of: shareQueue?.reports.count ?? 0, initial: true) { _, count in
+                    guard count > 0, let shareQueue else { return }
+                    controller.showShareQueueReports(shareQueue.takeReports())
                 }
             #endif
             .alert(
