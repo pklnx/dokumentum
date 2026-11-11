@@ -492,8 +492,12 @@ the group's queue folder and closes, and the app imports the items at launch and
   a regular file is not saved** (#87, the maintainer's decision on P1): when `ShareQueue` refuses it as
   `NotARegularFile` (a symbolic link, a folder, a FIFO, a socket or a device), there is no fallback to the
   data, so the extension never reads a link's target (Files lends a link as a link, for example one unpacked
-  from a zip). Every other failure of the file, a lent file that is gone (`ENOENT`) included, and an attachment
-  that lends no file still fall back to the data (`ShareQueue.fallsBackToData(afterFileError:)`). It never
+  from a zip). **Once the lent file was opened, a failure does not fall back either** (#104, the maintainer's
+  decision P1 = A): reading it or writing the queue (a full device, `EDQUOT`, `EIO`) throws `CopyFailed`, and
+  the attachment is not saved, because the data would go to the same volume and loading it holds the whole
+  file in the extension's memory. Only an attachment that lends no file, or a lent file that cannot be opened
+  (gone, `ENOENT`, or `EACCES`), falls back to the data (`ShareQueue.fallsBackToData(afterFileError:)`). The
+  order is `ShareQueue.saveAttachment`, tested in Kit; `ShareSaver` reaches the data only through it. It never
   decodes an image, so an attachment that offers only an image object is not saved. An attachment that is not
   saved makes the sheet show "This item cannot be saved" with OK. Otherwise it shows "Saving to Dokumentum…"
   and closes on its own. It does not log

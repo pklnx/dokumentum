@@ -98,9 +98,13 @@ public struct ShareQueue: Sendable {
     /// Adds a copy of the file at `source` (a file the system lends for the duration of a call) and returns
     /// the item's identifier. The item appears in `Items/` complete or not at all. `source` is opened once, without
     /// following a link at its last component, and copied from the open file through one 1 MiB buffer, so memory
-    /// stays bounded whatever the file's size. Throws, and writes nothing, `NotARegularFile` when `source` is a
-    /// symbolic link, a folder, a FIFO, a socket, a device or anything else that is not a regular file, and
-    /// `POSIXError(.ENOENT)` when it does not exist.
+    /// stays bounded whatever the file's size. Throws, and writes nothing:
+    /// - when `source` cannot be opened as a regular file, the open's error: `NotARegularFile` when it is a symbolic
+    ///   link, a folder, a FIFO, a socket, a device or anything else that is not a regular file, `POSIXError(.ENOENT)`
+    ///   when it does not exist, another `POSIXError` (such as `EACCES`) when it cannot be opened;
+    /// - once it was opened, `CopyFailed` for every failure: reading it, or writing the queue (`ENOSPC`, `EDQUOT`,
+    ///   `EIO`, the folders, `item.json`, the rename). The share extension then does not fall back to the data
+    ///   (`fallsBackToData(afterFileError:)`; #104, the maintainer's decision P1 = A).
     @discardableResult
     public func add(
         copyingFileAt source: URL, originalFileName: String, typeIdentifier: String, createdAt: Date = Date()
@@ -110,17 +114,23 @@ public struct ShareQueue: Sendable {
             createdAt: createdAt, afterOpen: nil)
     }
 
-    /// `add(copyingFileAt:…)` with a hook for tests: `afterOpen` runs after `source` was opened and checked.
+    /// `add(copyingFileAt:…)` with hooks for tests: `afterOpen` runs after `source` was opened and checked, and the
+    /// copy writes through `writeCall` (as `writeAll` does).
     @discardableResult
     func add(
         copyingFileAt source: URL, originalFileName: String, typeIdentifier: String, createdAt: Date,
-        afterOpen: (() throws -> Void)?
+        afterOpen: (() throws -> Void)?, writeCall: WriteCall = { write($0, $1, $2) }
     ) throws -> UUID {
         let input = try Self.openRegularFile(source)
         defer { try? input.close() }
-        try afterOpen?()
-        return try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
-            try Self.copy(from: input, to: $0)
+        // From here on the lent file is open: any failure is `CopyFailed`, which never falls back to the data.
+        do {
+            try afterOpen?()
+            return try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
+                try Self.copy(from: input, to: $0, using: writeCall)
+            }
+        } catch {
+            throw CopyFailed(underlying: error)
         }
     }
 
@@ -130,13 +140,56 @@ public struct ShareQueue: Sendable {
         public init() {}
     }
 
+    /// `add(copyingFileAt:…)` failed after the lent file was opened as a regular file: reading it or writing the
+    /// queue (`ENOSPC`, `EDQUOT`, `EIO`, the folders, `item.json`, the rename); `underlying` is that error. Nothing
+    /// was written. The share extension does not fall back to the data after it (#104, the maintainer's decision
+    /// P1 = A): the data would go to the same full or failing volume, and loading it holds the whole attachment in
+    /// the extension's memory.
+    public struct CopyFailed: Error {
+        public let underlying: any Error
+
+        public init(underlying: any Error) {
+            self.underlying = underlying
+        }
+    }
+
     /// Whether the share extension may load the attachment's data (`loadDataRepresentation`) after the lent file
     /// could not be copied with `add(copyingFileAt:…)`; `error` is what that threw, `nil` when no file was lent.
-    /// Never after `NotARegularFile`: a lent symbolic link, folder, FIFO, socket or device is not saved, so the
-    /// extension never reads through a link (#87, the maintainer's decision on P1). Every other failure, a lent file
-    /// that is gone (`POSIXError(.ENOENT)`) included, falls back to the data.
+    /// Only when no file was lent or the lent file could not be opened (`POSIXError(.ENOENT)` for a file that is
+    /// gone, `EACCES`, and the like). Never after `NotARegularFile`: a lent symbolic link, folder, FIFO, socket or
+    /// device is not saved, so the extension never reads through a link (#87, the maintainer's decision on P1).
+    /// Never after `CopyFailed`: once the lent file was opened, a failure ends the attachment unsaved (#104, the
+    /// maintainer's decision P1 = A).
     public static func fallsBackToData(afterFileError error: (any Error)?) -> Bool {
-        !(error is NotARegularFile)
+        !(error is NotARegularFile) && !(error is CopyFailed)
+    }
+
+    /// What the share extension's file step did for one attachment (`saveAttachment`).
+    public enum FileStep: Sendable {
+        /// The lent file is in the queue.
+        case saved
+        /// Not saved; the error is what `add(copyingFileAt:…)` threw, `nil` when no file was lent.
+        case notSaved((any Error)?)
+    }
+
+    /// The share extension's order for one attachment (#104): `savingFile` (the lent file, copied with
+    /// `add(copyingFileAt:…)`), then `savingData` (`loadDataRepresentation`, then `add(data:…)`) only when the file
+    /// step did not save it and `fallsBackToData(afterFileError:)` allows it: no file lent, or a lent file that could
+    /// not be opened. Never after `NotARegularFile` or `CopyFailed`. Each closure runs at most once, one after the
+    /// other, in the caller's isolation (`nonisolated(nonsending)`): the closures never leave it, so they may capture
+    /// what is not `Sendable` (the extension builds with `NonisolatedNonsendingByDefault`, this package does not).
+    /// - Returns: whether the attachment was saved.
+    public nonisolated(nonsending) static func saveAttachment(
+        savingFile: nonisolated(nonsending) () async -> FileStep,
+        savingData: nonisolated(nonsending) () async -> Bool
+    ) async -> Bool {
+        switch await savingFile() {
+        case .saved:
+            return true
+        case .notSaved(let error):
+            guard fallsBackToData(afterFileError: error) else { return false }
+            return await savingData()
+        }
     }
 
     /// Adds `data` as an item; see `add(copyingFileAt:…)`.
@@ -480,7 +533,7 @@ public struct ShareQueue: Sendable {
     /// buffer of `copyChunkSize`, then `fsync`. Memory stays at one buffer whatever the file's size, on every
     /// platform: no chunk becomes a `Data` (on Apple platforms `FileHandle.read(upToCount:)` returns autoreleased
     /// data, and a loop without a pool keeps every chunk until it returns; review of #95, B1).
-    private static func copy(from input: FileHandle, to destination: URL) throws {
+    private static func copy(from input: FileHandle, to destination: URL, using writeCall: WriteCall) throws {
         let created = try call(destination) { open($0, newFileFlags, 0o644) }
         guard created.result >= 0 else { throw posixError(created.code) }
         let output = created.result
@@ -495,7 +548,7 @@ public struct ShareQueue: Sendable {
                 if code == EINTR { continue }
                 throw posixError(code)
             }
-            try writeAll(UnsafeRawBufferPointer(rebasing: buffer[..<count]), to: output)
+            try writeAll(UnsafeRawBufferPointer(rebasing: buffer[..<count]), to: output, using: writeCall)
         }
         guard fsync(output) == 0 else { throw posixError(errno) }
     }
