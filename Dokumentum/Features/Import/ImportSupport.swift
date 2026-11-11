@@ -5,8 +5,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Everything one library window needs to import: the files picker (the "+" menu and ⌘O open it), the Photos
-/// picker (the "+" menu), dropping files onto the window (Mac), and the notice. Applied once, on the window's
-/// root.
+/// picker (the "+" menu), the document camera (the "+" menu, iPhone), dropping files onto the window (Mac), and
+/// the notice. Applied once, on the window's root.
 struct ImportSupport: ViewModifier {
     @Bindable var controller: ImportController
     /// The launch's store: the Debug synthetic import runs only on an in-memory one.
@@ -50,12 +50,35 @@ struct ImportSupport: ViewModifier {
                     Task { await controller.importDropped(files) }
                 }
             #else
+                // The document camera (#5, part 2). The app closes it in each of its three ends (VisionKit leaves
+                // that to the app); a finished scan is encoded and imported after it closed.
+                .fullScreenCover(isPresented: $controller.isScanning) {
+                    DocumentScannerView(
+                        onFinish: { [controller] scan in
+                            controller.isScanning = false
+                            Task { await controller.importScan(CameraScan(scan: scan)) }
+                        },
+                        onCancel: { [controller] in controller.isScanning = false },
+                        onFail: { [controller] error in controller.scanFailed(error) }
+                    )
+                    .ignoresSafeArea()
+                }
                 // Also the reports that arrived before the window appeared.
                 .onChange(of: shareQueue?.reports.count ?? 0, initial: true) { _, count in
                     guard count > 0, let shareQueue else { return }
                     controller.showShareQueueReports(shareQueue.takeReports())
                 }
             #endif
+            .overlay(alignment: .bottom) {
+                if controller.isSavingScan {
+                    ProgressView("Saving scan…")
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.bottom, 24)
+                        .accessibilityIdentifier(AccessibilityID.importSavingScan)
+                }
+            }
             .alert(
                 Text(verbatim: controller.notices.shown?.title ?? ""), isPresented: isShowingNotice,
                 presenting: controller.notices.shown
@@ -74,7 +97,23 @@ struct ImportSupport: ViewModifier {
     private var actions: ImportActions {
         ImportActions(
             pickFiles: { [controller] in controller.isPickingFiles = true },
-            pickPhotos: { [controller] in controller.isPickingPhotos = true })
+            pickPhotos: { [controller] in controller.isPickingPhotos = true },
+            scan: scanAction)
+    }
+
+    /// "Scan…" opens the camera; in a Debug launch with `-UITestScanSynthetic YES` it imports rendered pages
+    /// instead. `nil` without a camera, so the menu has no "Scan…" (the Mac, the simulator).
+    private var scanAction: (@MainActor () -> Void)? {
+        switch ScanAvailability.current(launchStore: launchStore) {
+        case .unavailable:
+            return nil
+        case .camera:
+            return { [controller] in controller.isScanning = true }
+        #if DEBUG
+            case .synthetic:
+                return { [controller] in Task { await controller.importScan(SyntheticScanPages.uiTest) } }
+        #endif
+        }
     }
 
     private var isShowingNotice: Binding<Bool> {
