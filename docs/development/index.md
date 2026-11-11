@@ -617,6 +617,50 @@ scanner (part 2) build on it.
   and `TestPage.photographed`, the page warped onto a dark desk at known corners (optionally with EXIF
   orientation 6). `TestPixels.rgb` samples a `CGImage`.
 
+## Search
+
+Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search`, Foundation only, so
+`kit-linux` runs every test of it. The indexer that builds and updates it (part 2) and the search field
+(part 3) follow.
+
+- **Normalisation** (`SearchNormalizer.normalizedWord`): NFKC, then Foundation's case, diacritic and width
+  folding with `locale: nil` (the device language never changes a result), then a table for what folding
+  leaves alone (æ → ae, œ → oe, ø → o, ł → l, đ → d, þ → th, ß/ẞ → ss), then NFC, so equal words have equal
+  bytes. İ, I and i become `i`; the dotless ı stays `ı`. The tests pin the outputs.
+- **Words** (`SearchTokenizer`): maximal runs of letters, digits and combining marks; everything else
+  separates (hyphen, U+2011, slash, apostrophe, the form feed between pages). "12.03.2024" is three words. A
+  hyphen (`-`, U+2010 or a soft hyphen) at a line end joins the word only before a lowercase letter
+  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). Plain ASCII words are only lowercased;
+  other words are normalised once per distinct form (`SearchNormalizer.Cache`, kept until `mergeOverflow`).
+- **Matching** (P1): every term of a query must match, each in any field. A term matches a word that starts
+  with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. Transcriptions: the
+  index also stores the *a/o/u* form of every word with *ae/oe/ue* (`mueller` → also `muller`; a side effect is
+  `steuer` → also `steur`); a query term also tries its *a/o/u* form and, typed with ä/ö/ü, its *ae/oe/ue*
+  form. So "Müller", "Mueller" and "muller" find each other in every direction.
+- **`SearchIndex`** (a value type): `setMetadata(_:for:)` (title, correspondent, type, tag display paths as
+  `SearchFields`; equal fields are skipped and it returns `false`), `setText(_:for:)` (replaces the previous
+  text), `remove(_:)`, `mergeOverflow()`, `search(_:)`/`matches(_:)` (a set of `instanceID`s, trashed
+  documents included), `statistics`. Inside: postings per token, a forward index per document and field, a
+  sorted vocabulary for prefixes, a `\0`-separated vocabulary buffer scanned with `memchr`/`memcmp` for
+  infixes, and an unsorted overflow for tokens new since the last merge. The index merges the overflow
+  itself when it holds more than `max(2,000, a quarter of the sorted vocabulary)` tokens; the owner calls
+  `mergeOverflow()` at the end of each batch of updates. Tokens without postings are dropped at a merge.
+- **`LibrarySearch`**: text, filter tokens (`SearchToken`: tag with subtree, correspondent, type, Inbox) and
+  scope (`SearchScope`: the sidebar's selection or All Documents). `apply` keeps the list order; the scope
+  alone decides trashed or not, and tokens use `LibrarySelection.matchesIgnoringTrash`, so "Trash + Tag:
+  Steuer" lists the trashed documents tagged Steuer. A text of punctuation only is no text. `suggestions`
+  offers tags, correspondents, types and the Inbox (never in the Trash) whose name has a word starting with
+  each term, tags first, at most 8.
+- **`DocumentSearching`**: what the library calls (`search`, `state`, and `updates()`, one stream per
+  subscriber); the indexer of part 2 conforms, and an FTS5 index would conform unchanged.
+- **`SyntheticCorpus`**: a seeded archive (SplitMix64, integer arithmetic only, the same on every platform;
+  a test pins its checksum) with the plan's distribution of 1 to 100 pages, 10 % Inbox, 1 % trashed, 40 tags
+  on two levels, 60 correspondents, 12 types, and three texts at the 500,000-byte cap. Texts are made on
+  demand (`text(of:)`). 5,000 documents are about 37 MB of text, 324,000 tokens and 2.2 million postings.
+- **Measured** on the Mac mini (M4), not asserted in any test: building the index over 5,000 synthetic
+  documents takes 1.4 s optimised and 7.7 s unoptimised; the slowest of 24 queries × 5 runs takes 2.3 ms
+  optimised and 14 ms unoptimised. The device measurement is part 2's benchmark.
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, `processing`,

@@ -17,6 +17,19 @@ public enum LibrarySelection: Sendable, Hashable {
         Matcher(self, tree: tree).matches(document)
     }
 
+    /// Whether `document` meets this selection's rule whether it is trashed or not: the rule of `matches` without
+    /// its trash guard, so a tag still includes its subtree. The search's filter tokens use it, because there the
+    /// scope alone decides trashed or not (plan of #7, Revision 1, B2). `trash` matches trashed documents.
+    public func matchesIgnoringTrash(_ document: LibraryDocument, in tree: TagTree) -> Bool {
+        Matcher(self, tree: tree).matchesIgnoringTrash(document)
+    }
+
+    /// `matchesIgnoringTrash` with the subtree computed once, for filtering many documents.
+    func predicateIgnoringTrash(in tree: TagTree) -> (LibraryDocument) -> Bool {
+        let matcher = Matcher(self, tree: tree)
+        return { matcher.matchesIgnoringTrash($0) }
+    }
+
     /// The documents of this selection in list order (`LibraryDocument.listOrder`).
     public func filter(_ documents: [LibraryDocument], in tree: TagTree) -> [LibraryDocument] {
         let matcher = Matcher(self, tree: tree)
@@ -40,10 +53,14 @@ public enum LibrarySelection: Sendable, Hashable {
         func matches(_ document: LibraryDocument) -> Bool {
             if case .trash = selection { return document.isTrashed }
             guard !document.isTrashed else { return false }
+            return matchesIgnoringTrash(document)
+        }
+
+        func matchesIgnoringTrash(_ document: LibraryDocument) -> Bool {
             switch selection {
             case .inbox: return document.isInbox
             case .all: return true
-            case .trash: return false
+            case .trash: return document.isTrashed
             case .tag: return !document.tagIDs.isDisjoint(with: subtree)
             case .correspondent(let id): return document.correspondent?.instanceID == id
             case .documentType(let id): return document.documentType?.instanceID == id
