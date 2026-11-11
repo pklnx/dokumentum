@@ -103,7 +103,8 @@ struct ProcessingInterruptionTests {
         await stuck.reached()
         await watchdog.waitForStarts(1)
         watchdog.fire()
-        await finished.wait(timeout: .seconds(30), "the run never ended: no watchdog")
+        // Without a watchdog the run never ends: let the stage go so the test fails instead of hanging.
+        if !(await finished.wait(timeout: .seconds(30), "the run never ended: no watchdog")) { stuck.release() }
         let report = await run.value
 
         #expect(report.timedOut == 1)
