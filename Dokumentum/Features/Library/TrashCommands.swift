@@ -43,7 +43,7 @@
 
     /// Keeps ⌘⌫ with the text field that has the keyboard focus. AppKit offers a key equivalent to the menu
     /// before the focused text view sees it as a key press, so the menu item's action hands the key back.
-    enum CommandDeleteRouting {
+    @MainActor enum CommandDeleteRouting {
         /// The editable text view (a text field's field editor, or a text editor) that should get ⌘⌫, when the
         /// command came from the keyboard; `nil` for a menu click or when no text has the focus.
         static func editingTextView(firstResponder: NSResponder?, event: NSEvent?) -> NSTextView? {
