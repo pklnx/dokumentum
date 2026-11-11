@@ -11,6 +11,11 @@ struct DocumentListView: View {
         /// (review of #74, finding 1). So a click on a row, the selected one too, and every change of the
         /// selection give the list the focus.
         @FocusState private var isListFocused: Bool
+        /// The height each row needs at its current width, measured by its hidden copy (#81). Not observed: only a
+        /// change in `generations` updates the list.
+        @State private var rowHeights = RowHeights()
+        /// How often each row's needed height changed while its content stayed the same (#81): part of its identity.
+        @State private var generations: [UUID: Int] = [:]
     #endif
 
     var body: some View {
@@ -25,8 +30,12 @@ struct DocumentListView: View {
                         // focus.
                         .contentShape(Rectangle())
                         .simultaneousGesture(TapGesture().onEnded { isListFocused = true })
-                        // A row whose content changes is replaced, so the table measures it again (#80): see below.
-                        .id(RowInputs(document: document, tagPaths: tagPaths))
+                        // A row whose content or needed height changes is replaced, so the table measures it again
+                        // (#80, #81): see below.
+                        .id(
+                            RowKey(
+                                inputs: RowInputs(document: document, tagPaths: tagPaths),
+                                generation: generations[document.instanceID] ?? 0))
                     #endif
             }
         }
@@ -48,6 +57,11 @@ struct DocumentListView: View {
             //   height (#80): a new tag line is cut, a removed one leaves a gap. So each row's identity includes what
             //   it shows (`RowInputs`): a changed row is removed and inserted again, and the table measures it. The
             //   new height applies at once, without an animation (maintainer decision on #80).
+            // - A width change of the list column re-measures rows loaded at once, but not the inserted ones (#81): a
+            //   title that wraps or unwraps leaves a gap or is cut. So each row measures the height it needs at its
+            //   width with a hidden copy (`row(_:tagPaths:)`), and a row whose needed height changes while its content
+            //   stays the same gets a new generation in its identity (`RowKey`): it is replaced like a changed row.
+            //   Only those rows are replaced, so the scroll position and the selection stay.
             .animation(.linear(duration: 0), value: model.documents.map(\.instanceID))
         #endif
         // On the list itself, before the overlay: an identifier after it would also replace the empty
@@ -94,6 +108,9 @@ struct DocumentListView: View {
         #if os(macOS)
             content
                 .accessibilityAction { model.selectedDocumentID = document.instanceID }
+                // After the action, so that it stays on the row's one element (#89): the copy is hidden from VoiceOver
+                // and adds none.
+                .background { heightProbe(document, tagPaths: tagPaths) }
                 .tag(document.instanceID)
         #else
             NavigationLink(value: document.instanceID) {
@@ -101,6 +118,46 @@ struct DocumentListView: View {
             }
         #endif
     }
+
+    #if os(macOS)
+        /// A hidden copy of the row that measures the height the row needs at its current width, whatever height the
+        /// table gave the row (#81). Not the row itself: it is laid out in the height the table gave it, and in the
+        /// plan's probes a row that was too short kept its title on one line, so its height did not change.
+        private func heightProbe(_ document: LibraryDocument, tagPaths: [String]) -> some View {
+            DocumentRow(document: document, tagPaths: tagPaths)
+                .fixedSize(horizontal: false, vertical: true)
+                .hidden()
+                .accessibilityHidden(true)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: { height in
+                    let inputs = RowInputs(document: document, tagPaths: tagPaths)
+                    if rowHeights.noteChanged(height, for: inputs) { replaceLater(document.instanceID) }
+                }
+        }
+
+        /// Queues the row for a new generation. The rows are replaced a few per update, one update per turn of the main
+        /// queue: when many rows are replaced in one update on a busy Mac, the table keeps the old height of some of
+        /// them (measured on #81 with 30 rows inserted on top of 3000: with 15 or 30 rows per update some stayed at
+        /// their old height, with 10 or fewer none did).
+        private func replaceLater(_ id: UUID) {
+            guard !rowHeights.pending.contains(id) else { return }
+            rowHeights.pending.append(id)
+            if rowHeights.pending.count == 1 { replacePendingRows() }
+        }
+
+        private func replacePendingRows() {
+            DispatchQueue.main.async {
+                let batch = rowHeights.pending.prefix(RowHeights.rowsPerUpdate)
+                for id in batch { generations[id, default: 0] += 1 }
+                // The next batch after the table took this one.
+                DispatchQueue.main.async {
+                    rowHeights.pending.removeFirst(batch.count)
+                    if !rowHeights.pending.isEmpty { replacePendingRows() }
+                }
+            }
+        }
+    #endif
 
     @ViewBuilder
     private var emptyState: some View {
@@ -146,5 +203,33 @@ struct DocumentListView: View {
     private struct RowInputs: Hashable {
         let document: LibraryDocument
         let tagPaths: [String]
+    }
+
+    /// A row's identity in the list: what it shows, and how often its needed height changed for that (#81).
+    private struct RowKey: Hashable {
+        let inputs: RowInputs
+        let generation: Int
+    }
+
+    /// The last height each row needed, with the inputs it was measured for (#81). Per document shown in the window;
+    /// not pruned, it is dropped with the window.
+    private final class RowHeights {
+        /// How many rows get a new generation in one update (`DocumentListView.replaceLater`).
+        static let rowsPerUpdate = 5
+        /// The rows waiting for a new generation, oldest first.
+        var pending: [UUID] = []
+        private var entries: [UUID: (inputs: RowInputs, height: CGFloat)] = [:]
+
+        /// Records `height` for the row and tells whether the row needs a new measurement by the table: only when the
+        /// same inputs now need a different height. A row's first measurement changes nothing, and neither does a
+        /// content change: a new `RowInputs` already replaces that row (#80).
+        func noteChanged(_ height: CGFloat, for inputs: RowInputs) -> Bool {
+            let id = inputs.document.instanceID
+            // Written on every call: after a content change the entry must hold the new inputs, or the next width
+            // change could not bump the row.
+            defer { entries[id] = (inputs, height) }
+            guard let previous = entries[id], previous.inputs == inputs else { return false }
+            return abs(previous.height - height) > 0.5
+        }
     }
 #endif
