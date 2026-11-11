@@ -288,6 +288,57 @@ struct ProcessingInterruptionTests {
         #expect(failures.count(for: id) == 0)
     }
 
+    /// Review B1 of #120: a pause that lands after the decision and before the stage starts (here in the claim
+    /// write) finds no stage to interrupt. The run is cancelled first, as `ProcessingScheduler.pause()` does, so the
+    /// queue sees it before it starts the stage: the stage never starts and the attempt is given back.
+    @Test func aPauseBeforeTheStageStartsGivesTheAttemptBackAndStartsNoStage() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        // Another device's expired claim, so the queue writes a claim (a takeover) before the stage.
+        let id = try store.insert(device: deviceB, claimedAt: processingStart.addingTimeInterval(-7 * hour))
+        let failures = store.failures(deviceA)
+        let page = Checkpoint()
+        defer { page.release() }
+        let stage = TestStage { _ in await page.pass() }
+        let run = Mutex<Task<ProcessingReport, Never>?>(nil)
+        let started = TestSignal()
+        let interrupt = Mutex<(@Sendable () -> Void)?>(nil)
+        let queue = store.queue(
+            deviceA, failures: failures, stage: stage, clock: clock,
+            hooks: .init(
+                afterScan: { await started.wait() },
+                beforeCheck: { kind in
+                    guard kind == .claim else { return }
+                    // What `pause()` does: cancel the run, then interrupt.
+                    run.withLock { $0 }?.cancel()
+                    interrupt.withLock { $0 }?()
+                }))
+        interrupt.withLock { $0 = { queue.interruptNow() } }
+        let finished = TestSignal()
+        let task = Task {
+            defer { finished.fire() }
+            return await queue.run()
+        }
+        run.withLock { $0 = task }
+        started.fire()
+
+        // Without the check the stage stands at its page and the run never ends: let it go so the test fails.
+        if !(await finished.wait(timeout: .seconds(30), "the run waited for a stage started after the pause")) {
+            page.release()
+        }
+        let report = await task.value
+        #expect(stage.count == 0, "a stage started after the pause")
+        #expect(failures.count(for: id) == 0, "the attempt stayed counted although the app paused")
+        #expect(report.interrupted == 1)
+        #expect(try store.row(id).deviceID == deviceA, "the claim write itself went through")
+
+        // The next run is not blocked by the stage that never started, and processes the document.
+        page.release()
+        #expect(await queue.run().done == 1)
+        #expect(try store.row(id).stateRaw == "done")
+    }
+
     /// `interruptNow()` with no stage running changes nothing.
     @Test func anInterruptionWithoutAStageChangesNothing() async throws {
         let store = try ProcessingStore()

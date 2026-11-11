@@ -348,15 +348,17 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (N1): a cancelled stage stops after its page, but a framework call that ignores cancellation runs on until it
   returns, and its result is always dropped. A stage starts only when every stage cancelled by an interruption has
   returned and at most one timed-out stage is still alive; a second timeout while the first is alive ends the run as
-  `stalled`, and the next run waits for one of them (`StageTracker`). #5's interactive corner detection uses Vision
+  `stalled`, and the next run waits for one of them (`StageTracker`; each wait is logged, so a stage that never
+  returns and blocks every later run until a relaunch shows in the log). #5's interactive corner detection uses Vision
   outside the queue, so this rule covers processing only.
 - **Interruptions** (#97, T11): a known interruption does not count, an unknown end does. `ProcessingQueue.interruptNow()`
   is synchronous and callable from any thread: it gives the running attempt back (the counter and the backoff return to
   their values before the attempt), cancels the stage and ends the wait for it; a stage that returns later writes
   nothing. The counter's read-modify-writes and each attempt's state (running, finished, interrupted) sit behind one
   `Mutex` (N2): a refund happens only while its attempt runs, and a success marks the attempt finished and removes the
-  counter in one step. The scheduler's `pause()` calls it and cancels the run; `resume()` ends the pause and runs the
-  queue. The app pauses when the scene goes to the background on iOS and when the Mac app quits
+  counter in one step. The scheduler's `pause()` cancels the run and then calls it; a run cancelled after it counted
+  an attempt and before its stage started gives the attempt back and starts no stage, so a pause between the decision
+  and the stage is not lost. `resume()` ends the pause and runs the queue. The app pauses when the scene goes to the background on iOS and when the Mac app quits
   (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
   suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
   power loss during a stage still counts.

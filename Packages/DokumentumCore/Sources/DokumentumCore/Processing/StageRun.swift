@@ -158,16 +158,26 @@ final class StageTracker: Sendable {
             }
             await withTaskCancellationHandler {
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                    let resumeNow = state.withLock { state in
-                        if state.isStartable || state.cancelledWaiters.remove(id) != nil { return true }
+                    let waitingFor = state.withLock { state -> (interrupted: Int, timedOut: Int)? in
+                        if state.isStartable || state.cancelledWaiters.remove(id) != nil { return nil }
                         state.waiters[id] = continuation
-                        return false
+                        return (
+                            state.abandoned.values.count(where: { $0 == .interrupted }),
+                            state.abandoned.values.count(where: { $0 == .timedOut })
+                        )
                     }
-                    if resumeNow {
+                    guard let waitingFor else {
                         continuation.resume()
-                    } else {
-                        onWait?()
+                        return
                     }
+                    // Visible in the field: a stage that ignores its cancellation and never returns blocks every
+                    // later run until the app is relaunched (review N3 of #120).
+                    Log.processing.notice(
+                        """
+                        Processing waits for stages that were let go: interrupted \
+                        \(waitingFor.interrupted, privacy: .public), timed out \(waitingFor.timedOut, privacy: .public)
+                        """)
+                    onWait?()
                 }
             } onCancel: {
                 let continuation = state.withLock { state in
@@ -218,6 +228,23 @@ final class StageTracker: Sendable {
         state.withLock { state in
             if state.current?.id == id { state.current = nil }
         }
+    }
+
+    /// The run was cancelled after `begin` and before the stage's task was created: the stage never starts. Returns
+    /// the stage if it was still current (the caller gives its attempt back); if `interruptCurrent()` took it first,
+    /// its mark as let go is removed, since no task will ever end it.
+    func cancelBeforeStart(_ id: UInt64) -> Current? {
+        let (current, waiters) = state.withLock { state -> (Current?, [CheckedContinuation<Void, Never>]) in
+            if let current = state.current, current.id == id {
+                state.current = nil
+                return (current, [])
+            }
+            guard state.abandoned.removeValue(forKey: id) != nil else { return (nil, []) }
+            defer { state.waiters = [:] }
+            return (nil, Array(state.waiters.values))
+        }
+        for waiter in waiters { waiter.resume() }
+        return current
     }
 
     /// The watchdog fired: the stage is let go; it counts as alive until it ends.

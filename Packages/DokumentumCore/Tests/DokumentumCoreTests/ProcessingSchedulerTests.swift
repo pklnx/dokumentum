@@ -104,10 +104,15 @@ struct ProcessingSchedulerTests {
             queuedAtEnd.withLock { $0.append(scheduler.isQueued) }
             setup.runs.fire()
         }
+        let requests = TestSignal()
+        scheduler.didRequestRun = { requests.fire() }
 
         scheduler.start()
         await gate.reached()
         setup.insertions.yield()
+        // The insertion reaches the scheduler through its subscription task: wait until it was handled, so it
+        // cannot land after the gate is released and queue a third run (#119).
+        await requests.wait(for: 2, "the insertion was not handled")
         for _ in 0..<5 { scheduler.requestRun() }
         #expect(runner.started.count == 1, "no second run while the first is going on")
         gate.release()

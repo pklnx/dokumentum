@@ -250,7 +250,7 @@ public actor ProcessingQueue: ProcessingRunning {
     ) async -> Bool {
         let id = candidate.instanceID
         // One job at a time (N1): a stage that was let go and has not returned blocks the next one.
-        guard await stages.waitUntilStartable() else { return false }
+        guard await stages.waitUntilStartable(), !Task.isCancelled else { return false }
         let loaded: LoadedFile
         switch Self.loadFile(of: id, in: container) {
         case .file(let file): loaded = file
@@ -358,6 +358,13 @@ public actor ProcessingQueue: ProcessingRunning {
         let stages = stages
         let stage = stage
         let id = stages.begin(attempt: attempt, outcome: outcome)
+        // A pause that came before `begin` found no stage to interrupt; it cancelled the run first, so it is seen
+        // here, and the stage never starts (review B1 of #120). One that comes after `begin` interrupts the stage.
+        if Task.isCancelled {
+            _ = stages.cancelBeforeStart(id)
+            failures.refund(attempt)
+            return .interrupted
+        }
         watchdog.kick()
         let task = Task.detached {
             let result: StageOutcome

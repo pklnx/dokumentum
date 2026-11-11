@@ -48,6 +48,9 @@ public final class ProcessingScheduler {
     public private(set) var scheduledWake: Date?
     /// Called on the main actor after each run, with its report. For tests, which wait for it instead of polling.
     public var didFinishRun: (@MainActor (ProcessingReport) -> Void)?
+    /// Called on the main actor at each `requestRun()`, whatever its trigger. For tests, which wait for a trigger
+    /// to be handled instead of polling.
+    public var didRequestRun: (@MainActor () -> Void)?
 
     public init(
         runner: any ProcessingRunning, observer: StoreChangeObserver, insertions: AsyncStream<Void>,
@@ -105,6 +108,7 @@ public final class ProcessingScheduler {
 
     /// Runs the queue now, or once more after the run that is going on. Nothing while paused: `resume()` runs.
     public func requestRun() {
+        didRequestRun?()
         guard !isPaused else { return }
         guard running == nil else {
             isQueued = true
@@ -118,8 +122,10 @@ public final class ProcessingScheduler {
     public func pause() {
         isPaused = true
         isQueued = false
-        runner.interruptNow()
+        // The run first: a stage the run is about to start then sees the cancellation, and one already started is
+        // interrupted (review B1 of #120).
         running?.cancel()
+        runner.interruptNow()
     }
 
     /// Ends a pause and starts a run. Without a pause, it requests a run like any trigger.
