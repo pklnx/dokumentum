@@ -382,9 +382,25 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
 - **Triggers** (`ProcessingScheduler`, stores on disk only): launch, every save that inserts a `Document` (an import,
   from any context), `scenePhase == .active` (`resume()`), every debounced store change, and the earlier of the next
   expiry of another device's claim and the next backoff end that a run waited for (`ProcessingReport.nextWake`), while
-  the app runs. No run starts while paused. One run at a time; requests during a run queue one more. The
+  the app runs (on iOS also while a background task holds the work). No run starts while paused. One run at a time; requests during a run queue one more. The
   queue's own save is a store change; the run it triggers writes nothing, and the chain ends there. A document left in
   `processing` by a quit is processed again by the launch run.
+- **Background on iOS** (#6, part 5, T13, N4, P3; `BackgroundProcessing`): two background tasks, both only calling
+  the scheduler's `resume()` and `pause()`. **Continued processing** (`BGContinuedProcessingTask`, strategy `.fail`,
+  identifiers `space.pklnx.Dokumentum.continued.<UUID>`) is asked for only when a user's import on this device
+  completes: the app's importer is wrapped (`BackgroundImportNotifying`), and every user import (files, photos, the
+  share queue, #5's scans) goes through it, while a CloudKit import never does, so the system's progress ("Processing
+  documents", "3 of 12 documents") never appears for documents of the other device. Its progress counts the user's
+  documents that are no longer open (`OpenDocuments`), updated after each store change; it completes with success
+  when the runs drain (`ProcessingScheduler.didDrain`). If the system cannot start it now, the work waits for the
+  foreground or the processing task. **The processing task** (`space.pklnx.Dokumentum.backgroundProcessing`,
+  `BGProcessingTask`, no power or network needed) is asked for when the scene goes to the background with open
+  documents and no task holds the work; the scheduler is paused then as before, and the task resumes it until the
+  runs drain. While a task holds the work, the background does not pause. An **expiry** pauses (the attempt is given
+  back) and fails the task; in the foreground the queue goes on at once. Each identifier is registered once per
+  process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
+  two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
+  another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 

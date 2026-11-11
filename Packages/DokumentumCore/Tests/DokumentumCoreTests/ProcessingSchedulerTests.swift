@@ -242,6 +242,49 @@ struct ProcessingSchedulerTests {
         #expect(runner.interrupts.count == 1)
     }
 
+    /// `didDrain` (the background tasks' hook, plan of #6, part 5) comes once when the runs end and none follows:
+    /// not after each run of a queued chain, and not after a run that `pause()` ended.
+    @Test func theRunsDrainOnceAndNotWhenPaused() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+        let drains = TestSignal()
+        let pausedAtDrain = Mutex<[Bool]>([])
+        scheduler.didDrain = {
+            pausedAtDrain.withLock { $0.append(scheduler.isPaused) }
+            drains.fire()
+        }
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.requestRun()
+        gate.release()
+        await setup.runs.wait(for: 2)
+        await drains.wait(for: 1, "the runs did not drain")
+        #expect(drains.count == 1, "a queued chain of two runs drained twice")
+
+        let held = Checkpoint()
+        defer { held.release() }
+        let pausedRunner = StubRunner(gate: held)
+        let paused = try makeScheduler(runner: pausedRunner)
+        defer { paused.scheduler.stop() }
+        let pausedDrains = TestSignal()
+        paused.scheduler.didDrain = { pausedDrains.fire() }
+        paused.scheduler.start()
+        await held.reached()
+        paused.scheduler.pause()
+        held.release()
+        await paused.runs.wait(for: 1)
+        #expect(pausedDrains.count == 0, "a run ended by pause() drained")
+        paused.scheduler.resume()
+        await paused.runs.wait(for: 2)
+        await pausedDrains.wait(for: 1, "the run after resume() did not drain")
+        #expect(pausedAtDrain.withLock { $0 } == [false])
+    }
+
     /// With the real queue: a failed attempt (#97 point 2) names its backoff, and the scheduler's timer runs the
     /// queue again when it ends, not before.
     @Test func aFailedAttemptWakesTheSchedulerWhenItsBackoffEnds() async throws {
