@@ -5,14 +5,19 @@
     python3 scripts/check-localization.py <derived data path>  # after a build of the app
     python3 scripts/check-localization.py --self-test
 
---catalog reads Dokumentum/Localizable.xcstrings alone: every entry needs a finished German
-translation (a plural needs German `one` and `other`, otherwise German reads "1 Dokumente"), and no
-entry may be `stale` (the code no longer uses it). This is the `localization` check.
+Two catalogs, one per target that shows text: the app's Dokumentum/Localizable.xcstrings and the
+share extension's DokumentumShare/Localizable.xcstrings (plan of #4, part 4).
 
-The build mode also finds strings that never reached the catalog. Swift writes the strings it
-localizes into `.stringsdata` files during the build. Xcode's IDE adds new ones to the String
-Catalog automatically, but `xcodebuild` does not, so a new UI text could ship untranslated. This
-mode compares the two; ci_scripts/ci_post_xcodebuild.sh runs it in Xcode Cloud.
+--catalog reads the catalogs alone: every entry needs a finished German translation (a plural needs
+German `one` and `other`, otherwise German reads "1 Dokumente"), and no entry may be `stale` (the
+code no longer uses it). This is the `localization` check.
+
+The build mode also finds strings that never reached their catalog. Swift writes the strings it
+localizes into `.stringsdata` files during the build, per target. Xcode's IDE adds new ones to the
+String Catalog automatically, but `xcodebuild` does not, so a new UI text could ship untranslated.
+This mode compares each target's strings with its own catalog; ci_scripts/ci_post_xcodebuild.sh runs
+it in Xcode Cloud. The app's strings must be there. The extension is built for iOS only, so a macOS
+build has none of its strings; they are required once its target was built (its build folder exists).
 
 Exit code 1 lists the keys.
 """
@@ -20,9 +25,15 @@ import json
 import pathlib
 import sys
 
-CATALOG = pathlib.Path(__file__).resolve().parent.parent / "Dokumentum" / "Localizable.xcstrings"
-# The app target only: the project folder <Project>.build holds one <Target>.build per target.
-STRINGSDATA = "**/Dokumentum.build/*/Dokumentum.build/**/*.stringsdata"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+# Per target: its catalog, where its .stringsdata are (the project folder <Project>.build holds one
+# <Target>.build per target), and whether a build must always have produced them.
+TARGETS = [
+    {"name": "Dokumentum", "catalog": ROOT / "Dokumentum" / "Localizable.xcstrings",
+     "build": "**/Dokumentum.build/*/Dokumentum.build", "always": True},
+    {"name": "DokumentumShare", "catalog": ROOT / "DokumentumShare" / "Localizable.xcstrings",
+     "build": "**/Dokumentum.build/*/DokumentumShare.build", "always": False},
+]
 
 
 def german_units(entry):
@@ -99,43 +110,129 @@ def self_test():
     for name, whole, count in cases:
         problems = catalog_problems(whole)
         assert len(problems) == count, f"{name}: expected {count} problem(s), got {problems}"
-    print(f"self-test passed ({len(catalog) + 1 + len(cases)} cases)")
+    build_cases = self_test_targets(fine)
+    print(f"self-test passed ({len(catalog) + 1 + len(cases) + build_cases} cases)")
 
 
-def load_catalog():
-    return json.loads(CATALOG.read_text(encoding="utf-8"))["strings"]
+def self_test_targets(fine):
+    """Both modes over two targets in a temporary folder: each target against its own catalog, and the
+    extension's strings required only once it was built. Returns the number of cases."""
+    import contextlib
+    import io
+    import tempfile
+
+    def write_json(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    def stringsdata(root, target, keys):
+        write_json(root / "derived" / "Build/Intermediates.noindex/Dokumentum.build/Debug-iphonesimulator"
+                   / f"{target}.build" / "Objects-normal/arm64/View.stringsdata",
+                   {"source": f"/src/{target}/View.swift",
+                    "tables": {"Localizable": [{"key": key} for key in keys]}})
+
+    def run(check, *arguments):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return check(*arguments)
+
+    cases = 0
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        targets = [
+            {"name": "App", "catalog": root / "App.xcstrings", "build": "**/Dokumentum.build/*/App.build", "always": True},
+            {"name": "Share", "catalog": root / "Share.xcstrings", "build": "**/Dokumentum.build/*/Share.build",
+             "always": False},
+        ]
+        write_json(targets[0]["catalog"], {"strings": {"Inbox": fine}})
+        write_json(targets[1]["catalog"], {"strings": {"Saving": fine}})
+        assert run(check_catalog, targets) == 0, "two fine catalogs pass"
+        write_json(targets[1]["catalog"], {"strings": {"Saving": {}}})
+        assert run(check_catalog, targets) == 1, "an untranslated entry in the second catalog fails"
+        write_json(targets[1]["catalog"], {"strings": {"Saving": fine}})
+        assert run(check_catalog, targets + [{**targets[1], "catalog": root / "missing.xcstrings"}]) == 1, \
+            "a missing catalog fails"
+        cases += 3
+
+        derived = root / "derived"
+        stringsdata(root, "App", ["Inbox"])
+        assert run(check_build, derived, targets) == 0, "the extension not built (macOS) is skipped"
+        stringsdata(root, "Share", ["Saving"])
+        assert run(check_build, derived, targets) == 0, "each target against its own catalog"
+        stringsdata(root, "Share", ["Inbox"])
+        assert run(check_build, derived, targets) == 1, "the app's string does not count for the extension"
+        stringsdata(root, "Share", [])
+        assert run(check_build, derived, targets) == 1, "the extension built without strings fails"
+        stringsdata(root, "App", [])
+        stringsdata(root, "Share", ["Saving"])
+        assert run(check_build, derived, targets) == 1, "the app without strings fails"
+        cases += 5
+    return cases
 
 
-def check_catalog():
-    problems = catalog_problems(load_catalog())
-    for problem in problems:
-        print(f"error: {CATALOG.name}: {problem}")
-    if problems:
+def load_catalog(path):
+    return json.loads(path.read_text(encoding="utf-8"))["strings"]
+
+
+def relative(path):
+    return path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+
+
+def check_catalog(targets=TARGETS):
+    failed = False
+    for target in targets:
+        name = relative(target["catalog"])
+        if not target["catalog"].is_file():
+            print(f"error: {name} is missing")
+            failed = True
+            continue
+        problems = catalog_problems(load_catalog(target["catalog"]))
+        for problem in problems:
+            print(f"error: {name}: {problem}")
+        if problems:
+            failed = True
+        else:
+            print(f"{name}: every entry has a finished German translation, none is stale.")
+    if failed:
         print("Fix them in Xcode (the catalog editor) or by hand.")
         return 1
-    print(f"{CATALOG.name}: every entry has a finished German translation, none is stale.")
     return 0
 
 
-def check_build(derived_data):
+def used_strings(derived_data, build_pattern):
+    """The keys of the Localizable table in a target's .stringsdata, each with a file that uses it, and whether
+    the target's build folder exists at all."""
     used = {}
-    for path in derived_data.glob(STRINGSDATA):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        for entry in data.get("tables", {}).get("Localizable", []):
-            used.setdefault(entry["key"], data.get("source", str(path)))
-    if not used:
-        print(f"error: no UI strings found in .stringsdata files under {derived_data}. "
-              f"Build the app first, with -derivedDataPath {derived_data}.")
-        return 1
-    catalog = load_catalog()
-    problems = [f"  {key!r}  (used in {pathlib.Path(used[key]).name})" for key in untranslated(used, catalog)]
-    if problems:
-        print(f"UI strings without a German translation in {CATALOG.name}:")
-        print("\n".join(problems))
-        print("Add them in Xcode (the catalog editor lists new strings after a build) or by hand.")
-        return 1
-    print(f"All {len(used)} UI strings have a German translation.")
-    return 0
+    folders = list(derived_data.glob(build_pattern))
+    for folder in folders:
+        for path in folder.glob("**/*.stringsdata"):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for entry in data.get("tables", {}).get("Localizable", []):
+                used.setdefault(entry["key"], data.get("source", str(path)))
+    return used, bool(folders)
+
+
+def check_build(derived_data, targets=TARGETS):
+    failed = False
+    for target in targets:
+        used, built = used_strings(derived_data, target["build"])
+        if not used:
+            if target["always"] or built:
+                print(f"error: no UI strings of {target['name']} found in .stringsdata files under {derived_data}. "
+                      f"Build the app first, with -derivedDataPath {derived_data}.")
+                failed = True
+            else:
+                print(f"{target['name']} was not built (an iOS-only target in another platform's build); skipped.")
+            continue
+        catalog = load_catalog(target["catalog"])
+        problems = [f"  {key!r}  (used in {pathlib.Path(used[key]).name})" for key in untranslated(used, catalog)]
+        if problems:
+            print(f"UI strings of {target['name']} without a German translation in {relative(target['catalog'])}:")
+            print("\n".join(problems))
+            print("Add them in Xcode (the catalog editor lists new strings after a build) or by hand.")
+            failed = True
+        else:
+            print(f"All {len(used)} UI strings of {target['name']} have a German translation.")
+    return 1 if failed else 0
 
 
 def main(arguments):
