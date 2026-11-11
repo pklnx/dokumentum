@@ -2,18 +2,19 @@ import SwiftUI
 
 #if os(macOS)
     /// A Mac placeholder for an empty list or detail ("No document selected", "Inbox empty", "Still downloading"), in
-    /// place of `ContentUnavailableView` (#82; maintainer decisions P1 and P2). The system view draws its title in the
-    /// secondary colour, 3.11:1 on white in light mode, and gives VoiceOver its symbol and title as one element, which
-    /// the Mac audit judges as a whole ("Contrast failed"). Here the title is in the primary colour and is the element
-    /// with the identifier; the symbol is decoration, hidden from VoiceOver. Fonts, spacings and the colours of the
-    /// symbol and the description are those of `ContentUnavailableView` on macOS 27, measured by rendering both views
-    /// with the app's strings in English and German, so only the title's colour changes. The iPhone keeps
-    /// `ContentUnavailableView`, whose title is already primary there.
+    /// place of `ContentUnavailableView` (#82; maintainer decisions P1 and P2). The system view draws its title and its
+    /// description in the secondary colour, 3.11:1 and 3.95:1 on white in light mode, and gives VoiceOver its symbol
+    /// and title as one element, which the Mac audit judges as a whole ("Contrast failed"). Here the title (#82, P1)
+    /// and the description (#89, maintainer decision of 2026-11-11) are in the primary colour, and the title is the
+    /// element with the identifier; the symbol is decoration, hidden from VoiceOver. Fonts and spacings, and the
+    /// symbol's tertiary colour, are those of `ContentUnavailableView` on macOS 27, measured by rendering both views
+    /// with the app's strings in English and German, so only the colours of the title and the description change. The
+    /// iPhone keeps `ContentUnavailableView`, whose title is already primary there.
     struct PlaceholderView: View {
         let title: LocalizedStringKey
         let systemImage: String
         var description: Text?
-        /// On the title: the element that UI tests and the audit find.
+        /// On the title: the element that UI tests and the audit find. The description gets `<identifier>.description`.
         var identifier: String?
 
         var body: some View {
@@ -29,11 +30,11 @@ import SwiftUI
                     .foregroundStyle(.primary)
                     .padding(.top, 24)
                 if let description {
-                    // Unchanged from the system view: the secondary colour.
-                    description
+                    // The system view's font and spacing, in the primary colour (#89).
+                    descriptionText(description)
                         .font(.system(size: 15))
                         .lineSpacing(1)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .padding(.top, 6)
                         .padding(.bottom, 12)
                 }
@@ -51,6 +52,15 @@ import SwiftUI
                 Text(title).accessibilityIdentifier(identifier)
             } else {
                 Text(title)
+            }
+        }
+
+        @ViewBuilder
+        private func descriptionText(_ description: Text) -> some View {
+            if let identifier {
+                description.accessibilityIdentifier("\(identifier).description")
+            } else {
+                description
             }
         }
     }

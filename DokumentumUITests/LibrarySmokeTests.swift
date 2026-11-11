@@ -28,6 +28,8 @@ final class LibrarySmokeTests: XCTestCase {
     private static let waterBill = 3
     private static let accountStatement = 4
     private static let carInsurance = 7
+    /// Scanned receipt (Inbox, a file that is not a PDF).
+    private static let scannedReceipt = 9
 
     override func setUp() {
         continueAfterFailure = false
@@ -97,6 +99,23 @@ final class LibrarySmokeTests: XCTestCase {
             ui.element("documentDetail.stillDownloading").waitForExistence(timeout: 20), "no “Still downloading”")
         XCTAssertFalse(ui.element("documentDetail.pdf").exists)
         ui.attachWindowScreenshot("6-still-downloading", to: self)
+        #if os(macOS)
+            // The placeholder's title and description are primary and reach 4.5:1 (#82 P1, #89), measured from
+            // their own pixels: the audit fails regular-weight text in light whatever its colour (plan of #89).
+            ui.assertTextContrast("documentDetail.stillDownloading", in: self)
+            ui.assertTextContrast("documentDetail.stillDownloading.description", in: self)
+
+            // A file that is not a PDF says it cannot be shown (#89). The Inbox does not list the water bill, so
+            // the selection clears first.
+            ui.activate("sidebar.inbox")
+            ui.activate(Self.documentRow(Self.scannedReceipt))
+            XCTAssertTrue(
+                ui.element("documentDetail.unreadable").waitForExistence(timeout: 20), "no “This PDF cannot be shown”")
+            XCTAssertFalse(ui.element("documentDetail.pdf").exists)
+            ui.attachWindowScreenshot("7-unreadable", to: self)
+            ui.assertTextContrast("documentDetail.unreadable", in: self)
+            ui.assertTextContrast("documentDetail.unreadable.description", in: self)
+        #endif
     }
 
     /// Every sidebar row (Library, tags, correspondents, types, Trash) has a VoiceOver value that starts with
