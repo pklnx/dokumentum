@@ -37,7 +37,7 @@ final class ScanSmokeTests: XCTestCase {
             let row = rows.matching(NSPredicate(format: "label BEGINSWITH %@", "Scan ")).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 20), "no “Scan …” row in the Inbox")
             XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)).count, 1, "not one document")
-            XCTAssertTrue(ui.element("sidebar.inbox").exists || ui.app.navigationBars.firstMatch.exists)
+            XCTAssertTrue(ui.element("documentList").exists, "the row is not in the document list")
             ui.attachWindowScreenshot("scan-3-inbox", to: self)
         #endif
     }
