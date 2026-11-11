@@ -17,7 +17,8 @@ import SwiftData
 /// grows with the pass, not with the archive. `RepairSQLTests` pins it.
 ///
 /// Records sharing an `instanceID` (a copied record) keep the first one read, as `RepairPlan.apply` indexes
-/// them, so a check and the write it allows meet the same record.
+/// them, so a check and the write it allows meet the same record. Documents are read in `RowRecords.oldestFirst`
+/// order everywhere, so the plan, the apply and the check keep the same copy.
 public enum RepairStore {
     /// The light snapshot of the store as `context` sees it.
     public static func snapshot(in context: ModelContext) throws -> RepairSnapshot {
@@ -31,7 +32,7 @@ public enum RepairStore {
         // Never `file`, `thumbnail` or `text`: prefetching them would load the blobs.
         var documents = FetchDescriptor<Document>()
         documents.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
-        for document in try context.fetch(documents) { reader.add(document) }
+        for document in RowRecords.oldestFirst(try context.fetch(documents)) { reader.add(document) }
         for file in try context.fetch(FetchDescriptor<DocumentFile>(predicate: #Predicate { $0.document == nil })) {
             reader.add(file)
         }

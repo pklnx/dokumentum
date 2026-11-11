@@ -310,6 +310,11 @@ Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.
 
 The check before the save (`RowState`, `RowState.read`) lives in `DokumentumCore/Store/RowStates.swift`, one copy for
 both background writers: the repair and the processing queue. `RowStateTests` pins its fields against the schema.
+**Copies sharing an `instanceID`** (a copied record) are read by one rule, `RowRecords.oldestFirst`: every reader keeps
+the oldest `createdAt`, and among equal dates the first row the store returns. The repair's plan (`RepairStore.read`),
+its apply and check, and the queue's scan, fetches and check all follow it, so a plan, its write and the check before
+the save meet the same row; the other copy takes part in neither (`SharedInstanceIDTests`). The order is applied in
+memory after the fetch, so the SQL the tests pin stays as it is.
 
 **The processing queue** (#4, part 5). `ProcessingClaimRules` (DokumentumKit) decides per document; `ProcessingQueue`
 (DokumentumCore, an actor) carries it out, one document at a time, off the main actor. Every document is claimed at
@@ -323,8 +328,7 @@ text record waits, and processing never creates a text. Each attempt is counted 
 counts too; a stage that returns clears the counter. The third failed attempt writes `failed`, and an attempt beyond
 the third (the earlier ones never returned) writes `failed` without running the stage, so such a PDF cannot crash every
 launch. Another device whose own counter is below 3 still tries a `failed` document. A counter also goes when its
-document is seen `done` or gone. Every fetch of the queue, and the check before its save, picks the oldest row by
-`createdAt`, as the scan does, so a copy sharing a document's `instanceID` never mixes into its writes.
+document is seen `done` or gone. Of copies sharing an `instanceID`, the queue uses the one the rule above names.
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.

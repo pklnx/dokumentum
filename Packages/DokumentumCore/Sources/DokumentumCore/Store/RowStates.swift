@@ -232,15 +232,24 @@ struct RowRecords {
     }
 
     /// The documents with these `instanceID`s, with their metadata but never `file`, `thumbnail` or `text`:
-    /// prefetching them would load the blobs. Oldest first by `createdAt`, so of two copies sharing an `instanceID`
-    /// the first one kept is the one the processing queue fetches (review A of #96, N2). Sorted after the fetch, so
-    /// the SQL stays the one `RepairSQLTests` pins.
+    /// prefetching them would load the blobs. In `oldestFirst` order.
     static func fetchDocuments(_ instanceIDs: Set<UUID>, in context: ModelContext) throws -> [Document] {
         guard !instanceIDs.isEmpty else { return [] }
         let ids = Array(instanceIDs)
         var descriptor = FetchDescriptor<Document>(predicate: #Predicate { ids.contains($0.instanceID) })
         descriptor.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
-        return try context.fetch(descriptor).sorted { $0.createdAt < $1.createdAt }
+        return oldestFirst(try context.fetch(descriptor))
+    }
+
+    /// **The one rule for documents sharing an `instanceID`** (a copied record): every reader keeps the first of
+    /// this order, the oldest `createdAt`, and among equal dates the first the store returned. The repair's plan
+    /// (`RepairStore.read`), its apply and check (`fetchDocuments`, `RowState.read`) and the processing queue's scan
+    /// and fetches (`ProcessingQueue`) all use it, so a plan, its write and the check before the save meet the same
+    /// row (review A of #96, N2; review B, B-D1). Sorted in memory after the fetch, so the SQL that `RepairSQLTests`
+    /// pins stays as it is.
+    static func oldestFirst(_ documents: [Document]) -> [Document] {
+        documents.enumerated().sorted { ($0.element.createdAt, $0.offset) < ($1.element.createdAt, $1.offset) }
+            .map(\.element)
     }
 
     /// The records `keys` name, with every metadata record. Blobs only while unlinked (`#Predicate { $0.document ==

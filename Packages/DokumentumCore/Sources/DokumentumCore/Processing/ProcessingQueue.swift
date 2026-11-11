@@ -304,15 +304,16 @@ extension ProcessingQueue {
     }
 
     /// Every document that is not `done`, oldest first: only `Document` rows (`ProcessingSQLTests`). An unknown
-    /// state is included and skipped by the rules. Records sharing an `instanceID` keep the first one read.
+    /// state is included and skipped by the rules. Records sharing an `instanceID` keep the first in
+    /// `RowRecords.oldestFirst` order, as every other reader does.
     static func scan(in container: ModelContainer) throws -> [Candidate] {
         let context = ModelContext(container)
         let done = ProcessingState.done.storedValue ?? "done"
-        let descriptor = FetchDescriptor<Document>(
-            predicate: #Predicate { $0.processingStateRaw != done }, sortBy: [SortDescriptor(\.createdAt)])
+        let descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.processingStateRaw != done })
         var seen: Set<UUID> = []
         var candidates: [Candidate] = []
-        for document in try context.fetch(descriptor) where seen.insert(document.instanceID).inserted {
+        for document in RowRecords.oldestFirst(try context.fetch(descriptor))
+        where seen.insert(document.instanceID).inserted {
             // `!= nil` reads the link from the document row; it does not load the blob.
             let input = ProcessingClaimInput(
                 state: document.processingState, deviceID: document.processingDeviceID,
@@ -384,12 +385,11 @@ extension ProcessingQueue {
         }
     }
 
-    /// The document with `instanceID`, without its blobs: the oldest by `createdAt`, as the scan and
-    /// `RowState.read` pick it, so a copy sharing the `instanceID` never mixes into one write (review A of #96, N2).
+    /// The document with `instanceID`, without its blobs: the first in `RowRecords.oldestFirst` order, as the
+    /// scan, `RowState.read` and the repair pick it, so a copy sharing the `instanceID` never mixes into one write.
+    /// Usually one row; all copies are fetched so the order can be applied.
     static func fetch(_ instanceID: UUID, in context: ModelContext) throws -> Document? {
-        var descriptor = FetchDescriptor<Document>(
-            predicate: #Predicate { $0.instanceID == instanceID }, sortBy: [SortDescriptor(\.createdAt)])
-        descriptor.fetchLimit = 1
-        return try context.fetch(descriptor).first
+        let descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == instanceID })
+        return RowRecords.oldestFirst(try context.fetch(descriptor)).first
     }
 }
