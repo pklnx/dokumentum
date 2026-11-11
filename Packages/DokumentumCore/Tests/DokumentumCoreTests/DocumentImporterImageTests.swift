@@ -4,6 +4,7 @@ import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Testing
+import UniformTypeIdentifiers
 
 @testable import DokumentumCore
 
@@ -195,6 +196,50 @@ struct DocumentImporterImageTests {
         #expect(
             firstResult
                 == ImageImportResult(outcome: .duplicate(of: document.instanceID, title: "Zwei", isTrashed: false)))
+    }
+
+    /// A multi-page TIFF through Files, ⌘O or drop (no type) and through the share queue (a declared type) is one
+    /// document with a page per frame (#90); the hash is still the file's bytes, so the same TIFF again is a
+    /// duplicate.
+    @Test(arguments: [("Fax.tiff", nil), ("Fax", UTType.tiff)] as [(String, UTType?)])
+    func aMultiPageTIFFFileBecomesOneDocumentWithAPagePerFrame(fileName: String, contentType: UTType?) async throws {
+        let container = try TestSupport.makeContainer()
+        let importer = Self.importer(container)
+        let saves = SaveCounter(container)
+        let tiff = TestImage.makeTIFF(frames: PDFBuilderTests.faxFrames)
+
+        let outcome = await importer.importFile(data: tiff, fileName: fileName, contentType: contentType, source: .file)
+
+        let document = try #require(try Self.documents(in: container).first)
+        #expect(try Self.documents(in: container).count == 1)
+        #expect(outcome == .imported(instanceID: document.instanceID))
+        #expect(saves.count == 1)
+        #expect(document.source == .image)
+        #expect(document.title == "Fax")
+        #expect(document.pageCount == 3)
+        #expect(document.contentHash == ContentHash.sha256(tiff), "the hash of the TIFF as received")
+        let pdf = try #require(document.file?.pdfData)
+        #expect(TestPDFReader.pageSizes(pdf) == PDFBuilderTests.faxPageSizes)
+
+        let again = await importer.importFile(data: tiff, fileName: fileName, contentType: contentType, source: .file)
+
+        #expect(again == .duplicate(of: document.instanceID, title: "Fax", isTrashed: false))
+        #expect(try Self.documents(in: container).count == 1)
+    }
+
+    /// A TIFF picked in Photos together with a photo: its frames follow the photo (#90).
+    @Test func aTIFFAmongPhotosGivesAPagePerFrame() async throws {
+        let container = try TestSupport.makeContainer()
+        let photos = [TestImage.make(width: 640, height: 480), TestImage.makeTIFF(frames: PDFBuilderTests.faxFrames)]
+
+        let result = await Self.importer(container).importImages(photos, fileName: "", title: "Foto", source: .image)
+
+        let document = try #require(try Self.documents(in: container).first)
+        #expect(result == ImageImportResult(outcome: .imported(instanceID: document.instanceID), leftOut: 0))
+        #expect(document.pageCount == 4)
+        #expect(document.contentHash == ContentHash.sha256(photos.reduce(Data(), +)))
+        let pdf = try #require(document.file?.pdfData)
+        #expect(TestPDFReader.pageSizes(pdf) == [CGSize(width: 595, height: 446)] + PDFBuilderTests.faxPageSizes)
     }
 
     /// A HEIC photo, the iPhone's format, where ImageIO can encode one to test with (not on every system).
