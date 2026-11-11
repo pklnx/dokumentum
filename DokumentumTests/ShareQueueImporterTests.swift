@@ -95,6 +95,34 @@
             }
         }
 
+        /// A PDF that the sending app declared as an image (#86): the bytes decide, so it keeps every page and is
+        /// stored as it came; the same bytes as a PDF afterwards are a duplicate of it.
+        @Test func aPDFItemLabelledAsAnImageKeepsItsPages() async throws {
+            try await withQueue { queue in
+                let container = try makeInMemoryContainer()
+                let documentImporter = DocumentImporter(container: container, deviceID: "DEVICE-A")
+                let pdf = SyntheticPDF.make(pages: [["Vertrag"], ["Seite 2"], ["Seite 3"]])
+                try queue.add(data: pdf, originalFileName: "Vertrag.png", typeIdentifier: "public.png")
+                let importer = ShareQueueImporter(runner: ShareQueueRunner(queue: queue, importer: documentImporter))
+
+                let report = try #require(await runOnce(importer))
+
+                let document = try #require(try documents(in: container).first)
+                #expect(try documents(in: container).count == 1)
+                #expect(report.imported == [document.instanceID])
+                #expect(document.pageCount == 3, "every page, not the first one rasterized")
+                #expect(document.source == .file)
+                #expect(document.file?.pdfData == pdf, "stored as it came")
+                #expect(document.contentHash == ContentHash.sha256(pdf))
+                #expect(names(in: queue.itemsFolder).isEmpty, "the item is removed after the save")
+                #expect(names(in: queue.failedFolder).isEmpty)
+
+                let again = await documentImporter.importFile(
+                    data: pdf, fileName: "Vertrag.pdf", contentType: .pdf, source: .file)
+                #expect(again == .duplicate(of: document.instanceID, title: "Vertrag", isTrashed: false))
+            }
+        }
+
         @Test func aDuplicateItemIsRemovedAndNamedInTheNotice() async throws {
             try await withQueue { queue in
                 let container = try makeInMemoryContainer()

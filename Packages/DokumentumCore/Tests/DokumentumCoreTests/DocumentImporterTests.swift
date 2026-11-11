@@ -66,15 +66,18 @@ struct DocumentImporterTests {
         #expect(try context.fetchCount(FetchDescriptor<DocumentThumbnail>()) == 0)
     }
 
+    /// Image bytes, so the declared type decides (PDF bytes would be a PDF without it, #86).
     @Test func aDeclaredTypeCountsWithoutAnExtension() async throws {
         let container = try TestSupport.makeContainer()
         let outcome = await Self.importer(container).importFile(
-            data: TestPDF.make(pages: ["x"]), fileName: "Scan", contentType: .pdf, source: .file)
+            data: TestImage.make(width: 400, height: 300), fileName: "Bon", contentType: .jpeg, source: .file)
         guard case .imported = outcome else {
             Issue.record("not imported: \(outcome)")
             return
         }
-        #expect(try Self.documents(in: container).map(\.title) == ["Scan"])
+        let document = try #require(try Self.documents(in: container).first)
+        #expect(document.title == "Bon")
+        #expect(document.source == .image)
     }
 
     @Test func theSameBytesUnderAnotherNameAreADuplicateAndOneChangedByteIsNot() async throws {
@@ -180,7 +183,7 @@ struct DocumentImporterTests {
         var data: Data {
             switch self {
             case .notAPDF: Data("Kein PDF, nur Text.".utf8)
-            case .wrongType: TestPDF.make(pages: ["x"])
+            case .wrongType: Data("Text".utf8)
             case .empty: Data()
             case .noPages: TestPDF.makeWithoutPages()
             case .passwordProtected: TestPDF.make(pages: ["Geheim"], userPassword: "geheim")
