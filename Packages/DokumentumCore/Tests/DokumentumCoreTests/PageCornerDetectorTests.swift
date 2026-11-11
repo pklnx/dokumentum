@@ -32,14 +32,17 @@ struct PageCornerDetectorTests {
         #expect(detection.confidence >= VisionPageCornerDetector.minimumConfidence)
     }
 
-    /// The segmentation request itself (T1), on macOS only: the simulator's answers with confidence 0, and so
-    /// may a virtual Mac, so the test is skipped then.
+    /// The segmentation request itself (T1), on macOS only: the simulator's does not work, and a virtual Mac's
+    /// may answer with confidence 0, so the test is skipped (cancelled with the reason) then.
     @Test func theSegmentationRequestFindsThePageWhereItWorks() throws {
         #if os(macOS)
             let image = try Self.displayed(
                 TestPage.photographed(corners: TestPage.tiltedCorners, canvas: Self.canvas))
             let segmented = try #require(VisionPageCornerDetector.segmentation(in: image))
-            try #require(segmented.confidence > 0, "Vision's segmentation gives confidence 0 here (as in a VM)")
+            // Skipped, not failed, where the request does not work (the simulator's answer, maybe a VM's).
+            guard segmented.confidence > 0 else {
+                try Test.cancel("Vision's segmentation gives confidence 0 here (as in a VM)")
+            }
             #expect(VisionPageCornerDetector.accepts(segmented))
             #expect(VisionPageCornerDetector.detectNow(in: image)?.source == .documentSegmentation)
         #endif

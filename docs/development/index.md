@@ -554,8 +554,8 @@ scanner (part 2) build on it.
   0 when there is no page (macOS). On the iOS simulator it does not work (the whole image with confidence 0,
   or wrong corners with confidence 0.97 for an empty desk, varying between runs, #110), so the simulator
   build uses the rectangle request only (`targetEnvironment(simulator)`). Tests assert accuracy, not which
-  request answered; the one test of the segmentation request runs on macOS and is skipped when it reports
-  confidence 0.
+  request answered; the one test of the segmentation request runs on macOS and is skipped (`Test.cancel` with
+  the reason, not a failure) when it reports confidence 0.
 - **The edited import** (`DocumentImporter.importEditedImages`): an `EditedImage` is one picked image with
   the pages it keeps (`EditedPage`: frame and edit; a multi-page TIFF can keep a page per frame). Pages are
   decoded, cleaned and drawn one at a time. A photo is decoded at `min(original, 2400 / longer side of the
