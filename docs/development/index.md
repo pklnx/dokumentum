@@ -362,11 +362,35 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
   suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
   power loss during a stage still counts.
+- **The stage** (#6, part 2): `DocumentStage` opens the PDF with PDFKit (unreadable, locked or page-less fails the
+  attempt) and keeps the `PDFDocument` alive until it returns, because PDFKit cannot draw a page of a released document
+  (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters is a text page (T2);
+  every other page is rendered in grayscale at 2400 px on the long side, crop box and rotation applied (T3), and
+  recognised by `VisionTextRecognizer`: `RecognizeTextRequest`, `.accurate`, `[de-DE, en-US]`, language correction on
+  (T1; the only `import Vision` of the queue). Tests inject a stub recogniser (`TextRecognizing`); the few real-Vision
+  tests (`VisionRecognitionTests`) wait with a 120 s safety net, because the first recognition in a process loads the
+  model (24 s measured), and skip with the reason where Vision cannot recognise German and English. The document's
+  text is the pages' texts in page order **joined with a form feed** (`ExtractedText.pageSeparator`; search relies on
+  it), `""` when no page has text. `textSource` is `.pdfText` when every page was a text page, else `.vision`, also for
+  a blank document, so `.none` means "never extracted". The stage checks for cancellation before each page and reports
+  progress after it (and once before the first), one page image alive at a time.
+- **Re-queue of step 3's documents** (#6, part 2, T6, N7): `ProcessingRequeue`, run by the queue at the start of each
+  run until one pass completed, then never again on this device (the flag `processingRequeue.textV1` in the per-device
+  defaults). Every `Document` that is `done` with `textSource == .none` (trashed ones too) goes back to `pending` **with
+  this device's claim**, so this device processes it at once and the other device waits instead of taking it over; a
+  document the other device re-queued (`pending`) or processed (`.pdfText`, `.vision`) fails the re-check. Each is one
+  write under the discipline below; one that backs off leaves the flag unset, so the next run's pass tries again. The
+  re-queued documents without a thumbnail are recorded (`processingRequeue.thumbnailBackfill`) for part 4's backfill
+  (N3).
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
 - **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
-  (`pageCount` when it differs, `done` or `failed`). Each is one synchronous call with no `await`: a fresh context
+  (`pageCount` and `textSource` when they differ, the text record's `extractedText`, `done` or `failed`). The text is
+  capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page alone is
+  over it, at its last whole character; the report counts it (`textsCapped`) and it is logged. The result write's check
+  also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), so a save
+  to the text in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
   fetches the document, re-checks what the decision was based on (state, claim device and time, not trashed, the same
   file, a text record) and writes nothing if one differs; it sets only the changed fields, reads the row again in a
   second fresh context (`RowState.read`) and saves only if every field still equals what it fetched. Otherwise it rolls

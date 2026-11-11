@@ -26,6 +26,10 @@ public struct ProcessingReport: Equatable, Sendable {
     public var timedOut = 0
     /// Attempts ended by `interruptNow()` (#97 point 4): given back, not counted. The run ends with one.
     public var interrupted = 0
+    /// Results whose text was over `ExtractedText.byteLimit` and was stored cut (T7, N6; logged).
+    public var textsCapped = 0
+    /// Documents the one-time re-queue pass at the start of this run set back to `pending` (`ProcessingRequeue`).
+    public var requeued = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
@@ -59,14 +63,18 @@ public protocol ProcessingRunning: Sendable {
 ///    written;
 /// 2. **claim write**, unless the claim is already this device's and fresh (a document this device imported):
 ///    `processingDeviceID`, `processingClaimedAt`, `processingState = .processing`;
-/// 3. **the stages**, with no context open (`ProcessingStage`; step 3 has one, `InspectStage`). **The attempt is
+/// 3. **the stage**, with no context open (`ProcessingStage`; the app's is `DocumentStage`). **The attempt is
 ///    counted before the stage runs** (`ProcessingFailures`), so a crash or an out-of-memory kill during the stage
 ///    counts as well: an attempt that never returned stays counted. A stage that returns clears the counter; one
 ///    that throws or times out keeps its attempt and starts the backoff (1 min, then 10 min, `ProcessingBackoff`).
 ///    The third failed attempt writes `.failed`; an attempt beyond the third (the earlier ones never returned)
 ///    writes `.failed` without running the stage again, so such a PDF cannot crash every launch. `.failed` syncs,
 ///    but another device whose own counter is below 3 still tries it;
-/// 4. **result write**: `pageCount` if it differs and `processingState = .done`.
+/// 4. **result write**: `pageCount` and `textSource` if they differ, the text record's `extractedText` (capped at
+///    `ExtractedText.byteLimit` UTF-8 bytes) and `processingState = .done`, in one save. Its check before the save
+///    reads the document row and the text row (by key) again.
+///
+/// Before its scan, a run does this device's one-time re-queue pass (`ProcessingRequeue`) until it completed once.
 ///
 /// **A result is dropped** when the row no longer holds the claim the work ran under (another device took it
 /// over, whatever its clock says) or links another file than the one whose data was processed (a replaced or
@@ -149,15 +157,18 @@ public actor ProcessingQueue: ProcessingRunning {
     private let stallTimeout: Duration
     private let watchdogSleep: Sleep
     private let hooks: Hooks
+    private let requeue: ProcessingRequeue?
     /// The stage this queue waits for and the ones it let go.
     let stages: StageTracker
 
     /// - Parameters:
     ///   - sightings: this device's claim sightings; by default in the failure counter's defaults suite.
     ///   - watchdogSleep: sleeps the stall timeout; `Task.sleep` on the suspending clock in the app.
+    ///   - requeue: the one-time re-queue pass, run before the scan until it completed; `nil` runs none (tests of
+    ///     other things).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
-        stage: any ProcessingStage = InspectStage(),
+        stage: any ProcessingStage = DocumentStage(), requeue: ProcessingRequeue? = nil,
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
         stallTimeout: Duration = ProcessingQueue.stallTimeout,
         watchdogSleep: @escaping Sleep = { try await Task.sleep(for: $0, clock: .suspending) },
@@ -173,6 +184,7 @@ public actor ProcessingQueue: ProcessingRunning {
         self.watchdogSleep = watchdogSleep
         self.now = now
         self.hooks = hooks
+        self.requeue = requeue
         stages = StageTracker(onWait: hooks.waitsForStage)
     }
 
@@ -192,6 +204,10 @@ public actor ProcessingQueue: ProcessingRunning {
     @discardableResult
     public func run() async -> ProcessingReport {
         var report = ProcessingReport()
+        if let requeue, !requeue.isDone {
+            report.requeued = requeue.run(in: container, deviceID: deviceID, now: now()).requeued
+            report.saves += report.requeued
+        }
         let candidates: [Candidate]
         do {
             try Self.forgetCounters(failures, sightings: sightings, in: container)
@@ -291,11 +307,25 @@ public actor ProcessingQueue: ProcessingRunning {
                 report.interrupted += 1
                 return false
             }
-            let outcome = write(.result, id, expecting: held) { document in
+            let text = result.text.map { ($0.source, $0.capped()) }
+            let outcome = write(.result, id, expecting: held, checksText: text != nil) { document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
+                if let (source, capped) = text {
+                    document.textSource = source
+                    if let record = document.text, record.extractedText != capped.text {
+                        record.extractedText = capped.text
+                    }
+                }
                 document.processingState = .done
             }
-            if count(outcome, into: &report) { report.done += 1 }
+            if count(outcome, into: &report) {
+                report.done += 1
+                if let (_, capped) = text, capped.isCapped {
+                    report.textsCapped += 1
+                    Log.processing.notice(
+                        "A document's text was over \(ExtractedText.byteLimit, privacy: .public) bytes and was cut")
+                }
+            }
             return true
         case .threw(let error):
             guard failures.fail(attempt) else {
@@ -408,9 +438,12 @@ public actor ProcessingQueue: ProcessingRunning {
     }
 
     private func write(
-        _ kind: Write, _ instanceID: UUID, expecting held: Held, change: (Document) -> Void
+        _ kind: Write, _ instanceID: UUID, expecting held: Held, checksText: Bool = false,
+        change: (Document) -> Void
     ) -> WriteOutcome {
-        Self.write(kind, instanceID, expecting: held, in: container, beforeCheck: hooks.beforeCheck, change: change)
+        Self.write(
+            kind, instanceID, expecting: held, in: container, checksText: checksText, beforeCheck: hooks.beforeCheck,
+            change: change)
     }
 
     private static func log(_ report: ProcessingReport) {
@@ -533,10 +566,11 @@ extension ProcessingQueue {
         }
     }
 
-    /// One write, steps 1 to 5 of the discipline, without a suspension.
+    /// One write, steps 1 to 5 of the discipline, without a suspension. With `checksText` the write also changes the
+    /// document's text record, and step 4 reads that row again too, by key (`RowState.readText`).
     static func write(
         _ kind: Write, _ instanceID: UUID, expecting held: Held, in container: ModelContainer,
-        beforeCheck: (@Sendable (Write) throws -> Void)?, change: (Document) -> Void
+        checksText: Bool = false, beforeCheck: (@Sendable (Write) throws -> Void)?, change: (Document) -> Void
     ) -> WriteOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -547,13 +581,19 @@ extension ProcessingQueue {
                 return .changed
             }
             let read = RowState.capture(document)
+            // The text record, by key, as this context read it (`held` made sure one is linked).
+            let textRead = checksText ? document.text.map { ($0.persistentModelID, RowState.capture($0)) } : nil
             // 3. Only the fields that change.
             change(document)
             try beforeCheck?(kind)
-            // 4. The row again, in a second fresh context, every field.
+            // 4. The rows again, in a second fresh context, every field.
             let key = RowKey(entity: .document, instanceID: instanceID)
             let stored = try RowState.read([key], in: container)
-            guard stored[key] == read else {
+            var textUnchanged = true
+            if let (textID, textState) = textRead {
+                textUnchanged = try RowState.readText(textID, in: container) == textState
+            }
+            guard stored[key] == read, textUnchanged else {
                 context.rollback()
                 Log.processing.notice("A processing write met another save of its document and wrote nothing")
                 return .metAnotherSave
