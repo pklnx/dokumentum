@@ -5,8 +5,8 @@ import ImageIO
 /// Builds a compact PDF from images (image files, photos), one page per image and one per frame of a
 /// multi-page TIFF (plan of #4, part 3; #90). The images are scaled down and embedded as JPEG, so the files
 /// stay small and sync quickly through iCloud.
-/// Ported from the predecessor's `PDFBuilder` (pklnx/document-archive `ec5c71d`) without the photo cleanup
-/// path (step 4 adds it).
+/// Ported from the predecessor's `PDFBuilder` (pklnx/document-archive `ec5c71d`); the photo cleanup path,
+/// `makePDF(fromEditedImages:)`, is step 4's (#5).
 public enum PDFBuilder {
     /// Page width in PDF points (A4 width). The height follows from the image's aspect ratio.
     public static let pageWidth: CGFloat = 595
@@ -53,9 +53,73 @@ public enum PDFBuilder {
         return built.map { Result(data: $0.data, pageCount: $0.pageCount, leftOut: leftOut) }
     }
 
+    /// The edited photos (#5, step 4): one page per `EditedPage`, in order, each decoded only when it is drawn
+    /// and cleaned with its edit (`PageCleanup`), so one full-size page is in memory at a time. A page whose
+    /// image or frame cannot be decoded, or whose edit cannot be rendered, is left out and counted. `nil` when
+    /// no page was drawn.
+    public static func makePDF(fromEditedImages items: [EditedImage]) -> Result? {
+        makePDF(fromEditedImages: items, trace: nil)
+    }
+
+    /// What `makePDF(fromEditedImages:trace:)` does, for the test that pins one page at a time.
+    enum PageEvent: Equatable {
+        case decoded(Int)
+        case drawn(Int)
+    }
+
+    static func makePDF(fromEditedImages items: [EditedImage], trace: ((PageEvent) -> Void)?) -> Result? {
+        let pages = items.indices.flatMap { item in items[item].pages.map { (item: item, page: $0) } }
+        var current: (item: Int, source: CGImageSource?)?
+        var leftOut = 0
+        let built = makePDF(
+            pageCount: pages.count,
+            page: { index in
+                let page = pages[index]
+                if current?.item != page.item {
+                    current = (page.item, ImageCoding.imageSource(for: items[page.item].data))
+                }
+                trace?(.decoded(index))
+                guard let source = current?.source, let image = editedPage(source, page.page) else {
+                    leftOut += 1
+                    return nil
+                }
+                return image
+            },
+            drawn: { trace?(.drawn($0)) })
+        return built.map { Result(data: $0.data, pageCount: $0.pageCount, leftOut: leftOut) }
+    }
+
+    /// One edited page: frame `page.frame` of `source`, decoded large enough that the cropped page keeps up to
+    /// `maxPixelSize` on its longer side (finding 4 of the plan review on #5), cleaned, and scaled down to at
+    /// most `maxPixelSize`. `nil` when the frame does not exist or cannot be decoded or rendered.
+    static func editedPage(_ source: CGImageSource, _ page: EditedPage) -> CGImage? {
+        guard page.frame >= 0, page.frame < ImageCoding.pageCount(of: source) else { return nil }
+        let size = decodeSize(for: page.edit.corners, of: ImageCoding.displayedSize(of: source, at: page.frame))
+        guard let image = ImageCoding.orientedImage(from: source, at: page.frame, maxPixelSize: size),
+            let edited = PageCleanup.render(image, edit: page.edit)
+        else { return nil }
+        guard max(edited.width, edited.height) > maxPixelSize else { return edited }
+        return ImageCoding.scaled(edited, maxPixelSize: maxPixelSize)
+    }
+
+    /// The longer side to decode an image of `size` (displayed) at, so that the part inside `quad` keeps
+    /// `maxPixelSize` on the longer side of its bounding box: `min(original, maxPixelSize / extent)`. The full
+    /// page gives `maxPixelSize`, as `makePDF(fromImageData:)`; an unknown size too.
+    static func decodeSize(for quad: PageQuad, of size: CGSize?) -> Int {
+        guard let size, size.width >= 1, size.height >= 1 else { return maxPixelSize }
+        let longer = max(size.width, size.height)
+        let box = quad.boundingBox
+        let extent = max(box.width * size.width, box.height * size.height)
+        guard extent >= 1 else { return min(Int(longer), maxPixelSize) }
+        let needed = (CGFloat(maxPixelSize) * longer / extent).rounded(.up)
+        return Int(min(longer, max(needed, CGFloat(maxPixelSize))).rounded(.up))
+    }
+
     /// Builds the PDF one page at a time: `page(i)` is asked for each page just before it is drawn. Pages for
-    /// which `page` returns `nil` are left out; `nil` when no page was drawn.
-    static func makePDF(pageCount: Int, page: (Int) -> CGImage?) -> (data: Data, pageCount: Int)? {
+    /// which `page` returns `nil` are left out; `nil` when no page was drawn. `drawn(i)` follows each page drawn.
+    static func makePDF(pageCount: Int, page: (Int) -> CGImage?, drawn: (Int) -> Void = { _ in }) -> (
+        data: Data, pageCount: Int
+    )? {
         guard pageCount > 0 else { return nil }
         let output = NSMutableData()
         guard let consumer = CGDataConsumer(data: output as CFMutableData) else { return nil }
@@ -75,6 +139,7 @@ public enum PDFBuilder {
                 context.draw(image, in: pageBox)
                 context.endPDFPage()
                 pagesDrawn += 1
+                drawn(index)
             }
         }
         context.closePDF()

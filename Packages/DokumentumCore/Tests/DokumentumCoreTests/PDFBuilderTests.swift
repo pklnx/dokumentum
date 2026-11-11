@@ -150,6 +150,94 @@ struct PDFBuilderTests {
         #expect(TestPDFReader.pageSizes(result.data).count == 200)
     }
 
+    // MARK: Edited photos (#5, step 4)
+
+    /// Plan test 9: one page at a time. Each page is decoded just before it is drawn, in order, never all
+    /// first.
+    @Test func editedPagesAreDecodedOneAtATimeInOrder() throws {
+        let items = [
+            EditedImage(data: TestImage.make(width: 400, height: 300), edit: PageEdit(quarterTurns: 1)),
+            EditedImage(
+                data: TestImage.makeTIFF(frames: Self.faxFrames), pages: [EditedPage(frame: 0), EditedPage(frame: 2)]),
+        ]
+        var events: [PDFBuilder.PageEvent] = []
+
+        let result = try #require(PDFBuilder.makePDF(fromEditedImages: items, trace: { events.append($0) }))
+
+        #expect(result.pageCount == 3)
+        #expect(events == [.decoded(0), .drawn(0), .decoded(1), .drawn(1), .decoded(2), .drawn(2)])
+    }
+
+    /// The pages of edited images in their order, each with its edit; a frame of a TIFF the caller kept, a
+    /// frame that does not exist and bytes that are no image are left out and counted.
+    @Test func editedImagesGiveAPagePerKeptPageWithTheirEdits() throws {
+        let items = [
+            EditedImage(data: TestImage.make(width: 400, height: 300), edit: PageEdit(quarterTurns: 1)),
+            EditedImage(data: Data("kein Bild".utf8)),
+            EditedImage(
+                data: TestImage.makeTIFF(frames: Self.faxFrames), pages: [EditedPage(frame: 2), EditedPage(frame: 7)]),
+            EditedImage(data: TestImage.make(width: 640, height: 480), pages: []),
+        ]
+
+        let result = try #require(PDFBuilder.makePDF(fromEditedImages: items))
+
+        #expect(result.pageCount == 2)
+        #expect(result.leftOut == 2)
+        #expect(
+            TestPDFReader.pageSizes(result.data) == [CGSize(width: 595, height: 793), CGSize(width: 595, height: 595)])
+        // The turned image's red band (its top) is now on the right.
+        let right = try #require(TestPDFReader.color(result.data, page: 0, atFraction: CGPoint(x: 0.9, y: 0.5)))
+        let left = try #require(TestPDFReader.color(result.data, page: 0, atFraction: CGPoint(x: 0.1, y: 0.5)))
+        #expect(Self.isRed(right), "\(right)")
+        #expect(Self.isWhite(left), "\(left)")
+        #expect(PDFBuilder.makePDF(fromEditedImages: [EditedImage(data: Data("kein Bild".utf8))]) == nil)
+    }
+
+    /// Finding 4 of the plan review on #5: the photo is decoded large enough that the cropped page keeps
+    /// 2400 px on its longer side when the photo has them, and its own size when it has fewer.
+    @Test func aCroppedPageKeeps2400PixelsWhenThePhotoHasThem() throws {
+        let canvas = CGSize(width: 3000, height: 4000)
+        // An upright A4 page over 70 % of the photo's height (2800 px) and over 50 % (2000 px).
+        let tall = PageQuad(
+            topLeft: CGPoint(x: 0.17, y: 0.15), topRight: CGPoint(x: 0.83, y: 0.15),
+            bottomRight: CGPoint(x: 0.83, y: 0.85), bottomLeft: CGPoint(x: 0.17, y: 0.85))
+        let half = PageQuad(
+            topLeft: CGPoint(x: 0.264, y: 0.25), topRight: CGPoint(x: 0.736, y: 0.25),
+            bottomRight: CGPoint(x: 0.736, y: 0.75), bottomLeft: CGPoint(x: 0.264, y: 0.75))
+
+        for (quad, expected) in [(tall, 2400), (half, 2000)] {
+            let photo = TestPage.photographed(corners: quad, canvas: canvas)
+            let source = try #require(ImageCoding.imageSource(for: photo))
+            let page = try #require(PDFBuilder.editedPage(source, EditedPage(edit: PageEdit(corners: quad))))
+            let longer = max(page.width, page.height)
+            #expect(abs(longer - expected) <= expected / 100, "longer side \(longer), expected \(expected)")
+        }
+    }
+
+    /// The decode size: `min(original, 2400 / extent of the quad)`; the full page as `makePDF(fromImageData:)`.
+    @Test func theDecodeSizeFollowsTheQuad() {
+        let photo = CGSize(width: 3024, height: 4032)
+        #expect(PDFBuilder.decodeSize(for: .fullPage, of: photo) == 2400)
+        #expect(PDFBuilder.decodeSize(for: .fullPage, of: CGSize(width: 640, height: 480)) == 640)
+        #expect(PDFBuilder.decodeSize(for: .fullPage, of: nil) == 2400)
+        let lowerHalf = PageQuad(
+            topLeft: CGPoint(x: 0, y: 0.5), topRight: CGPoint(x: 1, y: 0.5), bottomRight: CGPoint(x: 1, y: 1),
+            bottomLeft: CGPoint(x: 0, y: 1))
+        // The quad's box is 3024 × 2016 px at full size: 2400 / 3024 of 4032 is 3200.
+        #expect(PDFBuilder.decodeSize(for: lowerHalf, of: photo) == 3200)
+        let tiny = PageQuad(
+            topLeft: CGPoint(x: 0.4, y: 0.4), topRight: CGPoint(x: 0.5, y: 0.4), bottomRight: CGPoint(x: 0.5, y: 0.5),
+            bottomLeft: CGPoint(x: 0.4, y: 0.5))
+        #expect(PDFBuilder.decodeSize(for: tiny, of: photo) == 4032, "never more than the original")
+    }
+
+    /// The displayed size swaps width and height for orientation 6.
+    @Test func theDisplayedSizeAppliesTheOrientation() throws {
+        let photo = TestImage.make(width: 900, height: 1200, exifOrientation: 6)
+        let source = try #require(ImageCoding.imageSource(for: photo))
+        #expect(ImageCoding.displayedSize(of: source, at: 0) == CGSize(width: 900, height: 1200))
+    }
+
     static func isRed(_ color: (Int, Int, Int)) -> Bool { color.0 > 200 && color.1 < 60 && color.2 < 60 }
     static func isWhite(_ color: (Int, Int, Int)) -> Bool { color.0 > 200 && color.1 > 200 && color.2 > 200 }
 }
