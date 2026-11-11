@@ -261,6 +261,25 @@ struct BackgroundProcessingTests {
         #expect(setup.background.tracked == [id])
     }
 
+    /// A scan saved in the app (#5, part 2) goes through the same importer and asks for continued processing (P3:
+    /// an import or scan started on this iPhone).
+    @Test func aSavedScanAsksForAContinuedTask() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        let id = UUID()
+        let stub = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id)))
+        let background = setup.background
+        let importer = BackgroundImportNotifying(base: stub) { background.userImported($0) }
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: LibraryModel(source: EmptySource()))
+
+        await controller.importScan(ScanImportTests.scan(1))
+        await setup.submits.wait(for: 1, "no continued request was submitted")
+
+        #expect(stub.imageImports.first?.source == .scan)
+        #expect(setup.tasks.continuedRequests.count == 1)
+        #expect(setup.background.tracked == [id])
+    }
+
     /// A `Document` that another context inserts (a CloudKit import from the other device) runs the queue but never
     /// asks for continued processing (N4, P3).
     @Test func aCloudKitInsertionAsksForNoTask() async throws {
