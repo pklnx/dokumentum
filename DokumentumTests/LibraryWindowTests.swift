@@ -128,6 +128,19 @@ struct LibraryWindowTests {
         #expect(UITestLocalStore.folder(arguments: ["-UITestSeed", "YES"], temporaryDirectory: temporary) == nil)
     }
 
+    #if os(macOS)
+        /// `-UITestAppearance dark` asks for the dark appearance; anything else leaves the system's (#82).
+        @Test func theUITestAppearanceIsDarkOnlyWhenAsked() {
+            #expect(UITestAppearance.requested(arguments: ["-UITestAppearance", "dark"]) == .darkAqua)
+            for arguments in [
+                ["-UITestAppearance", "light"], ["-UITestAppearance", "Dark"], ["-UITestAppearance"],
+                ["-UITestSeed", "YES"], [],
+            ] {
+                #expect(UITestAppearance.requested(arguments: arguments) == nil, "\(arguments)")
+            }
+        }
+    #endif
+
     /// Removing the store's folder removes exactly `DokumentumUITest-<name>`, built from the validated name:
     /// never a sibling, never the directory above, and nothing for an invalid name.
     @Test func removingTheUITestLocalStoreRemovesOnlyItsFolder() throws {

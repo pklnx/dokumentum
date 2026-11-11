@@ -50,24 +50,22 @@ struct DocumentDetailView: View {
     private var content: some View {
         switch model.detail {
         case .noSelection:
-            ContentUnavailableView("No document selected", systemImage: "doc.text.magnifyingglass")
-                .accessibilityIdentifier(AccessibilityID.detailNoSelection)
+            placeholder(
+                "No document selected", systemImage: "doc.text.magnifyingglass",
+                identifier: AccessibilityID.detailNoSelection)
         case .loading:
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier(AccessibilityID.detailLoading)
         case .stillDownloading:
-            ContentUnavailableView(
+            placeholder(
                 "Still downloading", systemImage: "icloud.and.arrow.down",
-                description: Text("The file is being downloaded from iCloud.")
-            )
-            .accessibilityIdentifier(AccessibilityID.detailStillDownloading)
+                description: Text("The file is being downloaded from iCloud."),
+                identifier: AccessibilityID.detailStillDownloading)
         case .unreadable:
-            ContentUnavailableView(
+            placeholder(
                 "This PDF cannot be shown", systemImage: "exclamationmark.triangle",
-                description: Text("The file is damaged or not a PDF.")
-            )
-            .accessibilityIdentifier(AccessibilityID.detailUnreadable)
+                description: Text("The file is damaged or not a PDF."), identifier: AccessibilityID.detailUnreadable)
         case .pdf(let instanceID, let data):
             // The identifier goes on a SwiftUI container: on macOS XCUITest does not find one on the
             // representable itself.
@@ -77,6 +75,19 @@ struct DocumentDetailView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(AccessibilityID.detailPDF)
         }
+    }
+
+    /// The Mac's own placeholder, with the identifier on its title (#82); the iPhone's system view.
+    @ViewBuilder
+    private func placeholder(
+        _ title: LocalizedStringKey, systemImage: String, description: Text? = nil, identifier: String
+    ) -> some View {
+        #if os(macOS)
+            PlaceholderView(title: title, systemImage: systemImage, description: description, identifier: identifier)
+        #else
+            ContentUnavailableView(title, systemImage: systemImage, description: description)
+                .accessibilityIdentifier(identifier)
+        #endif
     }
 
     private var title: Text {

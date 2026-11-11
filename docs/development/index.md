@@ -361,9 +361,27 @@ drives them through the menu bar's key equivalents.
 the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged labels, not
 `NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
 accessibility action that selects the row, as a click does. Document rows read as one sentence
-(`LibraryDocument.accessibilityLabel`). `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)`
-(`UITestApp.auditAccessibility`): an issue on an element with one of the app's identifiers fails the test, the
-others are listed in an `audit-…` text attachment of the run.
+(`LibraryDocument.accessibilityLabel`). On the Mac they are tagged rows too, not links, for the same reason
+the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver whose action selects the document.
+The Mac document list is named by its navigation title ("Inbox"). The Mac placeholders ("No document selected",
+"Inbox empty", "Still downloading" and the others) are `PlaceholderView`, not `ContentUnavailableView`: the
+system view's title is secondary (3.11:1 on white in light mode) and it gives VoiceOver its symbol and title as
+one element. `PlaceholderView` keeps the system view's positions, draws the title in the primary colour, hides
+the symbol from VoiceOver and puts the identifier on the title (#82, maintainer decisions P1 and P2). The iPhone
+keeps `ContentUnavailableView`, whose title is already primary.
+
+`LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
+an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
+attachment of the run. On the Mac two issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
+exact identifier, audit type and description; any other issue on the same element still fails. An accepted
+issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
+`ACCEPTED, not reported`, without failing, because the audit is not fully stable.
+- `sidebar.syncOff`, contrast, "Contrast failed": text on the `.bar` material. The lowest measured contrast is
+  7.34:1 in light (#74) and 10.35:1 in dark (#82), on window PNGs. The bar is translucent, so the values depend
+  on what lies behind the window. The audit fails text over the material whatever its contrast; the background
+  stays (#74, maintainer decision 4).
+- `import.menu`, action, "Action is missing": the AppKit toolbar menu button that a SwiftUI `Menu` becomes.
+  None of the 13 SwiftUI variants tried passes (#82). VoiceOver opening the menu: not verified, #3 Done-when.
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show
@@ -382,6 +400,11 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
 - `TEST_RUNNER_DOKUMENTUM_UI_LANGUAGE=de|en`: the language of the run (the screenshot names end with it).
 - `TEST_RUNNER_DOKUMENTUM_UI_CONTENT_SIZE=XXXL`: the Dynamic Type size on the iPhone (a `UIContentSizeCategory`
   name without its prefix, such as `XXXL` or `AccessibilityXXXL`).
+- `TEST_RUNNER_DOKUMENTUM_UI_APPEARANCE=light|dark`: the Mac app alone in light or dark mode; the system's
+  appearance setting stays as it is (#82). Light through the launch argument `-NSRequiresAquaSystemAppearance
+  YES`, dark through the app's own `-UITestAppearance dark` (Debug builds; `-AppleInterfaceStyle Dark` as a
+  launch argument left the app light). The screenshot names then end with `-light-<language>` or
+  `-dark-<language>`. Record the system's appearance with the run: a Mac set to "Auto" is light by day.
 - On the Mac the screen must be unlocked during a run (`ioreg -n Root -d1 | grep IOConsoleLocked`, recorded
   before the run), and the test runner needs the screen-recording permission. Without it every window
   screenshot failed with "Failed to create screenshot. Image creation failed" (#67).

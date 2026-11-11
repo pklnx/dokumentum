@@ -48,6 +48,14 @@ struct UITestApp {
         ProcessInfo.processInfo.environment["DOKUMENTUM_UI_CONTENT_SIZE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// The appearance of this run on the Mac, set for the app alone; the system's setting stays as it is.
+    /// `TEST_RUNNER_DOKUMENTUM_UI_APPEARANCE=light`: through `-NSRequiresAquaSystemAppearance YES` (plan of #82, T1).
+    /// `TEST_RUNNER_DOKUMENTUM_UI_APPEARANCE=dark`: through the app's `-UITestAppearance dark` (Debug builds, #82).
+    /// Empty: the system's appearance. The screenshot and audit names then end with `light` or `dark`.
+    static var appearance: String? {
+        ProcessInfo.processInfo.environment["DOKUMENTUM_UI_APPEARANCE"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
         var arguments = Self.launchArguments(store) + extraArguments
@@ -57,6 +65,13 @@ struct UITestApp {
         if let contentSize = Self.contentSize {
             arguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategory\(contentSize)"]
         }
+        #if os(macOS)
+            switch Self.appearance {
+            case "light": arguments += ["-NSRequiresAquaSystemAppearance", "YES"]
+            case "dark": arguments += ["-UITestAppearance", "dark"]
+            default: break
+            }
+        #endif
         app.launchArguments = arguments
         app.launch()
     }
@@ -82,10 +97,14 @@ struct UITestApp {
     /// Mac that is the whole desktop, with other apps' windows.
     func attachWindowScreenshot(_ name: String, to testCase: XCTestCase) {
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        attachment.name = [name, Self.contentSize?.lowercased(), Self.language].compactMap { $0 }
-            .joined(separator: "-")
+        attachment.name = Self.attachmentName(name)
         attachment.lifetime = .keepAlways
         testCase.add(attachment)
+    }
+
+    /// `<name>[-<content size>][-<appearance>][-<language>]`, as the evidence files are named.
+    static func attachmentName(_ name: String) -> String {
+        [name, contentSize?.lowercased(), appearance?.lowercased(), language].compactMap { $0 }.joined(separator: "-")
     }
 
     /// The prefixes of the app's own accessibility identifiers (`AccessibilityID`, `DokumentumApp.rootIdentifier`).
@@ -93,12 +112,52 @@ struct UITestApp {
         "sidebar", "documentList", "documentDetail", "documentInfo", "import.", "trash.", "debug.", "dokumentum.",
     ]
 
+    /// An audit issue on one of the app's own elements that the audit reports although the element is right
+    /// (#82). It matches the exact identifier, the audit type and the issue's description (`compactDescription`,
+    /// in English in every language of the run); any other issue on the same element still fails.
+    struct AcceptedAuditIssue {
+        let identifier: String
+        let auditType: XCUIAccessibilityAuditType
+        let description: String
+        /// Why it is accepted, with the measurement; repeated in `docs/development/index.md` ("Library UI").
+        let reason: String
+
+        @MainActor
+        func matches(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
+            issue.element?.identifier == identifier && issue.auditType == auditType
+                && issue.compactDescription == description
+        }
+    }
+
+    #if os(macOS)
+        /// The Mac's accepted issues (plan of #82, T2). Each is still listed in the audit's attachment, marked
+        /// `ACCEPTED`; one the audit did not report in a run is listed as `ACCEPTED, not reported`, without failing,
+        /// because the audit is not fully stable (review of #74, 5849597239).
+        static let acceptedAuditIssues = [
+            AcceptedAuditIssue(
+                identifier: "sidebar.syncOff", auditType: .contrast, description: "Contrast failed",
+                reason:
+                    "text on the .bar material; lowest measured contrast 7.34:1 light (#74) and 10.35:1 dark (#82), "
+                    + "on window PNGs. The bar is translucent, so the values depend on what lies behind the window. "
+                    + "The audit fails text over the material whatever its contrast."),
+            AcceptedAuditIssue(
+                identifier: "import.menu", auditType: .action, description: "Action is missing",
+                reason:
+                    "the AppKit toolbar menu button of a SwiftUI Menu; none of the 13 SwiftUI variants tried passes "
+                    + "(#82). VoiceOver opening the menu: not verified, #3 Done-when."),
+        ]
+    #else
+        static let acceptedAuditIssues: [AcceptedAuditIssue] = []
+    #endif
+
     /// Runs the system's accessibility audit on what is shown now (plan of #3, T12). An issue on an element with
-    /// one of the app's own identifiers fails the test; the others (system controls, elements without an
-    /// identifier) are listed in a text attachment named `audit-<name>`, for the PR body, and do not fail it.
+    /// one of the app's own identifiers fails the test, unless it is one of `acceptedAuditIssues`; the others
+    /// (system controls, elements without an identifier) are listed in a text attachment named `audit-<name>`, for
+    /// the PR body, and do not fail it.
     func auditAccessibility(_ name: String, in testCase: XCTestCase, file: StaticString = #filePath, line: UInt = #line)
     {
         var listed: [String] = []
+        var reported = Set<Int>()
         do {
             try app.performAccessibilityAudit(for: .all) { issue in
                 let identifier = issue.element?.identifier ?? ""
@@ -108,15 +167,24 @@ struct UITestApp {
                     listed.append(description)
                     return true
                 }
+                if let index = Self.acceptedAuditIssues.firstIndex(where: { $0.matches(issue) }) {
+                    reported.insert(index)
+                    listed.append("ACCEPTED (\(Self.acceptedAuditIssues[index].reason)) " + description)
+                    return true
+                }
                 listed.append("FAIL " + description)
                 return false
             }
         } catch {
             XCTFail("accessibility audit \(name): \(error)", file: file, line: line)
         }
+        for (index, accepted) in Self.acceptedAuditIssues.enumerated() where !reported.contains(index) {
+            listed.append(
+                "ACCEPTED, not reported: \(accepted.auditType.rawValue) \(accepted.description) | id: \(accepted.identifier)"
+            )
+        }
         let attachment = XCTAttachment(string: listed.isEmpty ? "no issues" : listed.joined(separator: "\n"))
-        attachment.name = ["audit", name, Self.contentSize?.lowercased(), Self.language].compactMap { $0 }
-            .joined(separator: "-")
+        attachment.name = Self.attachmentName("audit-" + name)
         attachment.lifetime = .keepAlways
         testCase.add(attachment)
     }

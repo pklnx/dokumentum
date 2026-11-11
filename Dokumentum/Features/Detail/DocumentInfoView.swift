@@ -33,7 +33,11 @@ struct DocumentInfoView: View {
             if let document = model.selectedDocument {
                 DocumentInfoForm(model: model, document: document)
             } else {
-                ContentUnavailableView("No document selected", systemImage: "doc.text.magnifyingglass")
+                #if os(macOS)
+                    PlaceholderView(title: "No document selected", systemImage: "doc.text.magnifyingglass")
+                #else
+                    ContentUnavailableView("No document selected", systemImage: "doc.text.magnifyingglass")
+                #endif
             }
         }
         .accessibilityElement(children: .contain)
