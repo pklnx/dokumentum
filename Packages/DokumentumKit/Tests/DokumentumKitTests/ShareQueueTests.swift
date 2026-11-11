@@ -385,14 +385,16 @@ struct ShareQueueTests {
         }
     }
 
-    /// Review A's `incomingCleanupAtTheClockEdges`: a leftover dated in the future stays, one exactly a day old
-    /// stays (strict), one a day and a second old goes.
+    /// Review A's `incomingCleanupAtTheClockEdges`: a leftover dated in the future stays (a clock set back), one a
+    /// few seconds younger than a day stays, one a few seconds older than a day goes. No case sits on the exact
+    /// boundary: file systems keep modification dates at different precisions (on Linux an "exactly one day"
+    /// date came back a fraction older and was removed, PR #85 round 4).
     @Test func incomingCleanupAtTheClockEdges() throws {
         try withQueue { queue, _ in
             let now = Date()
-            let (future, exact, old) = (UUID().uuidString, UUID().uuidString, UUID().uuidString)
+            let (future, young, old) = (UUID().uuidString, UUID().uuidString, UUID().uuidString)
             for (name, age) in [
-                (future, -3 * 86_400.0), (exact, ShareQueue.incomingMaxAge), (old, ShareQueue.incomingMaxAge + 1),
+                (future, -3 * 86_400.0), (young, ShareQueue.incomingMaxAge - 5), (old, ShareQueue.incomingMaxAge + 5),
             ] {
                 let url = queue.incomingFolder.appending(path: name)
                 try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -401,7 +403,7 @@ struct ShareQueueTests {
             }
 
             #expect(queue.removeStaleIncoming(now: now) == 1)
-            #expect(Set(names(in: queue.incomingFolder)) == [future, exact])
+            #expect(Set(names(in: queue.incomingFolder)) == [future, young])
         }
     }
 
