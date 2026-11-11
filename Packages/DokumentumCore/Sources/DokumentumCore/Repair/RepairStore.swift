@@ -2,18 +2,6 @@ import DokumentumKit
 import Foundation
 import SwiftData
 
-/// The records of one read, by `instanceID`: the handles the repair's operations name. Only what the light
-/// snapshot holds: every document and metadata record, and the unlinked blobs.
-struct RepairRecords {
-    var documents: [UUID: Document] = [:]
-    var tags: [UUID: Tag] = [:]
-    var correspondents: [UUID: Correspondent] = [:]
-    var documentTypes: [UUID: DocumentType] = [:]
-    var files: [UUID: DocumentFile] = [:]
-    var thumbnails: [UUID: DocumentThumbnail] = [:]
-    var texts: [UUID: DocumentText] = [:]
-}
-
 /// Reads the repair's snapshot from a store (plan of #2, part 3).
 ///
 /// **The light form: no linked blob is loaded.** SwiftData selects every column of a fetched entity (measured
@@ -24,12 +12,13 @@ struct RepairRecords {
 /// alike (`RepairPropertyTests` in DokumentumKit).
 ///
 /// **The re-check read covers only what a pass writes** (`touched(by:in:)`): every metadata record (few, and
-/// chains need them all), the documents its operations name or that reference a merge's loser (through the
-/// loser's own `documents`), and the unlinked blobs it relinks. So the time from that read to the pass's save
+/// chains need them all), the documents its operations name or that reference a merge's loser (found through the
+/// loser's own `documents`, then read by `instanceID`), and the unlinked blobs it relinks. So the time from that read to the pass's save
 /// grows with the pass, not with the archive. `RepairSQLTests` pins it.
 ///
 /// Records sharing an `instanceID` (a copied record) keep the first one read, as `RepairPlan.apply` indexes
-/// them, so a check and the write it allows meet the same record.
+/// them, so a check and the write it allows meet the same record. Documents are read in `RowRecords.oldestFirst`
+/// order everywhere, so the plan, the apply and the check keep the same copy.
 public enum RepairStore {
     /// The light snapshot of the store as `context` sees it.
     public static func snapshot(in context: ModelContext) throws -> RepairSnapshot {
@@ -37,13 +26,13 @@ public enum RepairStore {
     }
 
     /// Every document and metadata record, and the unlinked blobs: what a run plans on.
-    static func read(in context: ModelContext) throws -> (snapshot: RepairSnapshot, records: RepairRecords) {
+    static func read(in context: ModelContext) throws -> (snapshot: RepairSnapshot, records: RowRecords) {
         var reader = Reader()
         try reader.readMetadata(in: context)
         // Never `file`, `thumbnail` or `text`: prefetching them would load the blobs.
         var documents = FetchDescriptor<Document>()
         documents.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
-        for document in try context.fetch(documents) { reader.add(document) }
+        for document in RowRecords.oldestFirst(try context.fetch(documents)) { reader.add(document) }
         for file in try context.fetch(FetchDescriptor<DocumentFile>(predicate: #Predicate { $0.document == nil })) {
             reader.add(file)
         }
@@ -59,9 +48,9 @@ public enum RepairStore {
     }
 
     /// What `plan` writes: every metadata record, the documents its operations name or that reference a merge's
-    /// loser, and the unlinked blobs it relinks. A blob linked meanwhile is not read, so its relink is skipped.
+    /// loser (by their `instanceID`s, in `RowRecords.oldestFirst` order), and the unlinked blobs it relinks. A blob linked meanwhile is not read, so its relink is skipped.
     static func touched(by plan: RepairPlan, in context: ModelContext) throws -> (
-        snapshot: RepairSnapshot, records: RepairRecords
+        snapshot: RepairSnapshot, records: RowRecords
     ) {
         var reader = Reader()
         try reader.readMetadata(in: context)
@@ -82,7 +71,9 @@ public enum RepairStore {
                 break
             }
         }
-        for document in try fetchDocuments(named, in: context) { reader.add(document) }
+        // A merge's loser names its documents through its relationship; they are read again by `instanceID`, so
+        // that of copies sharing one the `RowRecords.oldestFirst` copy is moved and checked, as everywhere else
+        // (review A of #96, D2-1; review B, B-D3).
         for (kind, loser) in losers {
             let documents: [Document]? =
                 switch kind {
@@ -90,8 +81,9 @@ public enum RepairStore {
                 case .documentType: reader.records.documentTypes[loser]?.documents
                 case .tag: reader.records.tags[loser]?.documents
                 }
-            for document in documents ?? [] { reader.add(document) }
+            named.formUnion((documents ?? []).map(\.instanceID))
         }
+        for document in try RowRecords.fetchDocuments(named, in: context) { reader.add(document) }
         if !blobs.isEmpty {
             let ids = Array(blobs)
             for file in try context.fetch(
@@ -116,54 +108,9 @@ public enum RepairStore {
         return (reader.snapshot, reader.records)
     }
 
-    /// The records `keys` name, with every metadata record. Blobs only while unlinked (`#Predicate { $0.document ==
-    /// nil }`), so the check before a pass's save loads no linked blob either.
-    static func records(_ keys: Set<RowKey>, in context: ModelContext) throws -> RepairRecords {
-        var reader = Reader()
-        try reader.readMetadata(in: context)
-        func ids(_ entity: RowKey.Entity) -> [UUID] { keys.filter { $0.entity == entity }.map(\.instanceID) }
-        for document in try fetchDocuments(Set(ids(.document)), in: context) { reader.add(document) }
-        let files = ids(.file)
-        if !files.isEmpty {
-            for file in try context.fetch(
-                FetchDescriptor<DocumentFile>(
-                    predicate: #Predicate { $0.document == nil && files.contains($0.instanceID) }))
-            {
-                reader.add(file)
-            }
-        }
-        let thumbnails = ids(.thumbnail)
-        if !thumbnails.isEmpty {
-            for thumbnail in try context.fetch(
-                FetchDescriptor<DocumentThumbnail>(
-                    predicate: #Predicate { $0.document == nil && thumbnails.contains($0.instanceID) }))
-            {
-                reader.add(thumbnail)
-            }
-        }
-        let texts = ids(.text)
-        if !texts.isEmpty {
-            for text in try context.fetch(
-                FetchDescriptor<DocumentText>(
-                    predicate: #Predicate { $0.document == nil && texts.contains($0.instanceID) }))
-            {
-                reader.add(text)
-            }
-        }
-        return reader.records
-    }
-
-    private static func fetchDocuments(_ instanceIDs: Set<UUID>, in context: ModelContext) throws -> [Document] {
-        guard !instanceIDs.isEmpty else { return [] }
-        let ids = Array(instanceIDs)
-        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { ids.contains($0.instanceID) })
-        descriptor.relationshipKeyPathsForPrefetching = [\.correspondent, \.documentType, \.tags]
-        return try context.fetch(descriptor)
-    }
-
     /// Collects records and their snapshots, the first of an `instanceID` only.
     private struct Reader {
-        var records = RepairRecords()
+        var records = RowRecords()
         var documents: [DocumentSnapshot] = []
         var metadata: [MetadataSnapshot] = []
         var blobs: [BlobSnapshot] = []
@@ -171,28 +118,22 @@ public enum RepairStore {
         var snapshot: RepairSnapshot { RepairSnapshot(documents: documents, metadata: metadata, blobs: blobs) }
 
         mutating func readMetadata(in context: ModelContext) throws {
-            var tags = FetchDescriptor<Tag>()
-            tags.relationshipKeyPathsForPrefetching = [\.parent]
-            for tag in try context.fetch(tags) where records.tags[tag.instanceID] == nil {
-                records.tags[tag.instanceID] = tag
+            let fetched = try RowRecords.fetchMetadata(in: context)
+            for tag in fetched.tags where records.add(tag) {
                 metadata.append(
                     MetadataSnapshot(
                         kind: .tag, instanceID: tag.instanceID, id: tag.id, createdAt: tag.createdAt,
                         mergedAt: tag.mergedAt, name: tag.name, parentInstanceID: tag.parent?.instanceID,
                         mergedIntoID: tag.mergedIntoID))
             }
-            for record in try context.fetch(FetchDescriptor<Correspondent>())
-            where records.correspondents[record.instanceID] == nil {
-                records.correspondents[record.instanceID] = record
+            for record in fetched.correspondents where records.add(record) {
                 metadata.append(
                     MetadataSnapshot(
                         kind: .correspondent, instanceID: record.instanceID, id: record.id,
                         createdAt: record.createdAt, mergedAt: record.mergedAt, name: record.name,
                         mergedIntoID: record.mergedIntoID))
             }
-            for record in try context.fetch(FetchDescriptor<DocumentType>())
-            where records.documentTypes[record.instanceID] == nil {
-                records.documentTypes[record.instanceID] = record
+            for record in fetched.documentTypes where records.add(record) {
                 metadata.append(
                     MetadataSnapshot(
                         kind: .documentType, instanceID: record.instanceID, id: record.id,
@@ -202,8 +143,7 @@ public enum RepairStore {
         }
 
         mutating func add(_ document: Document) {
-            guard records.documents[document.instanceID] == nil else { return }
-            records.documents[document.instanceID] = document
+            guard records.add(document) else { return }
             var linked: Set<BlobKind> = []
             // `!= nil` reads the link from the document row; it does not fire the blob's fault.
             if document.file != nil { linked.insert(.file) }
@@ -220,21 +160,18 @@ public enum RepairStore {
         }
 
         mutating func add(_ file: DocumentFile) {
-            guard records.files[file.instanceID] == nil else { return }
-            records.files[file.instanceID] = file
+            guard records.add(file) else { return }
             blobs.append(blob(.file, file.instanceID, file.createdAt, file.documentID, file.document))
         }
 
         mutating func add(_ thumbnail: DocumentThumbnail) {
-            guard records.thumbnails[thumbnail.instanceID] == nil else { return }
-            records.thumbnails[thumbnail.instanceID] = thumbnail
+            guard records.add(thumbnail) else { return }
             blobs.append(
                 blob(.thumbnail, thumbnail.instanceID, thumbnail.createdAt, thumbnail.documentID, thumbnail.document))
         }
 
         mutating func add(_ text: DocumentText) {
-            guard records.texts[text.instanceID] == nil else { return }
-            records.texts[text.instanceID] = text
+            guard records.add(text) else { return }
             blobs.append(blob(.text, text.instanceID, text.createdAt, text.documentID, text.document))
         }
 

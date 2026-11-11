@@ -23,6 +23,8 @@ public enum Log {
     public static let repair = Logger(subsystem: subsystem, category: "repair")
     /// Imports: each file's outcome, with its byte count; file names `.private` (#4, part 2).
     public static let importing = Logger(subsystem: subsystem, category: "import")
+    /// The processing queue: each run's counts, writes that backed off, dropped results (#4, part 5).
+    public static let processing = Logger(subsystem: subsystem, category: "processing")
 
     /// An error's domain and code, such as "NSCocoaErrorDomain 134110": safe to log as `.public`. Log the
     /// `localizedDescription` separately, as `.private`.

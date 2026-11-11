@@ -308,6 +308,54 @@ is lost, but the keeper can differ from the one another device chose until both 
 Repair tests seed a `RepairSnapshot` into a store on disk (`RepairStoreFixtures.swift`) and check
 `RepairInvariants` and that the store ends where the planner's simulation ends (`CheckedRepair`).
 
+The check before the save (`RowState`, `RowState.read`) lives in `DokumentumCore/Store/RowStates.swift`, one copy for
+both background writers: the repair and the processing queue. `RowStateTests` pins its fields against the schema.
+**Copies sharing an `instanceID`** (a copied record) are read by one rule, `RowRecords.oldestFirst`: every reader keeps
+the oldest `createdAt`, and among equal dates the first row the store returns. The repair's plan (`RepairStore.read`),
+its apply and check (`RepairStore.touched`, where a merge's loser names its documents through its relationship and
+they are read again by `instanceID`; `RowState.read`), and the queue's scan, fetches and check all follow it, so a plan,
+its write and the check before the save meet the same row. The other copy is neither written nor checked by either:
+its references stay as they are, also one to a record that a merge made a tombstone (`SharedInstanceIDTests`). The
+order is applied in memory after the fetch, so the SQL the tests pin stays as it is.
+
+**The processing queue** (#4, part 5). `ProcessingClaimRules` (DokumentumKit) decides per document; `ProcessingQueue`
+(DokumentumCore, an actor) carries it out, one document at a time, off the main actor. Every document is claimed at
+import by the importing device (`processingDeviceID`, `processingClaimedAt`, state `pending`); another device waits
+until the claim is 6 hours old by its own clock, then takes it over. A claim more than 6 hours in the future counts as
+expired, so a device with a fast clock that never comes back cannot keep a document waiting; a device with a slow clock
+can be taken over early. Both cost at most a double processing with the same result. `done` and a state of a newer
+build (`unknown`) are never touched; a trashed document waits for its restore; a document without its file data or its
+text record waits, and processing never creates a text. Each attempt is counted in this device's `UserDefaults`
+(`ProcessingFailures`, never synced) **before** its stage runs, so a crash or an out-of-memory kill during the stage
+counts too; a stage that returns clears the counter. The third failed attempt writes `failed`, and an attempt beyond
+the third (the earlier ones never returned) writes `failed` without running the stage, so such a PDF cannot crash every
+launch. Another device whose own counter is below 3 still tries a `failed` document. A counter also goes when its
+document is seen `done` or gone. Of copies sharing an `instanceID`, the queue uses the one the rule above names.
+- **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
+  key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
+  write). `ProcessingSQLTests` checks the SQL under `swift test`.
+- **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
+  (`pageCount` when it differs, `done` or `failed`). Each is one synchronous call with no `await`: a fresh context
+  fetches the document, re-checks what the decision was based on (state, claim device and time, not trashed, the same
+  file, a text record) and writes nothing if one differs; it sets only the changed fields, reads the row again in a
+  second fresh context (`RowState.read`) and saves only if every field still equals what it fetched. Otherwise it rolls
+  back and writes nothing; the next run comes from the other save's store change. Never a compensating write. A result
+  is dropped when the row no longer holds the claim the work ran under (a takeover) or links another file than the one
+  processed (compared by the file row's identifier, read from the document row without loading the file).
+- **Residual window**, as for the repair: a save to the same document that commits between the queue's re-read and the
+  commit of its save is written over with the values the queue read. Plan §3.2's "never overwrite an edit" holds on one
+  device except within this window, which is one document row's read plus its save; across devices it depends on how
+  CloudKit merges the record (#31's C1 and C2). A save at the queue's own `willSave` lies inside it, so the tests save
+  their edits through `ProcessingQueue.Hooks.beforeCheck`, between the fetch and the re-read
+  (`ProcessingConcurrentEditTests`, including #56's repair as the other writer, in both orders).
+- **Triggers** (`ProcessingScheduler`, stores on disk only): launch, every save that inserts a `Document` (an import,
+  from any context), `scenePhase == .active`, every debounced store change, and the next expiry of another device's
+  claim that a run waited for, while the app runs. One run at a time; requests during a run queue one more. The
+  queue's own save is a store change; the run it triggers writes nothing, and the chain ends there. A document left in
+  `processing` by a quit is processed again by the launch run.
+- **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
+  builds do not contain it.
+
 ## Library UI
 
 The library window (step 2, #3) is one `NavigationSplitView`: three columns on the Mac, a navigation stack on
@@ -463,8 +511,8 @@ the group's queue folder and closes, and the app imports the items at launch and
 
 ## Logging
 
-Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, subsystem
-`space.pklnx.Dokumentum`. Counts, enum states and error domain and code are `.public`; names, titles, paths,
+Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, `processing`,
+subsystem `space.pklnx.Dokumentum`. Counts, enum states and error domain and code are `.public`; names, titles, paths,
 text and `localizedDescription` are `.private`. App code never prints, and a crash message is a fixed text.
 `scripts/check-logging.py` enforces this in the app, the share extension and the packages' library code.
 

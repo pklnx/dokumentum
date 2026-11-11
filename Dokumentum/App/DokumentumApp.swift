@@ -21,12 +21,15 @@ struct DokumentumApp: App {
     /// The one importer of the app (plan of #4, N2): every window's `ImportController` uses it, so all
     /// imports go through one actor.
     let importer: DocumentImporter
+    /// Runs the processing queue (plan of #4, part 5): at launch, after imports, on every activation, after store
+    /// changes and at the next claim expiry. `nil` for an in-memory store, as the repair.
+    let processing: ProcessingScheduler?
     #if os(iOS)
         /// Imports what the share extension queued (plan of #4, part 4): at launch and on every activation, on
         /// the one importer. `nil` without the app group, and in runs that stay away from real data.
         let shareQueue: ShareQueueImporter?
-        @Environment(\.scenePhase) private var scenePhase
     #endif
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         var choice = ArchiveStore.currentChoice()
@@ -61,7 +64,20 @@ struct DokumentumApp: App {
         } else {
             repair = nil
         }
-        importer = DocumentImporter(container: container, deviceID: DeviceIdentity.processingDeviceID())
+        let deviceID = DeviceIdentity.processingDeviceID()
+        importer = DocumentImporter(container: container, deviceID: deviceID)
+        // The processing queue (#4, part 5), for the stores on disk only, like the repair.
+        if let storeChanges {
+            #if DEBUG
+                let takeoverInterval = ProcessingTakeoverArgument.seconds(arguments: ProcessInfo.processInfo.arguments)
+            #else
+                let takeoverInterval: TimeInterval? = nil
+            #endif
+            processing = ProcessingScheduler.start(
+                for: container, observer: storeChanges, deviceID: deviceID, takeoverInterval: takeoverInterval)
+        } else {
+            processing = nil
+        }
         #if os(iOS)
             shareQueue = ShareQueueImporter.forApp(importer: importer)
             shareQueue?.requestRun()
@@ -83,12 +99,15 @@ struct DokumentumApp: App {
                 .environment(shareQueue)
             #endif
         }
-        #if os(iOS)
-            // A launch is an activation too; the importer runs one at a time and queues one more run.
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { shareQueue?.requestRun() }
-            }
-        #endif
+        // A launch is an activation too; the share queue and the processing queue each run one at a time and
+        // queue one more run.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            #if os(iOS)
+                shareQueue?.requestRun()
+            #endif
+            processing?.requestRun()
+        }
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)
         #if os(macOS)

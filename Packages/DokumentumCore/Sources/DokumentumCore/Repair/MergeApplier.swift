@@ -17,7 +17,7 @@ enum MergeApplier {
         let instanceID: UUID
     }
 
-    static func apply(_ operation: RepairOperation, to records: RepairRecords, now: Date) throws {
+    static func apply(_ operation: RepairOperation, to records: RowRecords, now: Date) throws {
         switch operation {
         case .repoint(let reference, let from, let to):
             try repoint(reference, from: from, to: to, in: records, now: now)
@@ -47,7 +47,7 @@ enum MergeApplier {
     }
 
     private static func repoint(
-        _ reference: RepairReference, from: UUID, to: UUID, in records: RepairRecords, now: Date
+        _ reference: RepairReference, from: UUID, to: UUID, in records: RowRecords, now: Date
     ) throws {
         switch reference {
         case .correspondent(let document):
@@ -69,7 +69,7 @@ enum MergeApplier {
     }
 
     private static func merge(
-        _ kind: MetadataKind, loser: UUID, into keeper: UUID, in records: RepairRecords, now: Date
+        _ kind: MetadataKind, loser: UUID, into keeper: UUID, in records: RowRecords, now: Date
     ) throws {
         switch kind {
         case .correspondent:
