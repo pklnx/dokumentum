@@ -391,13 +391,15 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   completes: the app's importer is wrapped (`BackgroundImportNotifying`), and every user import (files, photos, the
   share queue, #5's scans) goes through it, while a CloudKit import never does, so the system's progress ("Processing
   documents", "3 of 12 documents") never appears for documents of the other device. Its progress counts the user's
-  documents that are no longer open (`OpenDocuments`), updated after each store change; it completes with success
-  when the runs drain (`ProcessingScheduler.didDrain`). If the system cannot start it now, the work waits for the
+  documents that are no longer open (`OpenDocuments`), updated after each store change; it completes when the runs
+  drain (`ProcessingScheduler.didDrain`), with success only when none of the user's documents is open any more. If the system cannot start it now, the work waits for the
   foreground or the processing task. **The processing task** (`space.pklnx.Dokumentum.backgroundProcessing`,
   `BGProcessingTask`, no power or network needed) is asked for when the scene goes to the background with open
   documents and no task holds the work; the scheduler is paused then as before, and the task resumes it until the
   runs drain. While a task holds the work, the background does not pause. An **expiry** pauses (the attempt is given
-  back) and fails the task; in the foreground the queue goes on at once. Each identifier is registered once per
+  back) and fails the task; in the foreground the queue goes on at once. The foreground is the application's state
+  (`UIApplication.applicationState`), not assumed: a launch in the background for the processing task brings no scene
+  phase. Each identifier is registered once per
   process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
   two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
   another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
