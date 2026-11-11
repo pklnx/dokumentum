@@ -32,8 +32,8 @@ import Foundation
 ///   after the open is never followed. The writer copies from that descriptor through one `copyChunkSize` buffer,
 ///   so a file is never held in memory; the reader maps the payload from it (below). Inside an item, `payload` and
 ///   `item.json` are opened, and `item.json` is rewritten, only through the descriptor of the item's folder, itself
-///   opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`): an item folder swapped for a link is refused,
-///   and nothing is read or written through it. A linked `item.json` makes the item unreadable (`Failed/`), and an entry of
+///   opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`): an item folder swapped for a link is refused, and
+///   nothing is read or written through it. A linked `item.json` makes the item unreadable (`Failed/`), and an entry of
 ///   `Items/` is read only when it is a real folder. A missing file is `POSIXError(.ENOENT)`.
 ///   What this does not cover, by design: a symbolic link at `ShareQueue/` or `Items/` is followed (both are
 ///   reached by path; our own code creates them, and swapping them needs the same group access), so is one among
@@ -48,10 +48,11 @@ import Foundation
 ///   (outside the threat model of #85): a payload changed or truncated by another process while it is mapped may
 ///   crash the reader or give it bytes that differ from the file's bytes at the open, and then the hash, PDFKit's
 ///   check and the stored bytes may disagree with each other (probes of #98: a truncated mapping read stale or zero
-///   bytes and raised no signal, on macOS and on iOS). The app counts an attempt before it reads, so an item that crashes it moves to
-///   `Failed/` after `maxAttempts`. The writer's copy has no such limit: `read(2)` of a truncated file returns short
-///   and never raises a signal. Mapping also relies on the group container having no data protection that locks
-///   files (`NSFileProtectionComplete`): a page fault on such a file after the device locks would crash the reader,
+///   bytes and raised no signal, on macOS and on iOS). The app counts an attempt before it reads, so an item that
+///   crashes it moves to `Failed/` after `maxAttempts`. The writer's copy has no such limit: `read(2)` of a truncated
+///   file returns short and never raises a signal. Mapping also relies on the group container having no data protection
+///   that locks files (`NSFileProtectionComplete`): a page fault on such a file after the device locks would crash the
+///   reader,
 ///   where a `read` returns an error.
 /// - **Versions.** An `item.json` with a newer `version` (a newer extension than app) is left alone; one that
 ///   cannot be read moves to `Failed/`.
@@ -255,11 +256,12 @@ public struct ShareQueue: Sendable {
         itemFolder(item.id).appending(path: Self.payloadName)
     }
 
-    /// The item's bytes, mapped copy-on-write from the payload opened once through the item folder's descriptor
-    /// (never through a link, out of the queue), never copied into memory (#98; see the type's "The payload is
-    /// mapped"). Writing to the `Data` changes private pages only, never the file. The `Data` stays valid after the
-    /// item is removed, and keeps the payload's disk space until it is released; an empty payload is empty `Data`. Throws `NotARegularFile` when the payload is not a regular file or the
-    /// item's folder is not a real folder, `POSIXError(.ENOENT)` when either is missing, or the mapping's error.
+    /// The item's bytes, mapped copy-on-write from the payload opened once through the item folder's descriptor (never
+    /// through a link, out of the queue), never copied into memory (#98; see the type's "The payload is mapped").
+    /// Writing to the `Data` changes private pages only, never the file. The `Data` stays valid after the item is
+    /// removed, and keeps the payload's disk space until it is released; an empty payload is empty `Data`. Throws
+    /// `NotARegularFile` when the payload is not a regular file or the item's folder is not a real folder,
+    /// `POSIXError(.ENOENT)` when either is missing, or the mapping's error.
     public func payload(of item: ShareQueueItem) throws -> Data {
         try payload(of: item, afterOpen: nil)
     }

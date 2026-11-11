@@ -526,12 +526,11 @@ the group's queue folder and closes, and the app imports the items at launch and
   with a new file written in full, synced and renamed over `item.json` in that folder (removed again if the
   rename fails). So an item folder swapped for a link is refused, and nothing is read or written through it.
   A linked `item.json` moves the item to `Failed/`, and an `Items/` entry is read only when it is a real
-  folder. Not covered, by design: a symbolic
-  link at `ShareQueue/` or `Items/` is followed (both are reached by path, our code creates them, and swapping
-  them needs the same group access), so is one among the folders above a lent file (`/var` is a link to
-  `/private/var`), and a hard link counts as a regular file. The item's name follows
-  `ShareQueue.itemFileName`: the suggested name, else the lent file's, else the share's date and time; the
-  type's extension is added only when the name has no PDF or image extension.
+  folder. Not covered, by design: a symbolic link at `ShareQueue/` or `Items/` is followed (both are reached
+  by path, our code creates them, and swapping them needs the same group access), so is one among the folders
+  above a lent file (`/var` is a link to `/private/var`), and a hard link counts as a regular file. The item's
+  name follows `ShareQueue.itemFileName`: the suggested name, else the lent file's, else the share's date and
+  time; the type's extension is added only when the name has no PDF or image extension.
 - **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the
   entitlements file. The app group on a device (both App IDs, the profiles) is the maintainer's (#4, M2 and M3).
 
