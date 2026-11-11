@@ -73,10 +73,12 @@ ENABLE_PREVIEWS = YES
 ALWAYS_SEARCH_USER_PATHS = NO
 EXCLUDED_SOURCE_FILE_NAMES = $(inherited) .gitkeep
 
-// String Catalogs. Only the app target emits its strings: scripts/check-localization.py reads what
-// the compiler wrote (.stringsdata) and compares it with Dokumentum/Localizable.xcstrings.
+// String Catalogs. The app and the share extension emit their strings, each for its own catalog:
+// scripts/check-localization.py reads what the compiler wrote (.stringsdata) per target and compares it
+// with Dokumentum/Localizable.xcstrings and DokumentumShare/Localizable.xcstrings.
 LOCALIZATION_PREFERS_STRING_CATALOGS = YES
 DOKUMENTUM_EMIT_LOC_STRINGS_Dokumentum = YES
+DOKUMENTUM_EMIT_LOC_STRINGS_DokumentumShare = YES
 SWIFT_EMIT_LOC_STRINGS = $(DOKUMENTUM_EMIT_LOC_STRINGS_$(TARGET_NAME):default=NO)
 
 // Signing. Automatic with the team; signed builds run on the maintainer's machine. Agents' local builds

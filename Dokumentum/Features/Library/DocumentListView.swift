@@ -16,7 +16,8 @@ struct DocumentListView: View {
     var body: some View {
         List(selection: $model.selectedDocumentID) {
             ForEach(model.documents) { document in
-                row(document)
+                let tagPaths = model.tagPaths(of: document)
+                row(document, tagPaths: tagPaths)
                     .accessibilityIdentifier(AccessibilityID.documentRow(document.instanceID))
                     .modifier(TrashRowActions(document: document))
                     #if os(macOS)
@@ -24,6 +25,8 @@ struct DocumentListView: View {
                         // focus.
                         .contentShape(Rectangle())
                         .simultaneousGesture(TapGesture().onEnded { isListFocused = true })
+                        // A row whose content changes is replaced, so the table measures it again (#80): see below.
+                        .id(RowInputs(document: document, tagPaths: tagPaths))
                     #endif
             }
         }
@@ -36,9 +39,15 @@ struct DocumentListView: View {
             .onChange(of: model.selectedDocumentID) { _, selected in
                 if selected != nil { isListFocused = true }
             }
-            // Rows inserted above existing ones need an animated update to be measured (#72). Without one, the Mac's
-            // table-backed `List` gives them its estimated row height (24 pt) and never measures them, so a
-            // two-line row is cut to its title. Zero duration: the list looks as before, only the update path changes.
+            // The Mac's table-backed `List` measures a row inserted above existing ones once, when it is inserted, and
+            // keeps that height. Two fixes cover that:
+            // - Inserts need an animated update to be measured at all (#72). Without one, the table gives the rows its
+            //   estimated row height (24 pt), so a two-line row is cut to its title. Zero duration: the list looks as
+            //   before, only the update path changes.
+            // - A content change, such as a tag added or removed, updates the cell in place and the row keeps its
+            //   height (#80): a new tag line is cut, a removed one leaves a gap. So each row's identity includes what
+            //   it shows (`RowInputs`): a changed row is removed and inserted again, and the table measures it. The
+            //   new height applies at once, without an animation (maintainer decision on #80).
             .animation(.linear(duration: 0), value: model.documents.map(\.instanceID))
         #endif
         // On the list itself, before the overlay: an identifier after it would also replace the empty
@@ -78,8 +87,8 @@ struct DocumentListView: View {
     // `List(selection:)` as before. It is a button to VoiceOver with the button's action, which selects the document
     // as a click does. On the iPhone the link stays, for the push and the row's disclosure indicator.
     @ViewBuilder
-    private func row(_ document: LibraryDocument) -> some View {
-        let content = DocumentRow(document: document, tagPaths: model.tagPaths(of: document))
+    private func row(_ document: LibraryDocument, tagPaths: [String]) -> some View {
+        let content = DocumentRow(document: document, tagPaths: tagPaths)
         #if os(macOS)
             content
                 .accessibilityAddTraits(.isButton)
@@ -130,3 +139,11 @@ struct DocumentListView: View {
         }
     }
 }
+
+#if os(macOS)
+    /// Everything a `DocumentRow` shows: its two inputs, so the identity cannot miss a field the row adds later.
+    private struct RowInputs: Hashable {
+        let document: LibraryDocument
+        let tagPaths: [String]
+    }
+#endif

@@ -43,7 +43,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 
 | Item | Value |
 |---|---|
-| Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (a placeholder until step 3) |
+| Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3: it hands shared files to the app through the app-group queue) |
 | Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked against the Xcode that Xcode Cloud offers (`ci_scripts/ci_post_clone.sh`, pinned in `.xcode-version`); if Xcode Cloud lags behind, the minimum stays at the newest SDK it offers until it catches up |
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
@@ -221,7 +221,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 ### 3.6 Porting from document-archive
 | Ported (cleaned up, tests along) | Rebuilt | Dropped |
 |---|---|---|
-| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), image cleanup and scanner wrapper, tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, share queue, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
+| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), image cleanup and scanner wrapper, tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows; new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
 
 ## 4. Development process
 - Workflow, roles, labels and review rules as in `pklnx/dev-process`; the

@@ -21,6 +21,12 @@ struct DokumentumApp: App {
     /// The one importer of the app (plan of #4, N2): every window's `ImportController` uses it, so all
     /// imports go through one actor.
     let importer: DocumentImporter
+    #if os(iOS)
+        /// Imports what the share extension queued (plan of #4, part 4): at launch and on every activation, on
+        /// the one importer. `nil` without the app group, and in runs that stay away from real data.
+        let shareQueue: ShareQueueImporter?
+        @Environment(\.scenePhase) private var scenePhase
+    #endif
 
     init() {
         var choice = ArchiveStore.currentChoice()
@@ -56,6 +62,10 @@ struct DokumentumApp: App {
             repair = nil
         }
         importer = DocumentImporter(container: container, deviceID: DeviceIdentity.processingDeviceID())
+        #if os(iOS)
+            shareQueue = ShareQueueImporter.forApp(importer: importer)
+            shareQueue?.requestRun()
+        #endif
     }
 
     var body: some Scene {
@@ -67,8 +77,18 @@ struct DokumentumApp: App {
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
                 source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
-                launchStore: launchStore, importer: importer)
+                launchStore: launchStore, importer: importer
+            )
+            #if os(iOS)
+                .environment(shareQueue)
+            #endif
         }
+        #if os(iOS)
+            // A launch is an activation too; the importer runs one at a time and queues one more run.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { shareQueue?.requestRun() }
+            }
+        #endif
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)
         #if os(macOS)
