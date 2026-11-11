@@ -424,7 +424,7 @@ the symbol from VoiceOver, puts the identifier on the title and `<identifier>.de
 
 The audit cannot guard the placeholders' contrast. In light it reports "Contrast failed" on the regular-weight
 15 pt description whatever its colour: `.primary`, `.secondary`, black and `labelColor` all fail, the medium and
-semibold weights pass (measured in the plan of #89 and again in its PR). The UI tests therefore measure the text
+semibold weights pass (measured in the plan of #89; `.primary` again in its PR, while in dark it passes). The UI tests therefore measure the text
 contrast of the placeholders' titles and descriptions from each element's own screenshot
 (`UITestApp.assertTextContrast`: the background is the most common pixel, the text the pixel farthest from it in
 relative luminance, at least 10 pixels must reach 4.5:1). `LibrarySmokeTests` measures "Still downloading" and
