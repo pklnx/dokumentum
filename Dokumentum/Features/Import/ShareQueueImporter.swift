@@ -181,7 +181,8 @@
             if let willImport { await willImport(attempted) }
             let outcome: ImportOutcome
             do {
-                // Only a regular file: a link is never followed out of the queue (review of #85).
+                // Only a regular file: a link is never followed out of the queue (review of #85). Mapped, not
+                // copied (#98): the attempt above is counted first, so a payload that crashes the read is bounded.
                 let data = try queue.payload(of: attempted)
                 outcome = await importer.importFile(
                     data: data, fileName: fileName, contentType: UTType(attempted.info.typeIdentifier),
