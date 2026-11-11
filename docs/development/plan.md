@@ -7,7 +7,7 @@ both are frozen, nothing is migrated from them.
 ## 1. Product
 
 A personal document archive in the style of paperless-ngx for exactly two
-devices of one person: an iPhone 18 Pro and a MacBook Pro (M6). Native
+devices of one person: an iPhone 18 Pro and a MacBook Air (M5). Native
 SwiftUI, data in the owner's private iCloud, no server, no accounts of its
 own, no web UI.
 
@@ -59,7 +59,8 @@ are no `#available` branches (the old app carried both for iOS 18/macOS 15).
 Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 | Where | macOS | Xcode | SDKs | Simulator runtimes |
 |---|---|---|---|---|
-| Development MacBook Pro (2026-11-07) | 27.2 (26B7124) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.2 |
+| MacBook Air, the maintainer's signing Mac (2026-11-11) | 27.2.1 (26B131) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | none installed |
+| MacBook Pro, returned to Apple (2026-11-07) | 27.2 (26B7124) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.2 |
 | Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
 The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`
@@ -253,11 +254,14 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   step 8's `Release`. So macOS tests in Xcode Cloud and in local builds run without the
   entitlements and outside the sandbox; only the maintainer's signed build
   exercises them.
-- State of the signed check (2026-11-07, the maintainer's delegation window on
-  #1): part 3 of step 0 merges on unsigned local evidence, Xcode Cloud and its reviews. Its
-  signed output and the device check (maintainer step 9 on #1) are deferred, not
-  dropped: they come before signed or iCloud work relies on them, and #1 stays
-  open until then. So no signed build has exercised the entitlements yet.
+- State of the signed check: part 3 of step 0 merged on unsigned local evidence,
+  Xcode Cloud and its reviews, with the signed output deferred (2026-11-07). On
+  2026-11-11 the maintainer ran the first signed, sandboxed Mac build on the MacBook
+  Air (`main` at `2066e51`): the entitlements are exactly those of
+  `Config/Dokumentum-macOS.entitlements`, and the imports of #4's M1 work in the
+  sandbox (#1 step 9 and #4 M1, results on both issues). The signed iPhone build
+  and the device check on the iPhone come with #4's M2/M3; #1 stays open until
+  then.
 - Development setup: implementation (Xcode, simulators, `xcodebuild`) happens
   on the maintainer's Mac mini (since 2026-11-10), with Claude Code there (local
   sessions, `gh` available). Agents have no signing identity and build unsigned; signed builds
