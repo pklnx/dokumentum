@@ -61,6 +61,14 @@ struct PDFBuilderTests {
         #expect(PDFBuilder.makePDF(fromImageData: [Data("kein Bild".utf8)]) == nil)
     }
 
+    /// ImageIO decodes a PDF's first page as an image; the image path never does (#86, T3).
+    @Test func aPDFIsNeverAPage() {
+        let pdf = TestPDF.make(pages: ["Vertrag", "Seite 2"])
+
+        #expect(ImageCoding.orientedImage(from: pdf, maxPixelSize: PDFBuilder.maxPixelSize) == nil)
+        #expect(PDFBuilder.makePDF(fromImageData: [pdf]) == nil)
+    }
+
     /// The longest side of a decoded image is at most 2400 px; smaller images keep their size.
     @Test func aLargeImageIsScaledTo2400PixelsAndASmallOneKeepsItsSize() throws {
         let large = try #require(

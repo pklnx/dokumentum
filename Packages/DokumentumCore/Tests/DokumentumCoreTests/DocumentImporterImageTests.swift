@@ -125,6 +125,29 @@ struct DocumentImporterImageTests {
         #expect(document.contentHash == ContentHash.sha256(photos.reduce(Data(), +)))
     }
 
+    /// The image path never rasterizes a PDF (#86, T3): Photos goes there without a type check. Alone it fails;
+    /// among photos it is left out and counted, and its bytes stay in the hash.
+    @Test func aPDFAmongPhotosIsNeverRasterized() async throws {
+        let container = try TestSupport.makeContainer()
+        let importer = Self.importer(container)
+        let saves = SaveCounter(container)
+        let pdf = TestPDF.make(pages: ["Vertrag", "Seite 2", "Seite 3"])
+
+        let alone = await importer.importImages([pdf], fileName: "", title: "Foto", source: .image)
+
+        #expect(alone == ImageImportResult(outcome: .failed(.unreadableImage)))
+        #expect(saves.count == 0)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<Document>()) == 0)
+
+        let photo = TestImage.make(width: 400, height: 300)
+        let mixed = await importer.importImages([photo, pdf], fileName: "", title: "Foto", source: .image)
+
+        let document = try #require(try Self.documents(in: container).first, "not imported: \(mixed)")
+        #expect(mixed == ImageImportResult(outcome: .imported(instanceID: document.instanceID), leftOut: 1))
+        #expect(document.pageCount == 1)
+        #expect(document.contentHash == ContentHash.sha256(photo + pdf), "the PDF's bytes stay in the hash")
+    }
+
     @Test(arguments: [
         ("Kaputt.jpg", Data("kein Bild".utf8), ImportFailure.unreadableImage),
         ("Leer.png", Data(), .empty),

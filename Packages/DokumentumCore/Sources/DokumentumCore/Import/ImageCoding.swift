@@ -9,9 +9,14 @@ import UniformTypeIdentifiers
 public enum ImageCoding {
     /// Decodes the first image in `data` with its EXIF orientation applied (a phone stores a portrait photo as
     /// landscape pixels and an orientation tag), scaled down so its longer side is at most `maxPixelSize`.
-    /// Smaller images keep their size. `nil` when ImageIO cannot decode it.
+    /// Smaller images keep their size. `nil` when ImageIO cannot decode it, and `nil` for a PDF: ImageIO
+    /// decodes a PDF's first page as an image, and the image path never rasterizes a PDF, whatever reached it
+    /// (#86, T3). A PDF stays a PDF only on the PDF path.
     public static func orientedImage(from data: Data, maxPixelSize: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        if let type = CGImageSourceGetType(source).flatMap({ UTType($0 as String) }), type.conforms(to: .pdf) {
+            return nil
+        }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

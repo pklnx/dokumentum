@@ -7,10 +7,12 @@ import UniformTypeIdentifiers
 /// What an import source needs from the importer; the app's tests stub it.
 public protocol DocumentImporting: Sendable {
     /// Imports one file whose bytes were already read: a PDF as it is, an image as a one-page PDF (part 3).
-    /// Never throws: every way it can end is an outcome.
+    /// **PDF bytes are a PDF whatever the label** (#86): a sender can declare a PDF as an image, and the image
+    /// path would keep only its first page. Never throws: every way it can end is an outcome.
     /// - Parameters:
     ///   - fileName: the file's name with its extension; it becomes the title (`importTitle`).
-    ///   - contentType: the type a provider declared; `nil` takes it from the name's extension.
+    ///   - contentType: the type a provider declared; `nil` takes it from the name's extension. Bytes that are
+    ///     not a PDF go by it.
     ///   - source: the source of a PDF; an image is always `.image`.
     func importFile(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
@@ -31,9 +33,11 @@ public protocol DocumentImporting: Sendable {
 /// context. It never writes to an existing row: a duplicate is reported, not touched (SwiftData writes whole
 /// rows and has no merge policy).
 ///
-/// **Order of one import:** the type (PDF or image), not empty, the hash (off the actor), the first duplicate
+/// **Order of one import:** the type (PDF or image: PDF bytes, `%PDF-` within the first KB, are a PDF whatever
+/// the label, #86; anything else by its label), not empty, the hash (off the actor), the first duplicate
 /// check (a short-lived context), for images building the PDF (`PDFBuilder`, off the actor), PDFKit's check
-/// (off the actor: it opens, is not locked, has a page), then `commit`: one synchronous call that opens a
+/// (off the actor: it opens, is not locked, has a page; bytes that only look like a PDF and do not open go on
+/// as an image when their label says image, as before #86), then `commit`: one synchronous call that opens a
 /// fresh context, checks for a duplicate again, inserts and saves. **No `await` while a context is in use**
 /// (plan review N3): the contexts live inside synchronous calls only.
 ///
@@ -103,7 +107,7 @@ public actor DocumentImporter: DocumentImporting {
     private func run(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
     {
-        switch Self.kind(fileName: fileName, contentType: contentType) {
+        switch Self.kind(of: data, fileName: fileName, contentType: contentType) {
         case nil:
             return .failed(.unsupportedType)
         case .image?:
@@ -116,6 +120,10 @@ public actor DocumentImporter: DocumentImporting {
         if let duplicate = firstDuplicateCheck(hash) { return duplicate }
         let pageCount: Int
         switch await Self.validate(data) {
+        case .failure(.unreadablePDF) where Self.kind(fileName: fileName, contentType: contentType) == .image:
+            // Bytes that look like a PDF but do not open as one, under an image label: an image with `%PDF-` in
+            // its metadata. It goes on as an image, as before #86; a real PDF is never rasterized (`ImageCoding`).
+            return await runImages([data], fileName: fileName, title: nil, source: .image).outcome
         case .failure(let failure): return .failed(failure)
         case .success(let pages): pageCount = pages
         }
@@ -208,7 +216,14 @@ public actor DocumentImporter: DocumentImporting {
         case pdf, image
     }
 
-    /// PDF or image by the declared type, else by the name's extension; `nil` for anything else.
+    /// PDF bytes are a PDF whatever the label (#86, T1): `ImportContent.isPDF`. Anything else by its label.
+    static func kind(of data: Data, fileName: String, contentType: UTType?) -> Kind? {
+        if ImportContent.isPDF(data) { return .pdf }
+        return kind(fileName: fileName, contentType: contentType)
+    }
+
+    /// The label's kind: PDF or image by the declared type, else by the name's extension; `nil` for anything
+    /// else.
     static func kind(fileName: String, contentType: UTType?) -> Kind? {
         guard let type = contentType ?? UTType(filenameExtension: (fileName as NSString).pathExtension) else {
             return nil
