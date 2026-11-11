@@ -102,17 +102,39 @@ public enum PDFBuilder {
         return ImageCoding.scaled(edited, maxPixelSize: maxPixelSize)
     }
 
-    /// The longer side to decode an image of `size` (displayed) at, so that the part inside `quad` keeps
-    /// `maxPixelSize` on the longer side of its bounding box: `min(original, maxPixelSize / extent)`. The full
-    /// page gives `maxPixelSize`, as `makePDF(fromImageData:)`; an unknown size too.
+    /// The longest side a page is decoded at for its crop, and the most pixels (finding N1 of review 5865079459 on
+    /// #118): a small crop of a 48 MP photo would otherwise decode the whole photo, about 195 MB as RGBA. At the cap
+    /// a page stays near 24 MP (about 96 MB as RGBA) while it is cleaned; the crop then has fewer than 2400 px.
+    static let maxDecodePixelSize = 6000
+    static let maxDecodePixels: CGFloat = 24_000_000
+
+    /// The longer side to decode an image of `size` (displayed) at, so that the page inside `quad` keeps
+    /// `maxPixelSize` on its longer side once it is straightened: `min(original, maxPixelSize / extent)`, capped at
+    /// `maxDecodePixelSize` and `maxDecodePixels`. The extent is the straightened page's, the longer of the quad's
+    /// opposite edges (`CIPerspectiveCorrection` gives about that size), not its bounding box: a tilted page's box is
+    /// larger than the page (finding N2 of review 5865079459). The full page gives `maxPixelSize`, as
+    /// `makePDF(fromImageData:)`; an unknown size too.
     static func decodeSize(for quad: PageQuad, of size: CGSize?) -> Int {
         guard let size, size.width >= 1, size.height >= 1 else { return maxPixelSize }
         let longer = max(size.width, size.height)
-        let box = quad.boundingBox
-        let extent = max(box.width * size.width, box.height * size.height)
-        guard extent >= 1 else { return min(Int(longer), maxPixelSize) }
-        let needed = (CGFloat(maxPixelSize) * longer / extent).rounded(.up)
-        return Int(min(longer, max(needed, CGFloat(maxPixelSize))).rounded(.up))
+        let shorter = min(size.width, size.height)
+        let extent = straightenedExtent(of: quad, in: size)
+        let cap = min(CGFloat(maxDecodePixelSize), (maxDecodePixels * longer / shorter).squareRoot().rounded(.down))
+        let needed =
+            extent >= 1 ? (CGFloat(maxPixelSize) * longer / extent).rounded(.up) : longer
+        let decode = min(longer, max(min(needed, cap), CGFloat(maxPixelSize)))
+        return Int(decode.rounded(.up))
+    }
+
+    /// The longer side, in pixels of an image of `size`, of the page `quad` straightens to: the longest of its four
+    /// edges' horizontal and vertical counterparts (top and bottom for the width, left and right for the height).
+    static func straightenedExtent(of quad: PageQuad, in size: CGSize) -> CGFloat {
+        func length(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            hypot((b.x - a.x) * size.width, (b.y - a.y) * size.height)
+        }
+        let width = max(length(quad.topLeft, quad.topRight), length(quad.bottomLeft, quad.bottomRight))
+        let height = max(length(quad.topLeft, quad.bottomLeft), length(quad.topRight, quad.bottomRight))
+        return max(width, height)
     }
 
     /// Builds the PDF one page at a time: `page(i)` is asked for each page just before it is drawn. Pages for
