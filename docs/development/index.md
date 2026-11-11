@@ -321,9 +321,14 @@ order is applied in memory after the fetch, so the SQL the tests pin stays as it
 **The processing queue** (#4, part 5). `ProcessingClaimRules` (DokumentumKit) decides per document; `ProcessingQueue`
 (DokumentumCore, an actor) carries it out, one document at a time, off the main actor. Every document is claimed at
 import by the importing device (`processingDeviceID`, `processingClaimedAt`, state `pending`); another device waits
-until the claim is 6 hours old by its own clock, then takes it over. A claim more than 6 hours in the future counts as
-expired, so a device with a fast clock that never comes back cannot keep a document waiting; a device with a slow clock
-can be taken over early. Both cost at most a double processing with the same result. `done` and a state of a newer
+until the claim is 6 hours old by its own clock, **or until it has seen the claim unchanged for 6 hours** by its own
+clock (#97, T8 of #6), then takes it over. When this device first saw each other device's claim is kept per document in
+its `UserDefaults` (`ClaimSightings`, never synced, pruned with the failure counters). So a claim in the future (a
+device with a fast clock) is never taken over at once and waits at most 6 hours of this device's time; a device with a
+slow clock can be taken over early, and it then waits for the taker's claim, which looks future to it, until the taker
+has written its result. Two devices never take a document from each other in turn, whatever their skew
+(`ClaimSkewSimulationTests`, −48 h to +48 h). The early takeover costs at most a double processing with the same
+result. `done` and a state of a newer
 build (`unknown`) are never touched; a trashed document waits for its restore; a document without its file data or its
 text record waits, and processing never creates a text. Each attempt is counted in this device's `UserDefaults`
 (`ProcessingFailures`, never synced) **before** its stage runs, so a crash or an out-of-memory kill during the stage
@@ -331,6 +336,30 @@ counts too; a stage that returns clears the counter. The third failed attempt wr
 the third (the earlier ones never returned) writes `failed` without running the stage, so such a PDF cannot crash every
 launch. Another device whose own counter is below 3 still tries a `failed` document. A counter also goes when its
 document is seen `done` or gone. Of copies sharing an `instanceID`, the queue uses the one the rule above names.
+- **Backoff** (#97, T9): after a failed attempt (thrown or timed out), the next one does not start before 1 minute after
+  the failed one started, the third not before 10 minutes after the second, on this device's clock
+  (`ProcessingBackoff`; the counter keeps `attempts` and `lastAttemptAt`, and step 3's plain number reads as attempts
+  without a time). A start in the future (the clock was set back) is stored as now, so the retry is at most the delay
+  away. The two runs of one import (its insertion and its store change) therefore spend one attempt, and three
+  failures take at least 11 minutes. The decision is `wait(.retryAfter)`.
+- **Stall watchdog** (#97, T10): a stage reports progress per page; with none for 300 s the queue cancels it without
+  waiting, counts the attempt as failed (`timedOut` in the report) and goes on with the next document. The watchdog
+  sleeps on the suspending clock, so a sleeping device never stalls. **One Vision job at a time also after a cancel**
+  (N1): a cancelled stage stops after its page, but a framework call that ignores cancellation runs on until it
+  returns, and its result is always dropped. A stage starts only when every stage cancelled by an interruption has
+  returned and at most one timed-out stage is still alive; a second timeout while the first is alive ends the run as
+  `stalled`, and the next run waits for one of them (`StageTracker`). #5's interactive corner detection uses Vision
+  outside the queue, so this rule covers processing only.
+- **Interruptions** (#97, T11): a known interruption does not count, an unknown end does. `ProcessingQueue.interruptNow()`
+  is synchronous and callable from any thread: it gives the running attempt back (the counter and the backoff return to
+  their values before the attempt), cancels the stage and ends the wait for it; a stage that returns later writes
+  nothing. The counter's read-modify-writes and each attempt's state (running, finished, interrupted) sit behind one
+  `Mutex` (N2): a refund happens only while its attempt runs, and a success marks the attempt finished and removes the
+  counter in one step. The scheduler's `pause()` calls it and cancels the run; `resume()` ends the pause and runs the
+  queue. The app pauses when the scene goes to the background on iOS and when the Mac app quits
+  (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
+  suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
+  power loss during a stage still counts.
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
@@ -349,8 +378,9 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   their edits through `ProcessingQueue.Hooks.beforeCheck`, between the fetch and the re-read
   (`ProcessingConcurrentEditTests`, including #56's repair as the other writer, in both orders).
 - **Triggers** (`ProcessingScheduler`, stores on disk only): launch, every save that inserts a `Document` (an import,
-  from any context), `scenePhase == .active`, every debounced store change, and the next expiry of another device's
-  claim that a run waited for, while the app runs. One run at a time; requests during a run queue one more. The
+  from any context), `scenePhase == .active` (`resume()`), every debounced store change, and the earlier of the next
+  expiry of another device's claim and the next backoff end that a run waited for (`ProcessingReport.nextWake`), while
+  the app runs. No run starts while paused. One run at a time; requests during a run queue one more. The
   queue's own save is a store change; the run it triggers writes nothing, and the chain ends there. A document left in
   `processing` by a quit is processed again by the launch run.
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release

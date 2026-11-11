@@ -18,7 +18,7 @@ struct ClaimSkewSimulationTests {
         for step in -96...96 {
             let skew = TimeInterval(step) * 30 * Self.minute
             var simulation = ClaimSimulation(skewOfB: skew, syncDelay: 5 * Self.minute, stageDuration: 15 * Self.minute)
-            let outcome = simulation.run(until: 24 * Self.hour)
+            let outcome = simulation.simulate(through: 24 * Self.hour)
             #expect(outcome.doneOnBoth != nil, "skew \(skew / Self.hour) h: no result within 24 h, \(outcome)")
             #expect(outcome.resultWrites == 1, "skew \(skew / Self.hour) h: \(outcome)")
             if let done = outcome.doneOnBoth { latest = max(latest, done) }
@@ -34,7 +34,7 @@ struct ClaimSkewSimulationTests {
             let skew = TimeInterval(step) * 30 * Self.minute
             var simulation = ClaimSimulation(
                 skewOfB: skew, syncDelay: 20 * Self.minute, stageDuration: 15 * Self.minute)
-            let outcome = simulation.run(until: 24 * Self.hour)
+            let outcome = simulation.simulate(through: 24 * Self.hour)
             #expect(outcome.doneOnBoth != nil, "skew \(skew / Self.hour) h: no result within 24 h, \(outcome)")
             #expect((1...2).contains(outcome.resultWrites), "skew \(skew / Self.hour) h: \(outcome)")
         }
@@ -97,7 +97,7 @@ struct ClaimSimulation {
         ClaimSkewSimulationTests.start.addingTimeInterval(time + devices[index].skew)
     }
 
-    mutating func run(until end: TimeInterval) -> Outcome {
+    mutating func simulate(through end: TimeInterval) -> Outcome {
         // A imports: pending with its own claim, as `DocumentImporter` writes it.
         write(Row(state: .pending, deviceID: devices[0].id, claimedAt: clock(of: 0, at: 0), version: 0), by: 0, at: 0)
         var time: TimeInterval = 0
