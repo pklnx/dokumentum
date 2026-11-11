@@ -31,6 +31,9 @@ struct DokumentumApp: App {
     init() {
         var choice = ArchiveStore.currentChoice()
         #if DEBUG
+            #if os(macOS)
+                UITestAppearance.apply(arguments: ProcessInfo.processInfo.arguments)
+            #endif
             var url = ArchiveStore.storeURL
             var fallbackURL = ArchiveStore.fallbackStoreURL
             if let folder = UITestLocalStore.folder(arguments: ProcessInfo.processInfo.arguments) {

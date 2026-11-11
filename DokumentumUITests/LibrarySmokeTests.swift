@@ -43,6 +43,9 @@ final class LibrarySmokeTests: XCTestCase {
         // The app opens on the Inbox (PQ1).
         XCTAssertFalse(ui.element(Self.documentRow(Self.accountStatement)).exists, "the start list is not the Inbox")
         ui.attachWindowScreenshot("1-inbox", to: self)
+        #if os(macOS)
+            assertMacListElements(ui)
+        #endif
 
         #if os(iOS)
             // The iPhone opens on the Inbox list; back to the sidebar.
@@ -144,6 +147,31 @@ final class LibrarySmokeTests: XCTestCase {
             }
         #endif
     }
+
+    #if os(macOS)
+        /// What the Mac audit checks, asserted without it, because the audit is not fully stable (review of #74,
+        /// 5849597239; plan of #82): the list has a name, a document row is a button that reads its sentence, and
+        /// "No document selected" is the title alone, without its symbol.
+        @MainActor
+        private func assertMacListElements(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
+            let list = ui.element("documentList")
+            XCTAssertFalse(list.label.isEmpty, "the document list has no label", file: file, line: line)
+
+            let row = ui.element(Self.documentRow(Self.electricityBill))
+            XCTAssertEqual(row.elementType, .button, "a document row is no button", file: file, line: line)
+            XCTAssertTrue(
+                row.label.hasPrefix("Electricity bill October, ") && row.label.contains("Stadtwerke Musterstadt"),
+                "a document row does not read its sentence: \(row.label)", file: file, line: line)
+
+            let noSelection = ui.element("documentDetail.noSelection")
+            XCTAssertTrue(
+                noSelection.waitForExistence(timeout: 10), "no “No document selected”", file: file, line: line)
+            // The title is one line of text; with the symbol the element was 89 pt high.
+            XCTAssertLessThan(
+                noSelection.frame.height, 40, "“No document selected” is more than its title: \(noSelection.frame)",
+                file: file, line: line)
+        }
+    #endif
 
     #if os(iOS)
         /// The navigation bar's back button.
