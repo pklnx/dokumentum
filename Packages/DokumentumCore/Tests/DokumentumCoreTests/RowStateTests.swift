@@ -6,9 +6,9 @@ import Testing
 
 @testable import DokumentumCore
 
-/// `RowState` holds every field a save can write, so the check before a pass's save compares whole rows
-/// (`RepairRun`). A field added to a model later must be added there or named in
-/// `RowState.excluded`, or this fails.
+/// `RowState` (`Store/RowStates.swift`) holds every field a save can write, so the check before a background
+/// writer's save compares whole rows (`RepairRun`, `ProcessingQueue`). A field added to a model later must be added
+/// there or named in `RowState.excluded`, or this fails.
 struct RowStateTests {
     private static let sample = UUID()
 
