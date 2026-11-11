@@ -2,8 +2,9 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// Builds a compact PDF from images (image files, photos), one page per image (plan of #4, part 3). The
-/// images are scaled down and embedded as JPEG, so the files stay small and sync quickly through iCloud.
+/// Builds a compact PDF from images (image files, photos), one page per image and one per frame of a
+/// multi-page TIFF (plan of #4, part 3; #90). The images are scaled down and embedded as JPEG, so the files
+/// stay small and sync quickly through iCloud.
 /// Ported from the predecessor's `PDFBuilder` (pklnx/document-archive `ec5c71d`) without the photo cleanup
 /// path (step 4 adds it).
 public enum PDFBuilder {
@@ -17,19 +18,33 @@ public enum PDFBuilder {
     /// A built PDF.
     public struct Result: Sendable {
         public let data: Data
-        /// The pages drawn: one per image that could be decoded.
+        /// The pages drawn: one per image, and one per frame of a multi-page TIFF, that could be decoded.
         public let pageCount: Int
-        /// The images that could not be decoded and were left out.
+        /// The images or TIFF frames that could not be decoded and were left out.
         public let leftOut: Int
     }
 
-    /// One page per item of `items`, in their order, each decoded with its EXIF orientation only when its
-    /// page is drawn, so one full-size image is in memory at a time. An item ImageIO cannot decode is left
-    /// out and counted. `nil` when no item could be decoded (or there is none).
+    /// One page per item of `items`, in their order, and for a multi-page TIFF one page per frame, in frame
+    /// order at the item's place (#90); other formats with several images (GIF, APNG, HEIC) give their first
+    /// image. Each page is decoded with its EXIF orientation only when it is drawn, so one full-size image is
+    /// in memory at a time. An item or frame ImageIO cannot decode is left out and counted. `nil` when nothing
+    /// could be decoded (or there is no item).
     public static func makePDF(fromImageData items: [Data]) -> Result? {
+        // A page per (item, frame), in order. An item ImageIO cannot read keeps one page, left out when drawn.
+        let pages = items.indices.flatMap { item in
+            let frames = ImageCoding.imageSource(for: items[item]).map(ImageCoding.pageCount(of:)) ?? 1
+            return (0..<frames).map { (item: item, frame: $0) }
+        }
+        // One source per item, shared by its frames (ImageIO finds a frame faster in a source it already has),
+        // and only the current item's source alive.
+        var current: (item: Int, source: CGImageSource?)?
         var leftOut = 0
-        let built = makePDF(pageCount: items.count) { index in
-            guard let image = ImageCoding.orientedImage(from: items[index], maxPixelSize: maxPixelSize) else {
+        let built = makePDF(pageCount: pages.count) { index in
+            let page = pages[index]
+            if current?.item != page.item { current = (page.item, ImageCoding.imageSource(for: items[page.item])) }
+            guard let source = current?.source,
+                let image = ImageCoding.orientedImage(from: source, at: page.frame, maxPixelSize: maxPixelSize)
+            else {
                 leftOut += 1
                 return nil
             }

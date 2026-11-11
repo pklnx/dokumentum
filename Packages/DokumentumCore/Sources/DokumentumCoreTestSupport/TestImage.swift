@@ -16,30 +16,60 @@ public enum TestImage {
     public static func make(
         width: Int, height: Int, type: UTType = .jpeg, exifOrientation: Int = 1, shade: Int = 255
     ) -> Data {
-        guard let upright = draw(width: width, height: height, shade: shade) else { return Data() }
-        let stored: CGImage?
-        if exifOrientation == 6 {
-            // Stored = displayed turned a quarter counter-clockwise; orientation 6 turns it clockwise again.
-            stored = bitmap(width: height, height: width) { context in
-                context.translateBy(x: CGFloat(height), y: 0)
-                context.rotate(by: .pi / 2)
-                context.draw(upright, in: CGRect(x: 0, y: 0, width: width, height: height))
-            }
-        } else {
-            stored = upright
+        make(type: type, frames: [Frame(width: width, height: height, exifOrientation: exifOrientation)], shade: shade)
+    }
+
+    /// One image of a file with several (#90): it **displays** `width` × `height` pixels; `exifOrientation` as
+    /// in `make(width:height:type:exifOrientation:shade:)`.
+    public struct Frame: Sendable {
+        public let width: Int
+        public let height: Int
+        public let exifOrientation: Int
+
+        public init(width: Int, height: Int, exifOrientation: Int = 1) {
+            self.width = width
+            self.height = height
+            self.exifOrientation = exifOrientation
         }
-        guard let stored else { return Data() }
+    }
+
+    /// A multi-page TIFF with one frame per element of `frames`, in their order, each drawn like `make`.
+    public static func makeTIFF(frames: [Frame]) -> Data {
+        make(type: .tiff, frames: frames)
+    }
+
+    /// One file of `type` with an image per element of `frames`: a multi-page TIFF, a GIF or APNG with several
+    /// frames, a HEIC collection. ImageIO may write fewer images than asked for some types (an APNG of frames
+    /// of different sizes), so a test checks the count it relies on. Empty `Data` when ImageIO cannot encode
+    /// `type` on this system.
+    public static func make(type: UTType, frames: [Frame], shade: Int = 255) -> Data {
         let data = NSMutableData()
-        guard
+        guard !frames.isEmpty,
             let destination = CGImageDestinationCreateWithData(
-                data as CFMutableData, type.identifier as CFString, 1, nil)
+                data as CFMutableData, type.identifier as CFString, frames.count, nil)
         else { return Data() }
-        let properties: [CFString: Any] = [
-            kCGImagePropertyOrientation: exifOrientation, kCGImageDestinationLossyCompressionQuality: 0.9,
-        ]
-        CGImageDestinationAddImage(destination, stored, properties as CFDictionary)
+        for frame in frames {
+            guard let stored = stored(frame, shade: shade) else { return Data() }
+            let properties: [CFString: Any] = [
+                kCGImagePropertyOrientation: frame.exifOrientation, kCGImageDestinationLossyCompressionQuality: 0.9,
+            ]
+            CGImageDestinationAddImage(destination, stored, properties as CFDictionary)
+        }
         guard CGImageDestinationFinalize(destination) else { return Data() }
         return data as Data
+    }
+
+    /// The pixels as stored for `frame`: as displayed, or for orientation 6 turned a quarter to the left.
+    private static func stored(_ frame: Frame, shade: Int) -> CGImage? {
+        let (width, height) = (frame.width, frame.height)
+        guard let upright = draw(width: width, height: height, shade: shade) else { return nil }
+        guard frame.exifOrientation == 6 else { return upright }
+        // Stored = displayed turned a quarter counter-clockwise; orientation 6 turns it clockwise again.
+        return bitmap(width: height, height: width) { context in
+            context.translateBy(x: CGFloat(height), y: 0)
+            context.rotate(by: .pi / 2)
+            context.draw(upright, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
     }
 
     /// Whether ImageIO can write HEIC here (the iOS simulator and some Macs cannot).

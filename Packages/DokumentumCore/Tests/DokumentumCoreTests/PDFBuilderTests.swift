@@ -3,6 +3,7 @@ import DokumentumCoreTestSupport
 import Foundation
 import ImageIO
 import Testing
+import UniformTypeIdentifiers
 
 @testable import DokumentumCore
 
@@ -79,6 +80,74 @@ struct PDFBuilderTests {
             ImageCoding.orientedImage(
                 from: TestImage.make(width: 640, height: 480), maxPixelSize: PDFBuilder.maxPixelSize))
         #expect(small.width == 640 && small.height == 480)
+    }
+
+    /// A fax or scanner TIFF's frames, as #90 uses them: landscape, portrait stored with orientation 6, square.
+    static let faxFrames = [
+        TestImage.Frame(width: 1200, height: 900), TestImage.Frame(width: 900, height: 1200, exifOrientation: 6),
+        TestImage.Frame(width: 500, height: 500),
+    ]
+    static let faxPageSizes = [
+        CGSize(width: 595, height: 446), CGSize(width: 595, height: 793), CGSize(width: 595, height: 595),
+    ]
+
+    /// Every frame of a multi-page TIFF becomes a page, in frame order, each with its own orientation (#90).
+    @Test func aMultiPageTIFFGivesAPagePerFrameInTheirOrder() throws {
+        let tiff = TestImage.makeTIFF(frames: Self.faxFrames)
+
+        let result = try #require(PDFBuilder.makePDF(fromImageData: [tiff]))
+
+        #expect(result.pageCount == 3)
+        #expect(result.leftOut == 0)
+        #expect(TestPDFReader.pageSizes(result.data) == Self.faxPageSizes)
+        let top = try #require(TestPDFReader.color(result.data, page: 1, atFraction: CGPoint(x: 0.5, y: 0.1)))
+        let bottom = try #require(TestPDFReader.color(result.data, page: 1, atFraction: CGPoint(x: 0.5, y: 0.9)))
+        #expect(Self.isRed(top), "frame 2 upright: its top at the top of the page: \(top)")
+        #expect(Self.isWhite(bottom), "\(bottom)")
+    }
+
+    /// A TIFF's frames take the TIFF's place among other images.
+    @Test func aTIFFAmongImagesKeepsTheOrder() throws {
+        let items = [
+            TestImage.make(width: 640, height: 480), TestImage.makeTIFF(frames: Self.faxFrames),
+            TestImage.make(width: 500, height: 700, type: .png),
+        ]
+
+        let result = try #require(PDFBuilder.makePDF(fromImageData: items))
+
+        #expect(result.pageCount == 5)
+        #expect(result.leftOut == 0)
+        #expect(
+            TestPDFReader.pageSizes(result.data)
+                == [CGSize(width: 595, height: 446)] + Self.faxPageSizes + [CGSize(width: 595, height: 833)])
+    }
+
+    /// Only a TIFF is split (#90, T1): a GIF, an APNG and a HEIC with three images each stay one page. Pins the
+    /// decision; the fixture must really hold three images, or the pin would hold for nothing. HEIC only where
+    /// ImageIO can encode it.
+    @Test(arguments: [UTType.gif, .png] + (TestImage.canEncodeHEIC ? [.heic] : []))
+    func onlyATIFFIsSplitIntoPages(type: UTType) throws {
+        let frames = Array(repeating: TestImage.Frame(width: 300, height: 200), count: 3)
+        let data = TestImage.make(type: type, frames: frames)
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        try #require(CGImageSourceGetCount(source) == 3, "the fixture has three images")
+
+        let result = try #require(PDFBuilder.makePDF(fromImageData: [data]))
+
+        #expect(result.pageCount == 1)
+        #expect(result.leftOut == 0)
+        #expect(TestPDFReader.pageSizes(result.data) == [CGSize(width: 595, height: 397)])
+    }
+
+    /// No cap on the frames (#90, T2).
+    @Test func aTIFFWithManyFramesKeepsEveryFrame() throws {
+        let tiff = TestImage.makeTIFF(frames: Array(repeating: TestImage.Frame(width: 16, height: 16), count: 200))
+
+        let result = try #require(PDFBuilder.makePDF(fromImageData: [tiff]))
+
+        #expect(result.pageCount == 200)
+        #expect(result.leftOut == 0)
+        #expect(TestPDFReader.pageSizes(result.data).count == 200)
     }
 
     static func isRed(_ color: (Int, Int, Int)) -> Bool { color.0 > 200 && color.1 < 60 && color.2 < 60 }
