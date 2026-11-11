@@ -538,6 +538,37 @@ the group's queue folder and closes, and the app imports the items at launch and
 - **Signing.** Agents build the extension unsigned like the app; the simulator gets the group from the
   entitlements file. The app group on a device (both App IDs, the profiles) is the maintainer's (#4, M2 and M3).
 
+## Page cleanup engine
+
+Step 4 (#5, part 1, #110) adds the engine in `DokumentumCore/Cleanup`; the cleanup sheet (part 3) and the
+scanner (part 2) build on it.
+
+- **An edit** (`PageEdit`) is applied in the photo's displayed orientation (EXIF applied when decoding), in
+  this order: the perspective crop to four corners (`PageQuad`, normalised 0…1 from the top left,
+  `CIPerspectiveCorrection`), the filter (`original`, `enhanced` = `CIDocumentEnhancer`, `grayscale` =
+  saturation 0, `blackAndWhite` = enhanced, grey, `CIColorThresholdOtsu`), then clockwise quarter turns. One
+  shared `CIContext` without cached intermediates.
+- **Corner detection** (`VisionPageCornerDetector`): `VNDetectDocumentSegmentationRequest`, then
+  `VNDetectRectanglesRequest` when the first answer is not accepted. Accepted: confidence at least 0.5, a
+  convex quad, at least 10 % of the image. The segmentation request returns the whole image with confidence
+  0 when there is no page (macOS). On the iOS simulator it does not work (the whole image with confidence 0,
+  or wrong corners with confidence 0.97 for an empty desk, varying between runs, #110), so the simulator
+  build uses the rectangle request only (`targetEnvironment(simulator)`). Tests assert accuracy, not which
+  request answered; the one test of the segmentation request runs on macOS and is skipped (`Test.cancel` with
+  the reason, not a failure) when it reports confidence 0.
+- **The edited import** (`DocumentImporter.importEditedImages`): an `EditedImage` is one picked image with
+  the pages it keeps (`EditedPage`: frame and edit; a multi-page TIFF can keep a page per frame). Pages are
+  decoded, cleaned and drawn one at a time. A photo is decoded at `min(original, 2400 / longer side of the
+  corners' bounding box)`, so a cropped page keeps up to 2400 px on its longer side, then scaled to at most
+  2400 px. **The duplicate hash is the photo import's:** the original bytes of each image that keeps a page,
+  once per image, in order; the edits do not enter it. So the same photos are a duplicate whatever the edits,
+  and a TIFF split into frames hashes like `importImages` of the file. An image whose pages were all removed
+  leaves the hash.
+- **Rendered test pages** (`TestPage` in `DokumentumCoreTestSupport`): an A4 page with a black marker at the
+  top left, a red band at the top right and grey text bars, optionally on tinted paper with a shadow gradient,
+  and `TestPage.photographed`, the page warped onto a dark desk at known corners (optionally with EXIF
+  orientation 6). `TestPixels.rgb` samples a `CGImage`.
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, `processing`,

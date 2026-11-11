@@ -37,6 +37,14 @@ final class StubImporter: DocumentImporting {
         return imagesResult
     }
 
+    /// The edited import of the cleanup (#5) answers like `importImages`; nothing in the app calls it yet.
+    func importEditedImages(_ items: [EditedImage], title: String, source: DocumentSource) async
+        -> ImageImportResult
+    {
+        imageCalls.withLock { $0.append((items.map(\.data), title)) }
+        return imagesResult
+    }
+
     func importFile(data: Data, fileName: String, contentType: UTType?, source: DocumentSource) async
         -> ImportOutcome
     {
