@@ -6,7 +6,9 @@
     python3 scripts/check-localization.py --self-test
 
 Two catalogs, one per target that shows text: the app's Dokumentum/Localizable.xcstrings and the
-share extension's DokumentumShare/Localizable.xcstrings (plan of #4, part 4).
+share extension's DokumentumShare/Localizable.xcstrings (plan of #4, part 4). A third, the app's
+Dokumentum/InfoPlist.xcstrings, holds the Info.plist texts (the camera's usage text, #5, part 2). It
+has no `.stringsdata` (its keys come from the generated Info.plist), so only --catalog checks it.
 
 --catalog reads the catalogs alone: every entry needs a finished German translation (a plural needs
 German `one` and `other`, otherwise German reads "1 Dokumente"), and no entry may be `stale` (the
@@ -33,6 +35,9 @@ TARGETS = [
      "build": "**/Dokumentum.build/*/Dokumentum.build", "always": True},
     {"name": "DokumentumShare", "catalog": ROOT / "DokumentumShare" / "Localizable.xcstrings",
      "build": "**/Dokumentum.build/*/DokumentumShare.build", "always": False},
+    # No build pattern: the build mode skips it.
+    {"name": "Dokumentum (Info.plist)", "catalog": ROOT / "Dokumentum" / "InfoPlist.xcstrings",
+     "build": None, "always": False},
 ]
 
 
@@ -166,6 +171,17 @@ def self_test_targets(fine):
         stringsdata(root, "Share", ["Saving"])
         assert run(check_build, derived, targets) == 1, "the app without strings fails"
         cases += 5
+
+        # A catalog without .stringsdata (the Info.plist texts): --catalog checks it, the build mode skips it.
+        info = {"name": "Info", "catalog": root / "Info.xcstrings", "build": None, "always": False}
+        write_json(info["catalog"], {"strings": {"NSCameraUsageDescription": {}}})
+        assert run(check_catalog, targets + [info]) == 1, "an untranslated Info.plist text fails --catalog"
+        write_json(info["catalog"], {"strings": {"NSCameraUsageDescription": fine}})
+        assert run(check_catalog, targets + [info]) == 0, "a translated Info.plist text passes --catalog"
+        stringsdata(root, "App", ["Inbox"])
+        write_json(info["catalog"], {"strings": {"NSCameraUsageDescription": {}}})
+        assert run(check_build, derived, targets + [info]) == 0, "the build mode skips the Info.plist catalog"
+        cases += 3
     return cases
 
 
@@ -214,6 +230,9 @@ def used_strings(derived_data, build_pattern):
 def check_build(derived_data, targets=TARGETS):
     failed = False
     for target in targets:
+        if target["build"] is None:
+            print(f"{relative(target['catalog'])} has no .stringsdata; --catalog checks it.")
+            continue
         used, built = used_strings(derived_data, target["build"])
         if not used:
             if target["always"] or built:

@@ -124,6 +124,47 @@
         }
       }
     },
+    "%lld pages could not be read and were left out." : {
+      "comment" : "Import notice line: pages of a scan are missing from the new document (two or more).",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Seite konnte nicht gelesen werden und wurde ausgelassen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Seiten konnten nicht gelesen werden und wurden ausgelassen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 page could not be read and was left out."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld pages could not be read and were left out."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld photos could not be read and were left out." : {
       "comment" : "Import notice line: photos of a selection are missing from the new document (two or more).",
       "localizations" : {
@@ -680,6 +721,23 @@
         }
       }
     },
+    "One page could not be read and was left out." : {
+      "comment" : "Import notice line: one page of a scan is missing from the new document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Seite konnte nicht gelesen werden und wurde ausgelassen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One page could not be read and was left out."
+          }
+        }
+      }
+    },
     "One photo could not be read and was left out." : {
       "comment" : "Import notice line: one photo of a selection is missing from the new document.",
       "localizations" : {
@@ -779,6 +837,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wiederherstellen"
+          }
+        }
+      }
+    },
+    "Saving scan…" : {
+      "comment" : "Shown at the bottom of the window while a finished scan is turned into a document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan wird gespeichert …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving scan…"
+          }
+        }
+      }
+    },
+    "Scan %@" : {
+      "comment" : "Title of a scanned document; %@ is the date and time of the scan.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan %@"
+          }
+        }
+      }
+    },
+    "Scanning failed" : {
+      "comment" : "Title of the notice when the document camera failed; nothing was imported.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scannen fehlgeschlagen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanning failed"
+          }
+        }
+      }
+    },
+    "Scan…" : {
+      "comment" : "Item of the list toolbar's import menu (iPhone): opens the document camera.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scannen …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan…"
           }
         }
       }
