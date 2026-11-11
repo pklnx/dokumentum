@@ -7,8 +7,9 @@ import UniformTypeIdentifiers
 ///
 /// For each attachment, in this order (plan review N8):
 /// 1. `loadFileRepresentation`: a file the system lends for the duration of the call, copied into the queue
-///    inside the call. The bytes never pass through memory. Only a regular file is copied: a lent symbolic link
-///    is refused by `ShareQueue`, so it is never followed (review of #85), and the next step takes over.
+///    inside the call. The file is never held in memory: `ShareQueue` copies it through one 1 MiB buffer. Only a
+///    regular file is copied: a lent symbolic link is refused by `ShareQueue`, so it is never followed (review of
+///    #85), and the next step takes over.
 /// 2. If that fails, `loadDataRepresentation` for the same type, which most providers coerce to.
 /// 3. Otherwise (an attachment that offers only an image object) it is not written: decoding an image here could
 ///    run the extension out of memory. The sheet then shows its error.
