@@ -1,7 +1,7 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
-// Pure logic, Foundation only: it also builds and tests on Linux (the `kit-linux` check).
+// Pure logic, Foundation and the C library only: it also builds and tests on Linux (the `kit-linux` check).
 let package = Package(
     name: "DokumentumKit",
     platforms: [.iOS(.v27), .macOS(.v27)],

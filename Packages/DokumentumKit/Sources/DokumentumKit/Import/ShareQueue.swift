@@ -1,5 +1,13 @@
 import Foundation
 
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#elseif canImport(Musl)
+    import Musl
+#endif
+
 /// The hand-over from the share extension to the app (plan of #4, part 4): a folder in the app group,
 /// `ShareQueue/`, that the extension writes and the app reads. The extension never opens the archive; it
 /// links this package only.
@@ -18,16 +26,26 @@ import Foundation
 ///   Leftovers in `Incoming/` (the extension ended before the rename) are removed after a day.
 /// - **A file name is data, never a path.** The payload is always `payload`. `originalFileName` is used for the
 ///   title only, and only through `fileName(fromShared:)`: `../../x.pdf` gives `x.pdf`.
-/// - **Regular files only, never links** (review of #85). The writer copies only a regular file (a lent symbolic
-///   link would be copied as a link and then followed by the app, out of the queue); the reader reads a payload
-///   only when it is a regular file, and an entry of `Items/` only when it is a real folder.
+/// - **Regular files only, opened once, no symbolic link from the item's folder down** (reviews of #85, #87).
+///   Every file is opened once (`O_NOFOLLOW`, `O_NONBLOCK`) and checked on the open descriptor (`fstat`): a
+///   symbolic link, a folder, a FIFO, a socket or a device is refused as `NotARegularFile`, and a link swapped in
+///   after the open is never followed. The writer copies from that descriptor through one `copyChunkSize` buffer,
+///   so a file is never held in memory; the reader reads from it. Inside an item, `payload` and `item.json` are
+///   opened, and `item.json` is rewritten, only through the descriptor of the item's folder, itself opened without
+///   following a link (`O_DIRECTORY`, `O_NOFOLLOW`): an item folder swapped for a link is refused, and nothing is
+///   read or written through it. A linked `item.json` makes the item unreadable (`Failed/`), and an entry of
+///   `Items/` is read only when it is a real folder. A missing file is `POSIXError(.ENOENT)`.
+///   What this does not cover, by design: a symbolic link at `ShareQueue/` or `Items/` is followed (both are
+///   reached by path; our own code creates them, and swapping them needs the same group access), so is one among
+///   the folders above a lent file (`/var` is a link to `/private/var`); and a hard link is a regular file.
 /// - **Versions.** An `item.json` with a newer `version` (a newer extension than app) is left alone; one that
 ///   cannot be read moves to `Failed/`.
-/// - **Attempts.** The reader counts an attempt in `item.json` (written `.atomic`) before it imports an item;
-///   at `maxAttempts` the item moves to `Failed/`.
+/// - **Attempts.** The reader counts an attempt in `item.json` before it imports an item (a new file in the item's
+///   folder, written in full and synced, then renamed over `item.json`); at `maxAttempts` the item moves to
+///   `Failed/`.
 ///
-/// Foundation only, so it is tested on Linux. Every method works on the file system directly and is safe to
-/// call from any thread; two processes may use one queue at the same time.
+/// Foundation and the C library only (Darwin, Glibc or Musl), so it is tested on Linux. Every method works on the
+/// file system directly and is safe to call from any thread; two processes may use one queue at the same time.
 public struct ShareQueue: Sendable {
     /// The app group of the iOS app and its share extension (plan.md, section 2).
     public static let appGroupIdentifier = "group.space.pklnx.dokumentum"
@@ -62,27 +80,38 @@ public struct ShareQueue: Sendable {
     // MARK: Writing (the share extension)
 
     /// Adds a copy of the file at `source` (a file the system lends for the duration of a call) and returns
-    /// the item's identifier. The item appears in `Items/` complete or not at all. Throws `NotARegularFile`, and
-    /// writes nothing, when `source` is a symbolic link, a folder or anything else that is not a regular file.
+    /// the item's identifier. The item appears in `Items/` complete or not at all. `source` is opened once, without
+    /// following a link at its last component, and copied from the open file through one 1 MiB buffer, so memory
+    /// stays bounded whatever the file's size. Throws, and writes nothing, `NotARegularFile` when `source` is a
+    /// symbolic link, a folder, a FIFO, a socket, a device or anything else that is not a regular file, and
+    /// `POSIXError(.ENOENT)` when it does not exist.
     @discardableResult
     public func add(
         copyingFileAt source: URL, originalFileName: String, typeIdentifier: String, createdAt: Date = Date()
     ) throws -> UUID {
-        guard Self.isRegularFile(source) else { throw NotARegularFile() }
+        try add(
+            copyingFileAt: source, originalFileName: originalFileName, typeIdentifier: typeIdentifier,
+            createdAt: createdAt, afterOpen: nil)
+    }
+
+    /// `add(copyingFileAt:…)` with a hook for tests: `afterOpen` runs after `source` was opened and checked.
+    @discardableResult
+    func add(
+        copyingFileAt source: URL, originalFileName: String, typeIdentifier: String, createdAt: Date,
+        afterOpen: (() throws -> Void)?
+    ) throws -> UUID {
+        let input = try Self.openRegularFile(source)
+        defer { try? input.close() }
+        try afterOpen?()
         return try add(originalFileName: originalFileName, typeIdentifier: typeIdentifier, createdAt: createdAt) {
-            try FileManager.default.copyItem(at: source, to: $0)
+            try Self.copy(from: input, to: $0)
         }
     }
 
-    /// A file to copy, or a payload to read, that is not a regular file (a symbolic link, a folder, a device).
+    /// A file to copy, or a file of an item to read, that is not a regular file (a symbolic link, a folder, a FIFO,
+    /// a device), or an item folder that is not a real folder.
     public struct NotARegularFile: Error, Equatable {
         public init() {}
-    }
-
-    /// Whether `url` itself (not what a link at it points to) is a regular file.
-    static func isRegularFile(_ url: URL) -> Bool {
-        let type = try? FileManager.default.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType
-        return type == .typeRegular
     }
 
     /// Adds `data` as an item; see `add(copyingFileAt:…)`.
@@ -122,7 +151,7 @@ public struct ShareQueue: Sendable {
             let info = ShareQueueItem.Info(
                 version: Self.currentVersion, originalFileName: originalFileName, typeIdentifier: typeIdentifier,
                 createdAt: createdAt, attempts: 0)
-            try Self.write(info, to: building)
+            try Self.writeInfo(info, to: building)
             try fileManager.createDirectory(at: itemsFolder, withIntermediateDirectories: true)
             try beforeHandOver?(building)
             // The last step: from here on the reader sees the item, complete.
@@ -172,16 +201,28 @@ public struct ShareQueue: Sendable {
         return scan
     }
 
-    /// Counts one attempt in the item's `item.json` (atomically) and returns the item as written. Throws when the
-    /// item is gone or cannot be written; the caller then leaves it for the next run.
+    /// Counts one attempt in the item's `item.json` (atomically) and returns the item as written. Everything goes
+    /// through the item folder's descriptor: a new file in that folder, written in full and synced, then renamed
+    /// over `item.json`. Throws, and writes nothing, when the item cannot be written; the caller then leaves it
+    /// for the next run: `NotARegularFile` when the item's folder is not a real folder (a link to one),
+    /// `POSIXError(.ENOENT)` when the item is gone, `CocoaError(.fileNoSuchFile)` when its `item.json` is missing
+    /// or not a regular file.
     public func recordAttempt(_ item: ShareQueueItem) throws -> ShareQueueItem {
+        try recordAttempt(item, beforeReplace: nil)
+    }
+
+    /// `recordAttempt(_:)` with a hook for tests: `beforeReplace` runs after the folder was opened and `item.json`
+    /// was checked, right before the new file is written.
+    func recordAttempt(_ item: ShareQueueItem, beforeReplace: (() throws -> Void)?) throws -> ShareQueueItem {
         var info = item.info
         info.attempts += 1
-        let folder = itemFolder(item.id)
-        guard FileManager.default.fileExists(atPath: folder.appending(path: Self.infoName).path) else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        try Self.write(info, to: folder)
+        let folder = try Self.openFolder(itemFolder(item.id))
+        defer { close(folder) }
+        var status = stat()
+        let found = Self.call(Self.infoName) { fstatat(folder, $0, &status, AT_SYMLINK_NOFOLLOW) }
+        guard found.result == 0, status.st_mode & S_IFMT == S_IFREG else { throw CocoaError(.fileNoSuchFile) }
+        try beforeReplace?()
+        try Self.replace(Self.infoName, in: folder, with: Self.encode(info))
         return ShareQueueItem(id: item.id, info: info)
     }
 
@@ -190,12 +231,21 @@ public struct ShareQueue: Sendable {
         itemFolder(item.id).appending(path: Self.payloadName)
     }
 
-    /// The item's bytes. Throws `NotARegularFile` when the payload is not a regular file (never follows a link out
-    /// of the queue), or the read's error.
+    /// The item's bytes, read from the payload opened once through the item folder's descriptor (never through a
+    /// link, out of the queue). Throws `NotARegularFile` when the payload is not a regular file or the item's
+    /// folder is not a real folder, `POSIXError(.ENOENT)` when either is missing, or the read's error.
     public func payload(of item: ShareQueueItem) throws -> Data {
-        let url = payloadURL(of: item)
-        guard Self.isRegularFile(url) else { throw NotARegularFile() }
-        return try Data(contentsOf: url, options: .mappedIfSafe)
+        try payload(of: item, afterOpen: nil)
+    }
+
+    /// `payload(of:)` with a hook for tests: `afterOpen` runs after the payload was opened and checked.
+    func payload(of item: ShareQueueItem, afterOpen: (() throws -> Void)?) throws -> Data {
+        let folder = try Self.openFolder(itemFolder(item.id))
+        defer { close(folder) }
+        let payload = try Self.openRegularFile(named: Self.payloadName, in: folder)
+        defer { try? payload.close() }
+        try afterOpen?()
+        return try payload.readToEnd() ?? Data()
     }
 
     /// Removes the item. An item that is gone already is no error.
@@ -308,8 +358,13 @@ public struct ShareQueue: Sendable {
         case unreadable
     }
 
+    /// Reads `item.json` through the folder's descriptor; a link or anything but a regular file is unreadable.
     private static func readInfo(in folder: URL) -> ReadInfo {
-        guard let data = try? Data(contentsOf: folder.appending(path: infoName)) else { return .unreadable }
+        guard let directory = try? openFolder(folder) else { return .unreadable }
+        defer { close(directory) }
+        guard let file = try? openRegularFile(named: infoName, in: directory) else { return .unreadable }
+        defer { try? file.close() }
+        guard let data = try? file.readToEnd() else { return .unreadable }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
         guard let version = try? decoder.decode(VersionOnly.self, from: data).version, version >= 1 else {
@@ -324,12 +379,161 @@ public struct ShareQueue: Sendable {
         var version: Int
     }
 
-    private static func write(_ info: ShareQueueItem.Info, to folder: URL) throws {
+    private static func encode(_ info: ShareQueueItem.Info) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(info)
+    }
+
+    /// The writer's `item.json` in its own new `Incoming/<UUID>/` folder.
+    private static func writeInfo(_ info: ShareQueueItem.Info, to folder: URL) throws {
         // Atomic: the reader rewrites it to count attempts, and a crash must not leave half a file.
-        try encoder.encode(info).write(to: folder.appending(path: infoName), options: .atomic)
+        try encode(info).write(to: folder.appending(path: infoName), options: .atomic)
+    }
+
+    // MARK: Opening files (once, never through a link)
+
+    /// A regular file: read only, never through a link (the last component), and never blocking, so a FIFO cannot
+    /// hang the open; whether it is a regular file is checked on the open descriptor.
+    static let readFlags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
+    /// An item's folder: only a real folder, never a link to one.
+    static let folderFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+    /// A new file of our own: created here or not at all, never through a link.
+    static let newFileFlags = O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC
+    /// The copy reads and writes this much at a time, so the extension's memory stays bounded.
+    static let copyChunkSize = 1 << 20
+
+    /// Opens `url` once, only when it is itself a regular file (`readFlags`, then `fstat`).
+    static func openRegularFile(_ url: URL) throws -> FileHandle {
+        let opened = try call(url) { open($0, readFlags) }
+        return try regularFile(opened)
+    }
+
+    /// `openRegularFile` for the entry `name` of an open folder (`openat`).
+    static func openRegularFile(named name: String, in folder: Int32) throws -> FileHandle {
+        try regularFile(call(name) { openat(folder, $0, readFlags) })
+    }
+
+    /// Opens an item's folder only when it is itself a folder, not a link to one. The caller closes it.
+    static func openFolder(_ url: URL) throws -> Int32 {
+        let opened = try call(url) { open($0, folderFlags) }
+        guard opened.result >= 0 else { throw openError(opened.code) }
+        return opened.result
+    }
+
+    private static func regularFile(_ opened: (result: Int32, code: Int32)) throws -> FileHandle {
+        guard opened.result >= 0 else { throw openError(opened.code) }
+        var status = stat()
+        guard fstat(opened.result, &status) == 0, status.st_mode & S_IFMT == S_IFREG else {
+            close(opened.result)
+            throw NotARegularFile()
+        }
+        return FileHandle(fileDescriptor: opened.result, closeOnDealloc: true)
+    }
+
+    /// Copies the open `input` into a new file at `destination` with `read(2)` and `write(2)` through one reused
+    /// buffer of `copyChunkSize`, then `fsync`. Memory stays at one buffer whatever the file's size, on every
+    /// platform: no chunk becomes a `Data` (on Apple platforms `FileHandle.read(upToCount:)` returns autoreleased
+    /// data, and a loop without a pool keeps every chunk until it returns; review of #95, B1).
+    private static func copy(from input: FileHandle, to destination: URL) throws {
+        let created = try call(destination) { open($0, newFileFlags, 0o644) }
+        guard created.result >= 0 else { throw posixError(created.code) }
+        let output = created.result
+        defer { close(output) }
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: copyChunkSize, alignment: 16)
+        defer { buffer.deallocate() }
+        while true {
+            let count = read(input.fileDescriptor, buffer.baseAddress, buffer.count)
+            if count == 0 { break }
+            if count < 0 {
+                let code = errno
+                if code == EINTR { continue }
+                throw posixError(code)
+            }
+            try writeAll(UnsafeRawBufferPointer(rebasing: buffer[..<count]), to: output)
+        }
+        guard fsync(output) == 0 else { throw posixError(errno) }
+    }
+
+    /// `write(2)`, as `writeAll` calls it; a test passes one that writes short or fails.
+    typealias WriteCall = (_ descriptor: Int32, _ bytes: UnsafeRawPointer, _ count: Int) -> Int
+
+    /// Writes all of `bytes` to `descriptor`: loops on short writes and on `EINTR`, throws any other error (N8).
+    static func writeAll(
+        _ bytes: UnsafeRawBufferPointer, to descriptor: Int32, using writeCall: WriteCall = { write($0, $1, $2) }
+    ) throws {
+        guard var next = bytes.baseAddress else { return }
+        var left = bytes.count
+        while left > 0 {
+            let written = writeCall(descriptor, next, left)
+            if written < 0 {
+                let code = errno
+                if code == EINTR { continue }
+                throw posixError(code)
+            }
+            guard written > 0 else { throw posixError(EIO) }
+            next += written
+            left -= written
+        }
+    }
+
+    /// Replaces the entry `name` of an open folder with `data`, atomically: a new file in that folder (`O_EXCL`,
+    /// never through a link), written in full and synced, then renamed over `name` in the same folder. The new file
+    /// is removed again on any error.
+    private static func replace(_ name: String, in folder: Int32, with data: Data) throws {
+        let temporary = ".\(name).\(UUID().uuidString)"
+        let created = call(temporary) { openat(folder, $0, newFileFlags, 0o644) }
+        guard created.result >= 0 else { throw posixError(created.code) }
+        do {
+            let file = created.result
+            defer { close(file) }
+            try data.withUnsafeBytes { try writeAll($0, to: file) }
+            guard fsync(file) == 0 else { throw posixError(errno) }
+            let renamed = temporary.withCString { from in
+                name.withCString { to in
+                    let result = renameat(folder, from, folder, to)
+                    return (result: result, code: result < 0 ? errno : 0)
+                }
+            }
+            guard renamed.result == 0 else { throw posixError(renamed.code) }
+        } catch {
+            _ = call(temporary) { unlinkat(folder, $0, 0) }
+            throw error
+        }
+    }
+
+    /// Runs `body` on `url`'s file-system path and returns its result with the `errno` it left, read inside the
+    /// closure. A URL without a file-system path throws `CocoaError(.fileReadInvalidFileName)`.
+    private static func call(_ url: URL, _ body: (UnsafePointer<CChar>) -> Int32) throws -> (
+        result: Int32, code: Int32
+    ) {
+        let outcome: (result: Int32, code: Int32)? = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return nil }
+            let result = body(path)
+            return (result, result < 0 ? errno : 0)
+        }
+        guard let outcome else { throw CocoaError(.fileReadInvalidFileName) }
+        return outcome
+    }
+
+    /// Runs `body` on `name` as a C string and returns its result with the `errno` it left, read inside the closure.
+    private static func call(_ name: String, _ body: (UnsafePointer<CChar>) -> Int32) -> (result: Int32, code: Int32) {
+        name.withCString { name in
+            let result = body(name)
+            return (result, result < 0 ? errno : 0)
+        }
+    }
+
+    /// The error of a failed open. `NotARegularFile` for what is not a regular file but cannot be opened at all: a
+    /// link (`ELOOP`; Linux gives `ENOTDIR` for a link opened with `O_DIRECTORY`) and a socket (`EOPNOTSUPP` on
+    /// Apple platforms, `ENXIO` on Linux). Anything else is its `POSIXError`, such as `ENOENT` for a missing file.
+    private static func openError(_ code: Int32) -> any Error {
+        [ELOOP, ENOTDIR, EOPNOTSUPP, ENXIO].contains(code) ? NotARegularFile() : posixError(code)
+    }
+
+    private static func posixError(_ code: Int32) -> POSIXError {
+        POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
     }
 }
 
