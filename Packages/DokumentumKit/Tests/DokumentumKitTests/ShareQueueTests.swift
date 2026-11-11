@@ -844,6 +844,54 @@ struct ShareQueueTests {
         }
     }
 
+    /// K17 (reviews of #106, A-N1 and B1): a uniquely referenced payload written in place changes the `Data` and
+    /// leaves the file as it was. 64 KiB, above `Data`'s inline size, so the write goes into the mapping itself.
+    /// With a read-only mapping that write raises `SIGBUS`, so on macOS it runs in a child process and a regression
+    /// fails this test instead of ending the suite; elsewhere it runs here (it cannot fault on a writable mapping).
+    @Test func aPayloadWrittenInPlaceLeavesTheFileUnchanged() async throws {
+        try await withContainer { queue, _ in
+            try queue.add(
+                data: inPlacePattern(), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf")
+            #if os(macOS)
+                await #expect(processExitsWith: .success) { [root = queue.root as URL] in
+                    try writePayloadInPlace(root: root)
+                }
+            #else
+                try writePayloadInPlace(root: queue.root)
+            #endif
+            let item = try #require(queue.scan().items.first)
+            #expect(try Data(contentsOf: queue.payloadURL(of: item)) == inPlacePattern())
+        }
+    }
+
+    #if os(macOS)
+        /// K18 (reviews of #106, A-N2 and B2): releasing the payload's `Data` unmaps it. In a child process, which
+        /// runs nothing else, so no other test can map the same addresses in between: the range is mapped while the
+        /// `Data` lives (`msync` succeeds) and gone after it was released (`msync` fails with `ENOMEM`).
+        @Test func aReleasedPayloadIsUnmapped() async throws {
+            try await withContainer { queue, _ in
+                try queue.add(
+                    data: Data(repeating: 1, count: 1 << 20), originalFileName: "a.pdf", typeIdentifier: "com.adobe.pdf"
+                )
+                await #expect(processExitsWith: .success) { [root = queue.root as URL] in
+                    let queue = ShareQueue(root: root)
+                    guard let item = queue.scan().items.first else { throw CocoaError(.fileNoSuchFile) }
+                    let range: (base: UnsafeMutableRawPointer, count: Int)? = try {
+                        let payload = try queue.payload(of: item)
+                        return payload.withUnsafeBytes { bytes in
+                            bytes.baseAddress.map { (UnsafeMutableRawPointer(mutating: $0), bytes.count) }
+                        }
+                    }()
+                    guard let range else { throw CocoaError(.fileReadCorruptFile) }
+                    // The `Data` is released when the closure above returns.
+                    guard msync(range.base, range.count, MS_ASYNC) == -1, errno == ENOMEM else {
+                        throw POSIXError(.EEXIST)
+                    }
+                }
+            }
+        }
+    #endif
+
     /// N8: `writeAll` writes everything through short writes and `EINTR`, and throws any other error.
     @Test func writeAllLoopsOverShortWritesAndInterrupts() throws {
         try withQueue { _, container in
@@ -1098,3 +1146,23 @@ private let largeSize = 128 << 20
         report(numbers, exitCode: growth < 32 * mebibyte ? 0 : 3)
     }
 #endif
+
+/// K17's payload: 64 KiB, every byte depending on its offset.
+private func inPlacePattern() -> Data {
+    Data((0..<(64 << 10)).map { UInt8(truncatingIfNeeded: $0 ^ ($0 >> 8) ^ 0x33) })
+}
+
+/// K17's step: maps the queue's only item, writes into the uniquely referenced `Data` at its first, middle and last
+/// byte, and checks that the `Data` changed. Throws when it did not.
+private func writePayloadInPlace(root: URL) throws {
+    let queue = ShareQueue(root: root)
+    guard let item = queue.scan().items.first else { throw CocoaError(.fileNoSuchFile) }
+    var payload = try queue.payload(of: item)
+    let original = inPlacePattern()
+    for offset in [0, payload.count / 2, payload.count - 1] {
+        payload[offset] = ~original[offset]
+    }
+    for offset in [0, payload.count / 2, payload.count - 1] where payload[offset] != ~original[offset] {
+        throw CocoaError(.fileWriteUnknown)
+    }
+}

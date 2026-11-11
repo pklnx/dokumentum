@@ -31,22 +31,24 @@ import Foundation
 ///   symbolic link, a folder, a FIFO, a socket or a device is refused as `NotARegularFile`, and a link swapped in
 ///   after the open is never followed. The writer copies from that descriptor through one `copyChunkSize` buffer,
 ///   so a file is never held in memory; the reader maps the payload from it (below). Inside an item, `payload` and
-///   `item.json` are
-///   opened, and `item.json` is rewritten, only through the descriptor of the item's folder, itself opened without
-///   following a link (`O_DIRECTORY`, `O_NOFOLLOW`): an item folder swapped for a link is refused, and nothing is
-///   read or written through it. A linked `item.json` makes the item unreadable (`Failed/`), and an entry of
+///   `item.json` are opened, and `item.json` is rewritten, only through the descriptor of the item's folder, itself
+///   opened without following a link (`O_DIRECTORY`, `O_NOFOLLOW`): an item folder swapped for a link is refused,
+///   and nothing is read or written through it. A linked `item.json` makes the item unreadable (`Failed/`), and an entry of
 ///   `Items/` is read only when it is a real folder. A missing file is `POSIXError(.ENOENT)`.
 ///   What this does not cover, by design: a symbolic link at `ShareQueue/` or `Items/` is followed (both are
 ///   reached by path; our own code creates them, and swapping them needs the same group access), so is one among
 ///   the folders above a lent file (`/var` is a link to `/private/var`); and a hard link is a regular file.
-/// - **The payload is mapped, not copied** (#98). `payload(of:)` maps the payload read-only from the descriptor it
-///   opened (`mmap`, `PROT_READ`, `MAP_PRIVATE`) and never copies it into memory, so a large item does not count
-///   toward the app's memory (clean file-backed pages). The mapping stays valid after the descriptor is closed and
-///   after the item is removed, and keeps the removed payload's disk space allocated until the `Data` is released.
-///   Limits, accepted because they need write access to the group (outside the threat model of #85): a payload
-///   changed or truncated by another process while it is mapped may crash the reader or give it bytes that differ
-///   from the file's bytes at the open (probes of #98: a truncated mapping read stale or zero bytes and raised no
-///   signal, on macOS and on iOS). The app counts an attempt before it reads, so an item that crashes it moves to
+/// - **The payload is mapped, not copied** (#98). `payload(of:)` maps the payload from the descriptor it opened as
+///   a private copy-on-write mapping (`mmap`, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE`; the descriptor itself is read
+///   only) and never copies it into memory, so a large item does not count toward the app's memory (clean
+///   file-backed pages). A write to the `Data`, even in place, goes to a private copy of that page and never reaches
+///   the file; with `PROT_READ` alone, an in-place write would crash (review of #106). The mapping stays valid after
+///   the descriptor is closed and after the item is removed, and keeps the removed payload's disk space allocated
+///   until the `Data` is released, which unmaps it. Limits, accepted because they need write access to the group
+///   (outside the threat model of #85): a payload changed or truncated by another process while it is mapped may
+///   crash the reader or give it bytes that differ from the file's bytes at the open, and then the hash, PDFKit's
+///   check and the stored bytes may disagree with each other (probes of #98: a truncated mapping read stale or zero
+///   bytes and raised no signal, on macOS and on iOS). The app counts an attempt before it reads, so an item that crashes it moves to
 ///   `Failed/` after `maxAttempts`. The writer's copy has no such limit: `read(2)` of a truncated file returns short
 ///   and never raises a signal. Mapping also relies on the group container having no data protection that locks
 ///   files (`NSFileProtectionComplete`): a page fault on such a file after the device locks would crash the reader,
@@ -253,10 +255,10 @@ public struct ShareQueue: Sendable {
         itemFolder(item.id).appending(path: Self.payloadName)
     }
 
-    /// The item's bytes, mapped read-only from the payload opened once through the item folder's descriptor (never
-    /// through a link, out of the queue), never copied into memory (#98; see the type's "The payload is mapped").
-    /// The `Data` stays valid after the item is removed, and keeps the payload's disk space until it is released;
-    /// an empty payload is empty `Data`. Throws `NotARegularFile` when the payload is not a regular file or the
+    /// The item's bytes, mapped copy-on-write from the payload opened once through the item folder's descriptor
+    /// (never through a link, out of the queue), never copied into memory (#98; see the type's "The payload is
+    /// mapped"). Writing to the `Data` changes private pages only, never the file. The `Data` stays valid after the
+    /// item is removed, and keeps the payload's disk space until it is released; an empty payload is empty `Data`. Throws `NotARegularFile` when the payload is not a regular file or the
     /// item's folder is not a real folder, `POSIXError(.ENOENT)` when either is missing, or the mapping's error.
     public func payload(of item: ShareQueueItem) throws -> Data {
         try payload(of: item, afterOpen: nil)
@@ -272,15 +274,17 @@ public struct ShareQueue: Sendable {
         return try Self.map(payload)
     }
 
-    /// The whole of the open `file`, mapped read-only (`PROT_READ`, `MAP_PRIVATE`) and unmapped when the `Data` is
-    /// released; the mapping outlives `file`. Empty `Data` for an empty file (`mmap` of length 0 is `EINVAL`).
+    /// The whole of the open `file`, mapped copy-on-write (`PROT_READ | PROT_WRITE`, `MAP_PRIVATE`: `Data` writes in
+    /// place into a uniquely referenced buffer, and a write must reach a private page, never the file or a fault)
+    /// and unmapped when the `Data` is released; the mapping outlives `file`. Empty `Data` for an empty file (`mmap`
+    /// of length 0 is `EINVAL`).
     static func map(_ file: FileHandle) throws -> Data {
         var status = stat()
         guard fstat(file.fileDescriptor, &status) == 0 else { throw posixError(errno) }
         let size = Int(status.st_size)
         guard size > 0 else { return Data() }
         // `MAP_FAILED` is `(void *)-1` on every platform.
-        guard let mapped = mmap(nil, size, PROT_READ, MAP_PRIVATE, file.fileDescriptor, 0),
+        guard let mapped = mmap(nil, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, file.fileDescriptor, 0),
             mapped != UnsafeMutableRawPointer(bitPattern: -1)
         else { throw posixError(errno) }
         return Data(bytesNoCopy: mapped, count: size, deallocator: .custom { _ = munmap($0, $1) })
