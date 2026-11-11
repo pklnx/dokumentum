@@ -8,9 +8,13 @@ import UniformTypeIdentifiers
 /// For each attachment, in this order (plan review N8):
 /// 1. `loadFileRepresentation`: a file the system lends for the duration of the call, copied into the queue
 ///    inside the call. The file is never held in memory: `ShareQueue` copies it through one 1 MiB buffer. Only a
-///    regular file is copied: a lent symbolic link is refused by `ShareQueue`, so it is never followed (review of
-///    #85), and the next step takes over.
-/// 2. If that fails, `loadDataRepresentation` for the same type, which most providers coerce to.
+///    regular file is copied (review of #85).
+/// 2. If no file was lent or it could not be copied, `loadDataRepresentation` for the same type, which most
+///    providers coerce to (`ShareQueue.fallsBackToData(afterFileError:)`). **Not when the lent file was refused**
+///    as `NotARegularFile` (a symbolic link, a folder, a FIFO, a socket or a device): then the attachment is not
+///    saved and the sheet shows its error, so the extension never reads a link's target (#87, the maintainer's
+///    decision on P1). Files lends a link as a link, and the data would be the target's bytes. Every other failure,
+///    a lent file that is gone included, still falls back.
 /// 3. Otherwise (an attachment that offers only an image object) it is not written: decoding an image here could
 ///    run the extension out of memory. The sheet then shows its error.
 enum ShareSaver {
@@ -31,7 +35,15 @@ enum ShareSaver {
                 continue
             }
             let name = provider.suggestedName
-            if await saveFile(provider, as: type, name: name, to: queue) { continue }
+            switch await saveFile(provider, as: type, name: name, to: queue) {
+            case .saved:
+                continue
+            case .notSaved(let error):
+                guard ShareQueue.fallsBackToData(afterFileError: error) else {
+                    notSaved += 1
+                    continue
+                }
+            }
             if await saveData(provider, as: type, name: name, to: queue) { continue }
             notSaved += 1
         }
@@ -56,20 +68,31 @@ enum ShareSaver {
         }
     }
 
+    /// What the file step did.
+    private enum FileResult {
+        case saved
+        /// Not saved; `error` is what `ShareQueue` threw, `nil` when no file was lent.
+        case notSaved(_ error: (any Error)?)
+    }
+
     private static func saveFile(_ provider: NSItemProvider, as type: UTType, name: String?, to queue: ShareQueue)
-        async -> Bool
+        async -> FileResult
     {
         await withCheckedContinuation { continuation in
             _ = provider.loadFileRepresentation(for: type, openInPlace: false) { url, _, _ in
                 // The file exists only until this handler returns, so it is copied here.
                 guard let url else {
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: .notSaved(nil))
                     return
                 }
-                let saved = try? queue.add(
-                    copyingFileAt: url, originalFileName: fileName(suggested: name, fileURL: url, type: type),
-                    typeIdentifier: type.identifier)
-                continuation.resume(returning: saved != nil)
+                do {
+                    try queue.add(
+                        copyingFileAt: url, originalFileName: fileName(suggested: name, fileURL: url, type: type),
+                        typeIdentifier: type.identifier)
+                    continuation.resume(returning: .saved)
+                } catch {
+                    continuation.resume(returning: .notSaved(error))
+                }
             }
         }
     }
