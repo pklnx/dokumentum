@@ -32,6 +32,72 @@ public enum TestPDF {
         return data as Data
     }
 
+    /// What one page of `make(contents:)` shows.
+    public enum PageContent: Sendable {
+        /// The line as real PDF text (Helvetica, 16 pt), as `make(pages:)` draws it.
+        case text(String)
+        /// The lines drawn into an image (150 dpi, grayscale, about 19 pt), the page's only content: a scan.
+        case image([String])
+        /// Nothing.
+        case blank
+    }
+
+    /// An A4 PDF with one page per element of `contents`.
+    public static func make(contents: [PageContent]) -> Data {
+        let data = NSMutableData()
+        var mediaBox = CGRect(x: 0, y: 0, width: 595, height: 842)
+        guard let consumer = CGDataConsumer(data: data as CFMutableData),
+            let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil)
+        else { return Data() }
+        for content in contents {
+            context.beginPDFPage(nil)
+            switch content {
+            case .text(let line):
+                draw([line], in: context, top: 750, fontSize: 16, lineHeight: 24)
+            case .image(let lines):
+                if let image = pageImage(lines: lines) { context.draw(image, in: mediaBox) }
+            case .blank:
+                break
+            }
+            context.endPDFPage()
+        }
+        context.closePDF()
+        return data as Data
+    }
+
+    /// An image-only PDF with one page per element of `pages`, each page an image of its lines (`PageContent.image`).
+    public static func makeImageOnly(pages: [[String]]) -> Data {
+        make(contents: pages.map { .image($0) })
+    }
+
+    /// An A4 page at 150 dpi (1240 × 1754 px), grayscale, with `lines` in black Helvetica of 40 px, one below the
+    /// other from the top left.
+    public static func pageImage(lines: [String]) -> CGImage? {
+        let width = 1240
+        let height = 1754
+        guard
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { return nil }
+        context.setFillColor(gray: 1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        draw(lines, in: context, top: CGFloat(height) - 200, fontSize: 40, lineHeight: 70)
+        return context.makeImage()
+    }
+
+    private static func draw(
+        _ lines: [String], in context: CGContext, top: CGFloat, fontSize: CGFloat, lineHeight: CGFloat
+    ) {
+        let font = CTFontCreateWithName("Helvetica" as CFString, fontSize, nil)
+        for (index, line) in lines.enumerated() {
+            let attributed = NSAttributedString(
+                string: line, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+            context.textPosition = CGPoint(x: fontSize * 3, y: top - CGFloat(index) * lineHeight)
+            CTLineDraw(CTLineCreateWithAttributedString(attributed), context)
+        }
+    }
+
     /// A well-formed PDF whose page tree is empty (`/Count 0`): it opens, with no page. CoreGraphics cannot
     /// write one (a context closed without a page still gets one), so it is written out with its
     /// cross-reference table.

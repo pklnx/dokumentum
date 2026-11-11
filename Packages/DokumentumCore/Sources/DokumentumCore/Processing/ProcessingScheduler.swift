@@ -72,8 +72,12 @@ public final class ProcessingScheduler {
         for container: ModelContainer, observer: StoreChangeObserver, deviceID: String,
         takeoverInterval: TimeInterval? = nil
     ) -> ProcessingScheduler {
+        let failures = ProcessingFailures()
+        // The text stage with Vision (#6, part 2), and this device's one-time re-queue of step 3's documents.
         let queue = ProcessingQueue(
-            container: container, deviceID: deviceID, failures: ProcessingFailures(),
+            container: container, deviceID: deviceID, failures: failures,
+            stage: DocumentStage(recognizer: VisionTextRecognizer()),
+            requeue: ProcessingRequeue(defaultsSuite: failures.defaultsSuite),
             takeoverInterval: takeoverInterval ?? ProcessingClaimRules.takeoverInterval)
         let scheduler = ProcessingScheduler(
             runner: queue, observer: observer, insertions: documentInsertions(of: container))
