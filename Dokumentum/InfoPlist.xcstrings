@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSCameraUsageDescription" : {
+      "comment" : "Shown once by iOS when the document scanner first asks for the camera (Info.plist NSCameraUsageDescription; the English text is in Config/Project.xcconfig).",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumentum verwendet die Kamera, um Dokumente zu scannen. Scans werden nur in deinem Archiv auf deinen Geräten und in deinem iCloud gespeichert."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.1"
+}

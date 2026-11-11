@@ -64,6 +64,13 @@ INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphone*] = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 
+// Camera (#5, part 2, P1): the iPhone app's document scanner, and nothing else, asks for the camera. One
+// variable per target, so the extension and the test bundles do not get the key; none on macOS. The German
+// text is in Dokumentum/InfoPlist.xcstrings, keyed NSCameraUsageDescription; check-project.py asserts where
+// the key resolves.
+DOKUMENTUM_CAMERA_USAGE_Dokumentum[sdk=iphone*] = Dokumentum uses the camera to scan documents. Scans are stored only in your archive on your devices and in your iCloud.
+INFOPLIST_KEY_NSCameraUsageDescription = $(DOKUMENTUM_CAMERA_USAGE_$(TARGET_NAME))
+
 // Assets and previews. The AppIcon set stays empty until step 8.
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 ENABLE_PREVIEWS = YES

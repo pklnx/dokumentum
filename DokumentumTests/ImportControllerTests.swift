@@ -16,24 +16,29 @@ final class StubImporter: DocumentImporting {
     /// The answer to `importImages`.
     let imagesResult: ImageImportResult
     private let calls = Mutex<[String]>([])
-    private let imageCalls = Mutex<[(items: [Data], title: String?)]>([])
+    private let imageCalls = Mutex<[(items: [Data], title: String?, source: DocumentSource)]>([])
+    /// Called at the start of each `importImages`, before it answers (a test reads the controller's state there).
+    let onImportImages: (@Sendable () async -> Void)?
 
     init(
         _ outcomes: [String: ImportOutcome] = [:],
-        images: ImageImportResult = ImageImportResult(outcome: .failed(.storeFailed))
+        images: ImageImportResult = ImageImportResult(outcome: .failed(.storeFailed)),
+        onImportImages: (@Sendable () async -> Void)? = nil
     ) {
         self.outcomes = outcomes
         self.imagesResult = images
+        self.onImportImages = onImportImages
     }
 
     var fileNames: [String] { calls.withLock { $0 } }
-    /// The items and titles `importImages` was given, per call.
-    var imageImports: [(items: [Data], title: String?)] { imageCalls.withLock { $0 } }
+    /// The items, titles and sources `importImages` was given, per call.
+    var imageImports: [(items: [Data], title: String?, source: DocumentSource)] { imageCalls.withLock { $0 } }
 
     func importImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
         -> ImageImportResult
     {
-        imageCalls.withLock { $0.append((items, title)) }
+        imageCalls.withLock { $0.append((items, title, source)) }
+        await onImportImages?()
         return imagesResult
     }
 
@@ -41,7 +46,7 @@ final class StubImporter: DocumentImporting {
     func importEditedImages(_ items: [EditedImage], title: String, source: DocumentSource) async
         -> ImageImportResult
     {
-        imageCalls.withLock { $0.append((items.map(\.data), title)) }
+        imageCalls.withLock { $0.append((items.map(\.data), title, source)) }
         return imagesResult
     }
 
@@ -77,7 +82,7 @@ struct StubPhoto: ImportPhotoItem {
 
 /// A library whose snapshot the test sets.
 @MainActor
-private final class SnapshotSource: LibrarySource {
+final class SnapshotSource: LibrarySource {
     var current: LibrarySnapshot
     let changes = AsyncStream<Void> { _ in }
 

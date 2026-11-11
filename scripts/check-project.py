@@ -10,6 +10,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
 - Each target resolves, per SDK, to its expected bundle identifier, platforms, entitlements file and
   Info.plist file, through the $(TARGET_NAME) indirection in the xcconfig. A new target needs a row in
   TARGETS: without its own variables it would silently get the app's identifier.
+- The camera's usage text (Info.plist NSCameraUsageDescription, #5, part 2) resolves non-empty for the app on
+  the iPhone SDKs and empty everywhere else: the Mac app, the extension and the test bundles never ask for the
+  camera.
 - Every entitlements file holds exactly the reviewed keys and values, so an unreviewed capability
   fails `lint`. A signed build adds keys of its own beyond these files (for example
   application-identifier, the team identifier and get-task-allow).
@@ -167,6 +170,12 @@ def on_ios_and_mac(ios, mac):
     return {"iphoneos": ios, "iphonesimulator": ios, "macosx": mac}
 
 
+# The camera's usage text (#5, part 2, P1): any non-empty text where NON_EMPTY stands, nothing elsewhere. The
+# text itself is the maintainer's; its German is in Dokumentum/InfoPlist.xcstrings.
+CAMERA_USAGE = "INFOPLIST_KEY_NSCameraUsageDescription"
+NON_EMPTY = object()
+
+
 # What each target must resolve to, per SDK it supports.
 TARGETS = {
     APP_TARGET: {
@@ -174,24 +183,28 @@ TARGETS = {
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(IOS_APP_ENTITLEMENTS, MAC_APP_ENTITLEMENTS),
         "INFOPLIST_FILE": on_ios_and_mac(IOS_APP_INFO, ""),
+        CAMERA_USAGE: on_ios_and_mac(NON_EMPTY, ""),
     },
     SHARE_TARGET: {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.Share",
         "SUPPORTED_PLATFORMS": IOS_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(SHARE_ENTITLEMENTS, None),
         "INFOPLIST_FILE": on_ios_and_mac(SHARE_INFO, None),
+        CAMERA_USAGE: on_ios_and_mac("", None),
     },
     "DokumentumTests": {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.Tests",
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
+        CAMERA_USAGE: on_ios_and_mac("", ""),
     },
     "DokumentumUITests": {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.UITests",
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
+        CAMERA_USAGE: on_ios_and_mac("", ""),
     },
 }
 # Config/Unsigned.xcconfig: macOS only, so the simulator keeps the real team and keys.
@@ -447,6 +460,13 @@ def check_targets(root, objects, project, settings):
                                     f"expected '{expected[key][sdk]}'")
                 if actual and not (root / actual).is_file():
                     problems.append(f"target {name}: {key} on {sdk} names {actual}, which does not exist")
+        for sdk in sdks:
+            actual = resolve(settings, CAMERA_USAGE, name, sdk).strip()
+            if expected[CAMERA_USAGE][sdk] is NON_EMPTY:
+                if not actual:
+                    problems.append(f"target {name}: {CAMERA_USAGE} resolves to '' on {sdk}, expected the camera text")
+            elif actual:
+                problems.append(f"target {name}: {CAMERA_USAGE} resolves to '{actual}' on {sdk}, expected ''")
     return problems
 
 
@@ -776,6 +796,8 @@ DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
 DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =
 DOKUMENTUM_INFOPLIST_DokumentumShare = Config/DokumentumShare-Info.plist
 INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))
+DOKUMENTUM_CAMERA_USAGE_Dokumentum[sdk=iphone*] = Dokumentum uses the camera to scan documents.
+INFOPLIST_KEY_NSCameraUsageDescription = $(DOKUMENTUM_CAMERA_USAGE_$(TARGET_NAME))
 #include? "Local.xcconfig"
 """
 FIXTURE_UNSIGNED = """// A comment
@@ -1006,6 +1028,18 @@ def self_test():
             XCCONFIG, "INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))",
             "DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist\nINFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))"),
          "resolves to 'Config/Info-iOS.plist' on macosx"),
+        ("the camera text missing on iOS", edit(
+            XCCONFIG, "DOKUMENTUM_CAMERA_USAGE_Dokumentum[sdk=iphone*] = Dokumentum uses the camera to scan documents.\n", ""),
+         "target Dokumentum: INFOPLIST_KEY_NSCameraUsageDescription resolves to '' on iphoneos"),
+        ("the camera text empty on iOS", edit(
+            XCCONFIG, "[sdk=iphone*] = Dokumentum uses the camera to scan documents.", "[sdk=iphone*] ="),
+         "target Dokumentum: INFOPLIST_KEY_NSCameraUsageDescription resolves to '' on iphonesimulator"),
+        ("the camera text on macOS", edit(XCCONFIG, "DOKUMENTUM_CAMERA_USAGE_Dokumentum[sdk=iphone*]",
+                                          "DOKUMENTUM_CAMERA_USAGE_Dokumentum"),
+         "target Dokumentum: INFOPLIST_KEY_NSCameraUsageDescription resolves to 'Dokumentum uses the camera to scan "
+         "documents.' on macosx"),
+        ("the camera text for every target", edit(XCCONFIG, "$(DOKUMENTUM_CAMERA_USAGE_$(TARGET_NAME))", "Camera."),
+         "target DokumentumShare: INFOPLIST_KEY_NSCameraUsageDescription resolves to 'Camera.' on iphoneos"),
         ("a self-referring setting", edit(XCCONFIG, "DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum =\n",
                                           "DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum = $(DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum)\n"),
          "refers to itself"),
