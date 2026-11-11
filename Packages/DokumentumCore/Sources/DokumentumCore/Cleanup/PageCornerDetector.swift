@@ -28,10 +28,11 @@ public struct PageCornerDetection: Sendable, Hashable {
 }
 
 /// Vision's page detection (T1): `VNDetectDocumentSegmentationRequest` first, and
-/// `VNDetectRectanglesRequest` when it gives nothing acceptable. On the iOS simulator the segmentation request
-/// returns the whole image with confidence 0 for every input, and on macOS it does so when there is no page
-/// (probes on #5), so the confidence threshold is needed everywhere, and the simulator always takes the
-/// fallback.
+/// `VNDetectRectanglesRequest` when it gives nothing acceptable. On macOS the segmentation request returns the
+/// whole image with confidence 0 when there is no page (probes on #5), so the confidence threshold is needed.
+/// **The simulator uses the rectangle request only:** there the segmentation request does not work (the plan's
+/// probe got the whole image with confidence 0; #110's runs got that for a page in one run and wrong corners
+/// with confidence 0.97 for an empty desk in another, which the threshold accepts).
 ///
 /// Accepted (T2): confidence at least `minimumConfidence`, a convex quad, at least `minimumArea` of the image.
 /// Interactive, outside the processing queue's Vision gate (T6).
@@ -48,7 +49,9 @@ public struct VisionPageCornerDetector: PageCornerDetecting {
 
     /// The detection, synchronously, on the caller's thread.
     static func detectNow(in image: CGImage) -> PageCornerDetection? {
-        if let segmented = segmentation(in: image), accepts(segmented) { return segmented }
+        #if !targetEnvironment(simulator)
+            if let segmented = segmentation(in: image), accepts(segmented) { return segmented }
+        #endif
         if let rectangle = rectangle(in: image), accepts(rectangle) { return rectangle }
         return nil
     }
