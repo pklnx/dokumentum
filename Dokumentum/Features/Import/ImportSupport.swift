@@ -5,8 +5,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Everything one library window needs to import: the files picker (the "+" menu and ⌘O open it), the Photos
-/// picker (the "+" menu), the document camera (the "+" menu, iPhone), dropping files onto the window (Mac), and
-/// the notice. Applied once, on the window's root.
+/// picker (the "+" menu) and the cleanup of the picked photos (#5, part 3), the document camera (the "+" menu,
+/// iPhone), dropping files onto the window (Mac), and the notice. Applied once, on the window's root.
 struct ImportSupport: ViewModifier {
     @Bindable var controller: ImportController
     /// The launch's store: the Debug synthetic import runs only on an in-memory one.
@@ -45,6 +45,20 @@ struct ImportSupport: ViewModifier {
                 pickedPhotos = []
                 Task { await controller.importPhotos(picked) }
             }
+            // The cleanup of the picked photos (P2, both devices). Only Cancel and Save close it: a swipe would
+            // drop the edits without asking.
+            // Save imports once the sheet is gone, so the new document opens (PQ1) after the sheet's animation.
+            .sheet(
+                item: $controller.cleanup,
+                onDismiss: { [controller] in Task { await controller.importSavedCleanup() } }
+            ) { cleanup in
+                PhotoCleanupView(
+                    model: cleanup,
+                    onSave: { [controller] in controller.closeCleanupForSave() },
+                    onCancel: { [controller] in controller.cancelCleanup() }
+                )
+                .interactiveDismissDisabled()
+            }
             #if os(macOS)
                 .dropDestination(for: ImportedFile.self) { files, _ in
                     Task { await controller.importDropped(files) }
@@ -71,12 +85,9 @@ struct ImportSupport: ViewModifier {
             #endif
             .overlay(alignment: .bottom) {
                 if controller.isSavingScan {
-                    ProgressView("Saving scan…")
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(.regularMaterial, in: Capsule())
-                        .padding(.bottom, 24)
-                        .accessibilityIdentifier(AccessibilityID.importSavingScan)
+                    SavingIndicator(title: "Saving scan…", identifier: AccessibilityID.importSavingScan)
+                } else if controller.isSavingPhotos {
+                    SavingIndicator(title: "Saving photos…", identifier: AccessibilityID.importSavingPhotos)
                 }
             }
             .alert(
@@ -97,8 +108,20 @@ struct ImportSupport: ViewModifier {
     private var actions: ImportActions {
         ImportActions(
             pickFiles: { [controller] in controller.isPickingFiles = true },
-            pickPhotos: { [controller] in controller.isPickingPhotos = true },
+            pickPhotos: photosAction,
             scan: scanAction)
+    }
+
+    /// "Photos…" opens the Photos picker; in a Debug launch with `-UITestCleanupSynthetic YES` it opens the cleanup
+    /// with two rendered photos instead.
+    private var photosAction: @MainActor () -> Void {
+        #if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if UITestCleanupSynthetic.isRequested(arguments: arguments, launchStore: launchStore) {
+                return { [controller] in Task { await controller.importPhotos(UITestCleanupSynthetic.photos) } }
+            }
+        #endif
+        return { [controller] in controller.isPickingPhotos = true }
     }
 
     /// "Scan…" opens the camera; in a Debug launch with `-UITestScanSynthetic YES` it imports rendered pages
@@ -122,5 +145,20 @@ struct ImportSupport: ViewModifier {
             set: { isShown in
                 if !isShown { controller.dismissNotice() }
             })
+    }
+}
+
+/// "Saving …" at the bottom of the window while an import runs after its sheet closed.
+private struct SavingIndicator: View {
+    let title: LocalizedStringKey
+    let identifier: String
+
+    var body: some View {
+        ProgressView(title)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.regularMaterial, in: Capsule())
+            .padding(.bottom, 24)
+            .accessibilityIdentifier(identifier)
     }
 }

@@ -231,29 +231,28 @@ struct PDFBuilderTests {
         #expect(PDFBuilder.decodeSize(for: tiny, of: photo) == 4032, "never more than the original")
     }
 
-    /// N1 of review 5865079459 on #118: a small crop of a 48 MP photo is not decoded at full size. 8000 × 6000 px
-    /// is capped at 24 MP (5656 × 4242 px), a 6000 px wide panorama at 6000 px on its longer side.
+    /// N1 of review 5865079459 on #118: a small crop of a photo above 25 MP is decoded at most at half its size (a
+    /// 48 MP photo at 4000 × 3000 px), a 108 MP photo at a quarter, where ImageIO decodes without the full photo; a
+    /// 24.5 MP photo (the iPhone's 24 MP) in full. Never below 2400 px, never above the original.
     @Test func theDecodeSizeIsCappedForASmallCropOfALargePhoto() {
         let tiny = PageQuad(
             topLeft: CGPoint(x: 0.4, y: 0.4), topRight: CGPoint(x: 0.5, y: 0.4), bottomRight: CGPoint(x: 0.5, y: 0.5),
             bottomLeft: CGPoint(x: 0.4, y: 0.5))
-        let large = CGSize(width: 8000, height: 6000)
-        let size = PDFBuilder.decodeSize(for: tiny, of: large)
-        #expect(size == 5656, "\(size)")
-        let pixels = CGFloat(size) * CGFloat(size) * 6000 / 8000
-        #expect(pixels <= PDFBuilder.maxDecodePixels, "\(pixels) pixels")
-        #expect(PDFBuilder.decodeSize(for: tiny, of: CGSize(width: 16000, height: 1000)) == 6000)
-        #expect(PDFBuilder.decodeSize(for: .fullPage, of: large) == 2400, "the full page as before")
+        #expect(PDFBuilder.decodeSize(for: tiny, of: CGSize(width: 8000, height: 6000)) == 4000)
+        #expect(PDFBuilder.decodeSize(for: tiny, of: CGSize(width: 12000, height: 9000)) == 3000)
+        #expect(PDFBuilder.decodeSize(for: tiny, of: CGSize(width: 5712, height: 4284)) == 5712)
+        #expect(PDFBuilder.decodeSize(for: .fullPage, of: CGSize(width: 8000, height: 6000)) == 2400)
+        #expect(PDFBuilder.decodeCap(for: CGSize(width: 40000, height: 30000)) == 5000, "an eighth at least")
     }
 
     /// N2 of review 5865079459 on #118: a page turned by 45° is decoded for its straightened size, not for its
-    /// bounding box. On a 6000 × 6000 photo the diamond's box is 4800 px, its edges 3394 px; 2400 / 3394 of 6000 is
+    /// bounding box. On a 4800 × 4800 photo the diamond's box is 3840 px, its edges 2715 px; 2400 / 2715 of 4800 is
     /// 4243 (the box would give 3000, and the page only about 1700 px).
     @Test func theDecodeSizeOfATiltedPageFollowsItsEdgesNotItsBoundingBox() {
         let diamond = PageQuad(
             topLeft: CGPoint(x: 0.5, y: 0.1), topRight: CGPoint(x: 0.9, y: 0.5), bottomRight: CGPoint(x: 0.5, y: 0.9),
             bottomLeft: CGPoint(x: 0.1, y: 0.5))
-        let size = PDFBuilder.decodeSize(for: diamond, of: CGSize(width: 6000, height: 6000))
+        let size = PDFBuilder.decodeSize(for: diamond, of: CGSize(width: 4800, height: 4800))
         #expect(abs(size - 4243) <= 1, "\(size)")
     }
 

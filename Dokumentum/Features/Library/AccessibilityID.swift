@@ -62,9 +62,31 @@ enum AccessibilityID {
     static let importScan = "import.scan"
     /// The "Saving scan…" indicator while a scan is encoded and imported.
     static let importSavingScan = "import.savingScan"
+    /// The "Saving photos…" indicator while the cleaned photos are imported (#5, part 3).
+    static let importSavingPhotos = "import.savingPhotos"
     static let importFiles = "import.files"
     static let importPhotos = "import.photos"
     static let importNoticeOK = "import.notice.ok"
+
+    /// The photo cleanup sheet (#5, part 3): the sheet, its large page, the corner handles (named by where they
+    /// show), the thumbnails by position, and its buttons.
+    static let cleanup = "cleanup"
+    static let cleanupPage = "cleanup.page"
+    static func cleanupCorner(_ corner: QuadCorner) -> String {
+        switch corner {
+        case .topLeft: "cleanup.corner.topLeft"
+        case .topRight: "cleanup.corner.topRight"
+        case .bottomRight: "cleanup.corner.bottomRight"
+        case .bottomLeft: "cleanup.corner.bottomLeft"
+        }
+    }
+    static func cleanupThumbnail(_ position: Int) -> String { "cleanup.thumbnail.\(position)" }
+    static let cleanupCancel = "cleanup.cancel"
+    static let cleanupSave = "cleanup.save"
+    static let cleanupRotate = "cleanup.rotate"
+    static let cleanupFilter = "cleanup.filter"
+    static let cleanupEdges = "cleanup.edges"
+    static let cleanupRemove = "cleanup.remove"
 
     /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
     static let debugMenu = "debug.menu"
