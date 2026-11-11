@@ -10,6 +10,7 @@
 		A10000000000000000000021 /* DokumentumCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000021 /* DokumentumCore */; };
 		A10000000000000000000022 /* DokumentumKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000011 /* DokumentumKit */; };
 		A10000000000000000000023 /* DokumentumShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* DokumentumShare.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E10000000000000000000021 /* DokumentumKit in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000013 /* DokumentumKit */; };
 		B10000000000000000000021 /* DokumentumTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000012 /* DokumentumTestSupport */; };
 /* End PBXBuildFile section */
 
@@ -118,6 +119,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E10000000000000000000021 /* DokumentumKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,6 +254,9 @@
 				E10000000000000000000010 /* DokumentumShare */,
 			);
 			name = DokumentumShare;
+			packageProductDependencies = (
+				D10000000000000000000013 /* DokumentumKit */,
+			);
 			productName = DokumentumShare;
 			productReference = E10000000000000000000001 /* DokumentumShare.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -520,6 +525,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		D10000000000000000000011 /* DokumentumKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DokumentumKit;
+		};
+		D10000000000000000000013 /* DokumentumKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DokumentumKit;
 		};
