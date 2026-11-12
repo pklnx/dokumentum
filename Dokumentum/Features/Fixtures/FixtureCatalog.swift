@@ -58,16 +58,17 @@
             Date(timeIntervalSinceReferenceDate: 815_184_000 - Double(days) * 86_400)
         }
 
+        /// `processing`: the queue's state (#6, P2); processed unless a sample shows another.
         private static func sample(
             _ number: Int, _ title: String, daysBefore days: Int, inbox: Bool,
             correspondent: LibraryDocument.Reference?, type: LibraryDocument.Reference?, tags: [TagRecord],
-            file: File
+            file: File, processing: ProcessingState = .done
         ) -> Sample {
             let date = date(daysBefore: days)
             let document = LibraryDocument(
                 instanceID: documentID(number), title: title, documentDate: date, createdAt: date, isInbox: inbox,
                 correspondent: correspondent, documentType: type, tagIDs: Set(tags.map(\.instanceID)),
-                fileState: file == .missing ? .missing : .present)
+                fileState: file == .missing ? .missing : .present, processingState: processing)
             return Sample(document: document, file: file)
         }
 
@@ -86,7 +87,8 @@
                 tags: [tax], file: .pdf(pages: letterPages(stadtwerke.name, "Electricity bill October"))),
             sample(
                 2, "Medical invoice", daysBefore: 5, inbox: true, correspondent: doctor, type: invoice,
-                tags: [tax, important], file: .pdf(pages: letterPages(doctor.name, "Medical invoice"))),
+                tags: [tax, important], file: .pdf(pages: letterPages(doctor.name, "Medical invoice")),
+                processing: .pending),
             sample(
                 3, "Water bill", daysBefore: 9, inbox: false, correspondent: stadtwerke, type: invoice, tags: [tax],
                 file: .missing),
@@ -98,7 +100,7 @@
                 file: .pdf(pages: letterPages(musterbank.name, "A letter without a title"))),
             sample(
                 6, longTitle, daysBefore: 31, inbox: true, correspondent: musterbank, type: letter, tags: [important],
-                file: .pdf(pages: letterPages(musterbank.name, "Annual statement 2025"))),
+                file: .pdf(pages: letterPages(musterbank.name, "Annual statement 2025")), processing: .failed),
             sample(
                 7, "Car insurance", daysBefore: 45, inbox: false, correspondent: musterbank, type: letter, tags: [auto],
                 file: .pdf(pages: letterPages(musterbank.name, "Car insurance"))),
@@ -107,7 +109,7 @@
                 file: .pdf(pages: letterPages("Autohaus", "Golf inspection"))),
             sample(
                 9, "Scanned receipt", daysBefore: 75, inbox: true, correspondent: nil, type: nil, tags: [],
-                file: .notPDF),
+                file: .notPDF, processing: .failed),
         ]
 
         static var snapshot: LibrarySnapshot {

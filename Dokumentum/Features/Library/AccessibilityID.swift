@@ -35,6 +35,12 @@ enum AccessibilityID {
     static let detailNoSelection = "documentDetail.noSelection"
     static let detailLoading = "documentDetail.loading"
 
+    /// The detail's processing status line in each state, and its "Try again" (#6, P2).
+    static let detailProcessingPending = "documentDetail.processing.pending"
+    static let detailProcessingRunning = "documentDetail.processing.running"
+    static let detailProcessingFailed = "documentDetail.processing.failed"
+    static let detailProcessingRetry = "documentDetail.processing.retry"
+
     /// The detail's toolbar button that shows the info panel.
     static let detailShowInfo = "documentDetail.showInfo"
 

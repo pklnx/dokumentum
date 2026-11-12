@@ -1,3 +1,4 @@
+import CoreGraphics
 import DokumentumCore
 import DokumentumKit
 import Foundation
@@ -13,12 +14,15 @@ protocol LibrarySource: Sendable {
     var changes: AsyncStream<Void> { get }
     /// The PDF of one document. Runs off the main actor.
     func loadPDF(instanceID: UUID) async -> PDFLoadState
+    /// The thumbnail of one document's list row (#6, part 4), decoded off the main actor; `nil` while it has none.
+    func loadThumbnail(instanceID: UUID) async -> CGImage?
     /// Writes edits to the documents (plan of #3, part 3); `nil` for a source that cannot be edited.
     @MainActor var editor: DocumentEditor? { get }
 }
 
 extension LibrarySource {
     @MainActor var editor: DocumentEditor? { nil }
+    func loadThumbnail(instanceID: UUID) async -> CGImage? { nil }
 }
 
 /// The store's library: Debug and Release builds alike. In a Debug build the store of a `-UITestSeed`

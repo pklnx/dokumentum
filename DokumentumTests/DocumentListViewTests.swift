@@ -182,6 +182,9 @@
             }
         }
 
+        /// `RowHeights.rowsPerUpdate` of the list: the many-rows test needs more shown rows than one update replaces.
+        private static let rowsPerUpdate = 5
+
         /// A title that wraps at 270 and 320 pt and fits on one line at 700 pt.
         private static let longTitle = "Annual statement of the company pension fund for 2026"
 
@@ -384,8 +387,13 @@
             // The new rows (all shown rows of a 900 pt window) laid out with the title on two lines.
             let settled = try await TestSupport.waitUntil("the new rows do not settle at their two-line height") {
                 let rows = Self.rows(in: window)
-                return rows.count > 10 && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
-                    && rows.prefix(10).allSatisfy { $0.content.frame.height > 50 }
+                // As many rows as the host realizes, more than one update replaces (`RowHeights.rowsPerUpdate`, 5); all
+                // shown rows are new ones with the long title (review B1 of #135: the CI host realized 10 rows of a
+                // fixture, the Mac mini 23, and `> 10` failed there).
+                return rows.count > Self.rowsPerUpdate
+                    && rows.allSatisfy { row, content in
+                        row.frame.height == content.frame.height && content.frame.height > 50
+                    }
             }
             try #require(settled)
             let before = Self.rows(in: window)[0].content.frame.height
@@ -403,7 +411,8 @@
             try #require(changed)
             let fits = try await TestSupport.waitUntil("a shown row is not as tall as its content") {
                 let rows = Self.rows(in: window)
-                return rows.count > 10 && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
+                return rows.count > Self.rowsPerUpdate
+                    && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
             }
             if !fits {
                 let heights = Self.rows(in: window).map { "\($0.row.frame.height)/\($0.content.frame.height)" }
@@ -438,6 +447,14 @@
 
         // MARK: Hosting
 
+        /// The rows' thumbnail in these tests (#6, part 4): smaller than a one-line row (45 pt), so a row's height is its
+        /// text's, as in #124's measurements, and every content and width change below changes it. At the app's
+        /// 40 × 56 pt a short row is as tall as its thumbnail and a title that wraps changes nothing. Only lines with
+        /// an icon (tags) could make it taller, and with them the table measured the rows a sidebar switch brings in
+        /// again by itself, so #124's counter-proof (no generation in the row's identity) no longer failed for them
+        /// (review B2 of #135). The thumbnail's size is fixed either way; the row-height logic does not depend on it.
+        static let thumbnailSize = CGSize(width: 12, height: 16)
+
         /// A window on the first screen (the one with the menu bar), in front, so its table lays out as a shown one.
         private func hostedWindow(_ view: some View, width: CGFloat = 900, height: CGFloat = 500) throws -> NSWindow {
             let screen = try #require(NSScreen.screens.first, "the test host has a screen")
@@ -446,7 +463,7 @@
                 styleMask: [.titled, .closable, .resizable],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: view)
+            window.contentView = NSHostingView(rootView: view.environment(\.rowThumbnailSize, Self.thumbnailSize))
             window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 40))
             window.orderFrontRegardless()
             return window
