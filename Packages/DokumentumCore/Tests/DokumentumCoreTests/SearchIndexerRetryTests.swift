@@ -153,6 +153,45 @@ struct SearchIndexerRetryTests {
         try SearchStore.edit(document.instanceID, in: container) { $0.title = "Spät neu" }
         await recorder.ready.wait(for: 3)
         #expect(await indexer.search("fruhankunft").matches == [document.instanceID])
+
+        let readsAfterRetry = reads.reads.count
+        try SearchStore.edit(document.instanceID, in: container) { $0.title = "Spät" }
+        await recorder.ready.wait(for: 4)
+        #expect(Array(reads.reads.dropFirst(readsAfterRetry)) == [], "a document read once leaves the retry set")
+    }
+
+    /// A row that keeps failing and is then deleted leaves the retry set: neither the event of the delete nor a
+    /// later one reads it again.
+    @Test func aDeletedRetryRowIsNotReadAgain() async throws {
+        let container = try TestSupport.makeContainer()
+        let document = try SearchStore.insert(title: "Notiz", text: "Entwurf", in: container)
+        let row = try FailingReads.textRow(of: document, in: container)
+        let reads = FailingReads()
+        let indexer = SearchIndexer(container: container, hooks: reads.textHooks())
+        let recorder = StateRecorder(indexer.updates())
+        defer {
+            recorder.cancel()
+            indexer.stop()
+        }
+        indexer.start()
+        await recorder.ready.wait()
+
+        reads.fail([row])
+        try SearchStore.setText("Reinschrift", of: document, in: container)
+        await recorder.ready.wait(for: 2)
+        #expect(reads.reads.last == [row], "the write's read failed")
+
+        let readsBeforeDelete = reads.reads.count
+        let deleting = ModelContext(container)
+        let text = try #require(try deleting.fetch(FetchDescriptor<DocumentText>()).first)
+        deleting.delete(text)
+        try deleting.save()
+        await recorder.ready.wait(for: 3)
+        #expect(await indexer.search("entwurf").matches == [], "the delete clears the text")
+
+        try SearchStore.edit(document, in: container) { $0.title = "Notiz neu" }
+        await recorder.ready.wait(for: 4)
+        #expect(Array(reads.reads.dropFirst(readsBeforeDelete)) == [], "the deleted row was read again")
     }
 }
 

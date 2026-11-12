@@ -359,7 +359,8 @@ public actor SearchIndexer: DocumentSearching {
     // MARK: Reads (nonisolated: each in fresh contexts of its own)
 
     /// The text changes since `token` and the text rows they name, read in fresh contexts, with the rows and
-    /// documents of `retry` first (#132, N-c). History errors are returned with nothing read; the caller logs them.
+    /// documents of `retry` first (#132, N-c); rows deleted since `token` are not read. History errors are returned
+    /// with nothing read; the caller logs them.
     private nonisolated static func readTextChanges(
         since token: DefaultHistoryToken?, retry: Retry, history: any SearchHistoryReading, reads: StoreReads
     ) -> HistoryRead {
@@ -390,6 +391,9 @@ public actor SearchIndexer: DocumentSearching {
         }
         let relinked = reads.linkedTexts(ofDocuments: documents)
         for id in relinked.texts where seen.insert(id).inserted { upserts.append(id) }
+        // A deleted row is not read: the delete clears it and takes it out of the retry set (#132, N-c).
+        let deleted = Set(deletes)
+        upserts.removeAll { deleted.contains($0) }
         let groups = stride(from: 0, to: upserts.count, by: SearchStoreReader.groupSize).map { start in
             reads.texts(Array(upserts[start..<min(start + SearchStoreReader.groupSize, upserts.count)]))
         }

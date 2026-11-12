@@ -937,7 +937,7 @@ below).
   retry set (held with the index, so a rebuild starts without it); the token still advances, since re-reading
   the history would repeat every other change. The next history read reads the set's rows again by key, before
   the new changes. A group of 25 whose read fails is read again row by row, so only the rows that really fail
-  stay; a row leaves the set when it is read, gone or deleted. Documents whose relinked text could not be read
+  stay; a row leaves the set when it is read, gone or deleted (a deleted row is not read). Documents whose relinked text could not be read
   are kept and retried the same way, and the build's failed groups are read again in its last history read.
   Each error code is logged once. A row that keeps failing costs one failed read per event; with no further
   event (a save or a remote change) the retry waits, as the history does.
@@ -954,7 +954,7 @@ below).
 - **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
   a change during the build, two subscribers, a persistent history error, a query answered while an update's
   history read is held), `SearchIndexerRetryTests` (a failed text read found after the next event, a failing
-  row that does not hold its group, a failed read during the build, a failed relink read),
+  row that does not hold its group, a failed read during the build, a failed relink read, a deleted retry row),
   `SearchIndexerRemoteTests`
   (another container's write with the remote change, an expired history with the rebuild swap) and
   `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
