@@ -2,6 +2,7 @@ import DokumentumCore
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
+import Observation
 import SwiftData
 import Testing
 
@@ -131,12 +132,21 @@ struct SyncLabTests {
         #expect(lab.canChangeDeviceSettings)
         #expect(lab.isClassificationEnabled, "the switch is on unless set")
 
+        // The toggle reads `isClassificationEnabled`: a confirmed write must change it observably (review B, N3).
+        let changed = TestSignal()
+        withObservationTracking {
+            _ = lab.isClassificationEnabled
+        } onChange: {
+            changed.fire()
+        }
         lab.setClassification(false)
         #expect(lab.isConfirmingWrite)
         #expect(lab.isClassificationEnabled, "the switch changed before the question was answered")
+        #expect(changed.count == 0)
         lab.confirmWrites()
         await writes.wait(for: 1, "the switch was not set")
         #expect(!lab.isClassificationEnabled)
+        #expect(changed.count == 1, "the toggle's value changed without notifying its view")
         #expect(defaults.object(forKey: ClassificationSettings.enabledKey) as? Bool == false)
 
         lab.resetRequeueFlag()

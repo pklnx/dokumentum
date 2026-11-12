@@ -108,7 +108,9 @@ struct SyncLabGeneratorTests {
     /// PR #155).
     @Test func onlyTheLetterOptionGivesALetterPage() throws {
         let word = SyncLabGenerator.uniqueWord()
-        let letterWords = ["Stadtwerke", "Rechnung", "2026", "EUR"]
+        // Markers of the letter page only. Not bare digits: every page has a random UUID line, whose hex digits can
+        // contain "2026" (review B, N2 of PR #155).
+        let letterWords = ["Stadtwerke Musterstadt", "Rechnung vom", "14.01.2026", "EUR"]
         for page in 0..<3 {
             let plain = SyncLabGenerator.lines(word: word, page: page).joined(separator: "\n")
             #expect(plain.contains(word))

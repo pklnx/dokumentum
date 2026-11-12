@@ -134,6 +134,13 @@ struct SyncLabExportTests {
         }
     }
 
+    /// The newest schema version, the last of `DokumentumMigrationPlan` (the one the store opens): a field a later
+    /// version adds is then checked here too, not only V1's (review B, N1 of PR #155).
+    static func newestModel() throws -> NSManagedObjectModel {
+        let newest = try #require(DokumentumMigrationPlan.schemas.last, "the migration plan has no schema")
+        return try #require(NSManagedObjectModel.makeManagedObjectModel(for: newest.models))
+    }
+
     /// The seed's records, fetched in one context, for the per-field test.
     private struct Records {
         let context: ModelContext
@@ -245,7 +252,7 @@ struct SyncLabExportTests {
     /// schema, so a field added later needs a change here too.
     @Test func eachFieldChangedAloneChangesItsEntityHash() throws {
         let changes = Self.fieldChanges()
-        let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
+        let model = try Self.newestModel()
         var schemaFields: Set<String> = []
         for entity in model.entities {
             let name = try #require(entity.name)
@@ -314,7 +321,7 @@ struct SyncLabExportTests {
     /// `SchemaDump` reads it, has a line in the dump: a field added later cannot drop out of the comparison unnoticed.
     @Test func everyFieldOfTheSchemaIsInTheDump() throws {
         let dump = try dump(seed: 5)
-        let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
+        let model = try Self.newestModel()
         var fields = 0
         for entity in model.entities {
             let name = try #require(entity.name)

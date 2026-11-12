@@ -64,6 +64,7 @@
             self.monitor = monitor
             self.takeoverInterval = takeoverInterval ?? ProcessingClaimRules.takeoverInterval
             self.defaultsSuite = defaultsSuite
+            refreshDeviceSettings()
         }
 
         var shortDeviceID: String { String(deviceID.prefix(8)) }
@@ -375,8 +376,14 @@
 
         /// Whether this device classifies (#8's per-device switch `classification.enabled`, on unless set; never
         /// synced). The protocol turns it off on both devices before run 1, so only M1/M2 classify (review A, B3 of
-        /// PR #155).
-        var isClassificationEnabled: Bool { ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled }
+        /// PR #155). Read from the defaults at init and after each write of the lab, and observable, so the toggle
+        /// shows the stored value once a confirmed write ran (review B, N3).
+        private(set) var isClassificationEnabled = true
+
+        /// Reads the device settings the lab shows again (the classification switch).
+        func refreshDeviceSettings() {
+            isClassificationEnabled = ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled
+        }
 
         /// Sets the classification switch (a device setting, not a data write; read at each decision, so the next
         /// run follows it). Only with a store on disk, after the question.
@@ -387,6 +394,7 @@
             }
             perform { [self] in
                 ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled = enabled
+                refreshDeviceSettings()
                 Log.processing.notice("Sync lab: classification \(enabled ? "on" : "off", privacy: .public)")
                 report("Classification on this device: \(enabled ? "on" : "off")")
                 processing?.requestRun()
