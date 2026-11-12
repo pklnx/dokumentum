@@ -2,7 +2,8 @@ import DokumentumKit
 import SwiftUI
 
 /// The documents of the sidebar's selection, newest document date first (PQ4). One document at a
-/// time (PQ11).
+/// time (PQ11). The search field (#7, part 3) narrows them: words, filter chips and the scope switch (selected list
+/// or All Documents), in the same order and rows.
 struct DocumentListView: View {
     @Bindable var model: LibraryModel
     #if os(macOS)
@@ -11,6 +12,8 @@ struct DocumentListView: View {
         /// (review of #74, finding 1). So a click on a row, the selected one too, and every change of the
         /// selection give the list the focus.
         @FocusState private var isListFocused: Bool
+        /// Whether the search field has the focus; Edit › Find… (⌘F) sets it (`LibraryModel.focusSearch`).
+        @FocusState private var isSearchFocused: Bool
         /// The height each row needs at its current width, measured by its hidden copy (#81). Not observed: only a
         /// change in `generations` updates the list.
         @State private var rowHeights = RowHeights()
@@ -69,13 +72,46 @@ struct DocumentListView: View {
         .accessibilityIdentifier(AccessibilityID.documentList)
         .overlay {
             if model.documents.isEmpty {
-                #if os(macOS)
-                    emptyState
-                #else
-                    emptyState
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier(AccessibilityID.documentListEmpty)
-                #endif
+                if model.isSearchActive {
+                    searchEmptyState
+                } else {
+                    #if os(macOS)
+                        emptyState
+                    #else
+                        emptyState
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier(AccessibilityID.documentListEmpty)
+                    #endif
+                }
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) { indexingLine }
+        .searchable(
+            text: $model.search.text, tokens: $model.search.tokens, placement: searchPlacement, prompt: Text("Search")
+        ) { token in
+            SearchTokenLabel(token: token, name: model.name(of: token))
+        }
+        // The chips offered for the text typed; picking one adds it. Not `suggestedTokens`: the Mac shows none of them
+        // (measured on macOS 27 for #123).
+        .searchSuggestions {
+            ForEach(model.searchSuggestions) { token in
+                SearchTokenLabel(token: token, name: model.name(of: token))
+                    .searchCompletion(token)
+            }
+        }
+        #if os(macOS)
+            .searchFocused($isSearchFocused)
+            .onChange(of: model.searchFocusRequests) { isSearchFocused = true }
+        #endif
+        .searchScopes($model.search.scope, activation: .onSearchPresentation) {
+            // No switch while All Documents is the list: both scopes would be the same.
+            if model.selection != .all {
+                title
+                    .accessibilityIdentifier(AccessibilityID.searchScope(.selection))
+                    .tag(SearchScope.selection)
+                Text("All Documents")
+                    .accessibilityIdentifier(AccessibilityID.searchScope(.all))
+                    .tag(SearchScope.all)
             }
         }
         .navigationTitle(title)
@@ -158,6 +194,58 @@ struct DocumentListView: View {
             }
         }
     #endif
+
+    /// The iPhone's field sits in the list's navigation bar, always shown (plan of #7, Approach 8); the Mac's in the
+    /// window's toolbar.
+    private var searchPlacement: SearchFieldPlacement {
+        #if os(iOS)
+            .navigationBarDrawer(displayMode: .always)
+        #else
+            .automatic
+        #endif
+    }
+
+    /// "Indexing texts… 12 of 40" over the results while the index reads its texts (P5): results show what is in
+    /// so far. In the primary colour on the list's own background, as the placeholders (#82).
+    @ViewBuilder
+    private var indexingLine: some View {
+        if let progress = model.indexingProgress {
+            Text("Indexing texts… \(progress.indexed.formatted()) of \(progress.total.formatted())")
+                .font(indexingLineFont)
+                .foregroundStyle(.primary)
+                // On the text, before the frame: the line's element is the text alone, not the band behind it, which
+                // reaches under the toolbar on the Mac (the audit measured the band's contrast).
+                .accessibilityIdentifier(AccessibilityID.searchIndexing)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(.background)
+        }
+    }
+
+    /// Large and heavy enough for the audit's contrast check: on the Mac it failed the line at 10 pt medium in dark mode
+    /// ("not high enough unless font size is larger"), and at 13 pt medium and 13 pt semibold in light mode although the
+    /// line's pixels measure 14.94:1 (#123); 15 pt semibold passes, as for the placeholders (#89).
+    private var indexingLineFont: Font {
+        #if os(macOS)
+            .title3.weight(.semibold)
+        #else
+            .subheadline.weight(.semibold)
+        #endif
+    }
+
+    /// No document matches the search (P4): "No Results for “x”", or "No Results" for chips alone.
+    @ViewBuilder
+    private var searchEmptyState: some View {
+        let text = model.search.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: LocalizedStringKey = text.isEmpty ? "No Results" : "No Results for “\(text)”"
+        #if os(macOS)
+            PlaceholderView(title: title, systemImage: "magnifyingglass", identifier: AccessibilityID.searchEmpty)
+        #else
+            ContentUnavailableView(title, systemImage: "magnifyingglass")
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(AccessibilityID.searchEmpty)
+        #endif
+    }
 
     @ViewBuilder
     private var emptyState: some View {

@@ -1,12 +1,15 @@
 import Foundation
 
 /// A filter chip of the search field (plan of #7, P3).
-public enum SearchToken: Sendable, Hashable {
+public enum SearchToken: Sendable, Hashable, Identifiable {
     /// The tag and every tag below it.
     case tag(UUID)
     case correspondent(UUID)
     case documentType(UUID)
     case inbox
+
+    /// Itself: a chip of the search field is identified by what it filters (`.searchable` needs `Identifiable`).
+    public var id: Self { self }
 
     /// The sidebar selection with the same rule.
     public var selection: LibrarySelection {

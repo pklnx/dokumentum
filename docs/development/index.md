@@ -499,8 +499,8 @@ no window. On the maintainer's signed, sandboxed build (#1, step 9, 2026-11-11) 
 from the old root (`75340a0`) to `LibraryRootView`. The container's `Saved Application State` stayed empty in both
 runs, though, so that run did not show whether the scene id overrides a stale state.
 
-**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Move to
-Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
+**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Find… ⌘F
+(the search field, see "The search field"), Move to Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
 nothing to act on (`@FocusedValue` of the focused window). ⌘⌫ while a text field is edited stays with the
 field (`CommandDeleteRouting`), so the field must lose the focus when the user turns to the list: a click on a
 document row, the selected one too, and a change of the selection give the list the focus (`DocumentListView`;
@@ -673,7 +673,8 @@ scanner (part 2) build on it.
 
 Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search`, Foundation only, so
 `kit-linux` runs every test of it. Part 2 (#122) adds the indexer that builds and updates it and the
-benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
+benchmark (`DokumentumCore/Search`); part 3 (#123) adds the search field in the library (see "The search field"
+below).
 
 - **Normalisation** (`SearchNormalizer.normalizedWord`): NFKC, then Foundation's case, diacritic and width
   folding with `locale: nil` (the device language never changes a result), then a table for what folding
@@ -735,7 +736,11 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
   batch at most, and at most 25 rows are in memory); then the history since the step-1 token and the
   metadata again, so nothing saved during the build is missed; then `.ready`. Each batch yields
   `.building(indexed:total:)`.
-- **Updates** start after `.ready`; events that come during the build leave one pending event. Events:
+- **Updates** start after `.ready`; events that come during the build leave one pending event. Each update reads
+  the history, the changed text rows and the metadata **off the actor**, in fresh contexts, and then applies them
+  in one actor call (#132, N-d), so a query typed while the processing queue writes texts waits only for that
+  call: about 2 ms for the metadata compare of 5,000 documents in a Debug build on the Mac (`setMetadata` with equal
+  fields, measured for #123), plus tokenising the changed texts. Events:
   `ModelContext.didSave` of any context of the container at once, and the shared observer's debounced
   stream (remote changes the mirroring saves, the end of each CloudKit import). On each event:
   - **texts** through SwiftData's persistent history since the indexer's token (`StoreSearchHistory`):
@@ -760,7 +765,8 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
 - **Memory:** the index of 5,000 synthetic documents (37 MB of text) costs about 66 MB of
   `phys_footprint` on the Mac (R-b); the benchmark reports the figure of the device it runs on.
 - **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
-  a change during the build, two subscribers, a persistent history error), `SearchIndexerRemoteTests`
+  a change during the build, two subscribers, a persistent history error, a query answered while an update's
+  history read is held), `SearchIndexerRemoteTests`
   (another container's write with the remote change, an expired history with the rebuild swap) and
   `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
   changed text row by key).
@@ -801,6 +807,44 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
   contingency is an FTS5 index behind `DocumentSearching` (T13).
 - **M2 of #7** checks on two devices that the mirroring's imports reach the history: a word imported on
   the Mac is found on the iPhone, without relaunching it, once its text was processed.
+
+### The search field
+
+Part 3 (#123), in `DocumentListView` and `LibraryModel`:
+
+- **Field:** `.searchable` on the list column, prompt "Search". On the iPhone it sits in the list's navigation
+  bar (`navigationBarDrawer`, always shown); on the Mac in the window's toolbar. The Mac's **Edit › Find… (⌘F)**
+  (`LibraryCommands`) puts the focus into it (`LibraryModel.focusSearch`, `.searchFocused`): `.searchable` adds no
+  Find item and does not answer ⌘F by itself (measured on macOS 27). `SearchSmokeTests` checks that the menu bar
+  has exactly one Find item (by title, in English or German) and that ⌘F focuses the field.
+- **Query:** each change of the text runs `DocumentSearching.search` at once, no debounce (T10); each query has a
+  generation, and an answer that comes after a newer query started is dropped. Until the answer comes the list
+  keeps the previous result. Each `updates()` element of the index runs the active query again. The result goes
+  through `LibrarySearch.apply`: the usual rows in the usual order (P4).
+- **Scope** (`.searchScopes`, shown while the search is presented): the selected list's name or All Documents;
+  none while All Documents is the list. The scope applies only to an active search; an empty field shows the
+  selected list. On the Mac the segments carry `search.scope.selection`/`search.scope.all`; the iPhone's scope bar
+  is a system segmented control (`scopeBar`) whose segments keep only their titles.
+- **Chips** (`SearchToken`, `SearchTokenLabel`): suggested while typing through `.searchSuggestions` with
+  `.searchCompletion(token)` ("Tag: Auto › Golf", "Correspondent: …", "Type: …", "Inbox"; not `suggestedTokens`,
+  which the Mac does not show). Picking one drops the words typed for it. Chips combine with each other and the
+  text; they work in the Trash, which offers no Inbox chip. A chip whose record is gone is dropped at the next
+  read.
+- **Empty result:** "No Results for “x”" (or "No Results" for chips alone), `search.empty`; the Mac's
+  `PlaceholderView`, the iPhone's `ContentUnavailableView`.
+- **Indexing line:** "Indexing texts… 12 of 40" (`search.indexing`) over the results while the index is
+  `.building` and a search is active (P5). In the primary colour on the list's background; the Mac uses 15 pt
+  semibold (`.title3`), because the audit failed the line at 10 pt medium in dark mode ("not high enough unless font
+  size is larger") and at 13 pt medium and semibold in light mode, although its pixels measure 14.94:1.
+  `SearchSmokeTests` also measures its contrast from its pixels (`assertTextContrast`).
+- **Sidebar (P7):** the search stays when another list is chosen on the Mac. On the iPhone it ends when the
+  stack goes back to the sidebar (`selection` becomes `nil`).
+- **`-UITestHoldSearchIndex YES`** (Debug, in-memory stores only): the index stops after its first text batch and
+  stays `.building`, so `SearchSmokeTests` sees and audits the indexing line; the sample texts all fit in that
+  batch.
+- **Tests:** `LibraryModelSearchTests` (text and scope, chips incl. the Trash, generations, index updates, the
+  indexing line, the sidebar) and `SearchSmokeTests` (UISmoke, iPhone and Mac: a word from one text, the scope,
+  a chip, ⌘F and a sidebar change on the Mac; audited).
 
 ## Logging
 

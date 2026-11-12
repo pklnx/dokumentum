@@ -11,8 +11,8 @@ enum SearchStoreReader {
     static let groupSize = 25
 
     /// One text row as the index needs it.
-    struct TextRow {
-        struct Owner: Equatable {
+    struct TextRow: Sendable {
+        struct Owner: Sendable, Equatable {
             var instanceID: UUID
             var createdAt: Date
         }
