@@ -158,7 +158,8 @@ struct FoundationModelsClassifierTests {
 }
 
 /// The real model (#8, part 2, T12): the synthetic bill of the plan's P-b through the classification step. Runs
-/// where the model is available (the development Mac); skips on the simulator (P-m) and wherever else it is not.
+/// where the model is available (the development Mac, also its iOS simulator on #138); skips wherever it is not
+/// (the plan's probe P-m found the simulator without it).
 struct FoundationModelsRealModelTests {
     static let availability = SystemLanguageModel.default.availability
     static let skipReason = Comment(rawValue: "The on-device model is not available here: \(availability)")

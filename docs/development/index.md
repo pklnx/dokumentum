@@ -573,14 +573,15 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     `contextSizeExceeded` and a cancellation included, is a failed attempt. **Availability:** `modelNotReady` is "not ready",
     the other reasons are unavailable; the scheduler follows the model's
     availability (`availabilityChanges()`, through Observation) and runs the queue on each change, so documents that
-    waited for the model are classified once it is ready. On the iOS simulator the model is not ready (plan of #8,
-    P-m), so documents there wait in `classify` until the claim's 6 hours end.
+    waited for the model are classified once it is ready. Where the model is not ready (the plan's probe P-m found
+    that on the iOS simulator), documents wait in `classify` until the claim's 6 hours end.
   - **Only the on-device model:** `scripts/check-project.py` fails if any `.swift` file names the framework's server
     model (`PrivateCloudCompute…`, also in a comment) or if a file other than the classifier and its tests imports
     `FoundationModels` (review N6).
   - **The real model** runs in one test, `FoundationModelsRealModelTests` (the plan's synthetic bill through the step:
     the correspondent matched to the existing record, the date 14.01.2026). It is skipped, with the availability as
-    the reason, where the model is not available (the simulator, possibly Xcode Cloud).
+    the reason, where the model is not available (possibly Xcode Cloud). On the development Mac they ran in the macOS
+    plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 
