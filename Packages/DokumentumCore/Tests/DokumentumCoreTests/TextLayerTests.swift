@@ -67,6 +67,21 @@ struct TextLayerTests {
         #expect(progress == 1 + 2 + 2 + 2, "the redraw and the guard report progress (N1)")
     }
 
+    static let born = "Rechnung Nummer 2026-0042"
+
+    /// A born-digital page (its font embedded, as a `CGContext` writes it) beside a scanned page: the file is
+    /// layered, and the text page keeps its own text.
+    @Test func aMixedPDFWithAnEmbeddedFontIsLayeredAndKeepsItsText() async throws {
+        let source = TestPDF.make(contents: [.text(Self.born), .image(Self.lines)])
+
+        let result = try await stage().process(pdfData: source) { _, _ in }
+
+        let layered = try #require(result.layeredPDF, "not layered")
+        let after = try #require(PDFDocument(data: layered))
+        #expect(after.page(at: 0)?.string?.contains(Self.born) == true)
+        #expect(after.findString("Fälligkeit", withOptions: []).count == 1, "only the scanned page is layered")
+    }
+
     /// The PDF the importer builds from photos (`PDFBuilder`, JPEG pages): the main case qualifies.
     @Test func aPDFBuiltFromImagesGetsALayer() async throws {
         let container = try TestSupport.makeContainer()
@@ -299,6 +314,25 @@ struct TextLayerTests {
         let lines = [0: StubRecognizer.boxedLines(Self.lines), 1: StubRecognizer.boxedLines(Self.lines)]
 
         #expect(textLayer.apply(to: source, document: document, lines: lines) == .kept(.guardFailed(failure)))
+    }
+
+    /// The guard's check of each page's own text: a rewrite whose text page lost its text is rejected.
+    @Test func theGuardRejectsARewriteThatLosesAPagesOwnText() throws {
+        let source = TestPDF.make(contents: [.text(Self.born), .image(Self.lines)])
+        let document = try #require(PDFDocument(data: source))
+        // The same rewrite (rotation, attributes, marker from the source), drawn from a copy whose text page is blank.
+        let withoutText = TestPDF.make(contents: [.blank, .image(Self.lines)])
+        let textLayer = TextLayer { data in
+            guard let original = PDFDocument(data: source), let drawn = TextLayer.cgDocument(withoutText) else {
+                return data
+            }
+            return TextLayer.rewrite(drawn, document: original, lines: [1: StubRecognizer.boxedLines(Self.lines)]) {}
+                ?? data
+        }
+        let lines = [1: StubRecognizer.boxedLines(Self.lines)]
+
+        #expect(
+            textLayer.apply(to: source, document: document, lines: lines) == .kept(.guardFailed(.sourceText(page: 0))))
     }
 
     /// A guard failure keeps the stored bytes and still writes the text.
