@@ -814,6 +814,14 @@ below).
 - **History errors:** an expired token (`SwiftDataError.historyTokenExpired`) rebuilds. Any other error
   is logged once per code; the first one of a launch rebuilds, later ones keep the index and the token,
   and the next event reads the history again.
+- **Failed text reads** (#132, N-c): a text row whose read fails keeps what is indexed for it and goes into a
+  retry set (held with the index, so a rebuild starts without it); the token still advances, since re-reading
+  the history would repeat every other change. The next history read reads the set's rows again by key, before
+  the new changes. A group of 25 whose read fails is read again row by row, so only the rows that really fail
+  stay; a row leaves the set when it is read, gone or deleted. Documents whose relinked text could not be read
+  are kept and retried the same way, and the build's failed groups are read again in its last history read.
+  Each error code is logged once. A row that keeps failing costs one failed read per event; with no further
+  event (a save or a remote change) the retry waits, as the history does.
 - **Rebuild:** a fresh index is built aside through the same steps while the old one answers queries
   (state `.building`), then replaces it in one assignment. Until then both are in memory: about 2 × 66 MB
   for 5,000 documents (the plan review's measurement R-b on the Mac).
@@ -826,7 +834,9 @@ below).
   `phys_footprint` on the Mac (R-b); the benchmark reports the figure of the device it runs on.
 - **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
   a change during the build, two subscribers, a persistent history error, a query answered while an update's
-  history read is held), `SearchIndexerRemoteTests`
+  history read is held), `SearchIndexerRetryTests` (a failed text read found after the next event, a failing
+  row that does not hold its group, a failed read during the build, a failed relink read),
+  `SearchIndexerRemoteTests`
   (another container's write with the remote change, an expired history with the rebuild swap) and
   `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
   changed text row by key).

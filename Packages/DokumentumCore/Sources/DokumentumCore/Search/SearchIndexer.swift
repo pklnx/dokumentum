@@ -29,6 +29,15 @@ import Synchronization
 /// - Any other history error (N5): logged once per code; the first one in a launch rebuilds, later ones keep the
 ///   index and the token, and the next event tries the history again.
 ///
+/// **A failed read of text rows** (#132, N-c) does not hold the token back (re-reading the whole history would
+/// repeat every other change): the rows whose read failed go into a retry set (`Contents.retry`) and are read
+/// again with the next history read, by key, before the new changes. A group of 25 whose read fails is read again
+/// id by id, so only the rows that really fail stay in the set; a row leaves it when it is read, when it is gone
+/// or when it is deleted. The documents whose relinked text could not be read are kept the same way. Each error
+/// code is logged once. A row that keeps failing costs one failed read per event and nothing else (no read
+/// triggers an event); with no further event the retry waits, as the history does. The build records its failed
+/// groups the same way, so its step 4 already reads them again; a rebuild starts with an empty set.
+///
 /// **A rebuild** builds a fresh index aside through the same steps while the old one answers queries (the state is
 /// `.building` meanwhile), then replaces it in one assignment. Both are in memory until then (about 2 × 66 MB for
 /// 5,000 documents, R-b).
@@ -47,6 +56,10 @@ public actor SearchIndexer: DocumentSearching {
         /// Runs after an update read the history, the changed texts and the metadata, off the actor, before it
         /// applies them.
         public var afterUpdateRead: (@Sendable () async -> Void)?
+        /// Reads the text rows of one group in place of `SearchStoreReader.texts` (#132, N-c: a test fails reads).
+        var readTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [SearchStoreReader.TextRow])?
+        /// Reads the text rows that documents link now in place of `SearchStoreReader.linkedTexts`.
+        var readLinkedTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [PersistentIdentifier])?
 
         public init(
             afterBatch: (@Sendable (Int) async -> Void)? = nil, beforeHistory: (@Sendable () async -> Void)? = nil,
@@ -74,6 +87,7 @@ public actor SearchIndexer: DocumentSearching {
 
     public let container: ModelContainer
     private let history: any SearchHistoryReading
+    private let reads: StoreReads
     private let batchBytes: Int
     private let hooks: Hooks
 
@@ -104,6 +118,7 @@ public actor SearchIndexer: DocumentSearching {
         self.history = history ?? StoreSearchHistory(container: container)
         batchBytes = max(1, textBatchBytes)
         self.hooks = hooks
+        reads = StoreReads(container: container, readTexts: hooks.readTexts, readLinkedTexts: hooks.readLinkedTexts)
     }
 
     // MARK: DocumentSearching
@@ -210,7 +225,7 @@ public actor SearchIndexer: DocumentSearching {
         textsDone: ContinuousClock.Instant
     ) {
         withContents(aside: aside) { contents in
-            switch Self.readTextChanges(since: contents.token, history: history, container: container) {
+            switch Self.readTextChanges(since: contents.token, retry: contents.retry, history: history, reads: reads) {
             case .changes(let changes):
                 apply(changes, to: &contents)
             case .expired(let code), .failed(let code):
@@ -258,22 +273,23 @@ public actor SearchIndexer: DocumentSearching {
     /// Reads the text rows of `group` in a fresh context and indexes them; a row that is gone clears its text.
     /// Returns the bytes indexed.
     private func upsertTexts(_ group: [PersistentIdentifier], into contents: inout Contents) -> Int {
-        apply(Self.readTexts(group, container: container), to: &contents)
+        apply(reads.texts(group), to: &contents)
     }
 
-    /// Indexes the rows read for one group; a row that is gone clears its text. A group whose read failed changes
-    /// nothing. Returns the bytes indexed.
+    /// Indexes the rows read for one group; a row that is gone clears its text. A row whose read failed keeps what
+    /// is indexed and goes into the retry set (#132, N-c); the others leave it. Returns the bytes indexed.
     @discardableResult
     private func apply(_ group: TextGroup, to contents: inout Contents) -> Int {
-        guard let rows = group.rows else { return 0 }
         var found: Set<PersistentIdentifier> = []
         var bytes = 0
-        for row in rows {
+        for row in group.rows {
             found.insert(row.id)
             bytes += row.text.utf8.count
             contents.upsert(row)
         }
-        for id in group.ids where !found.contains(id) { contents.clear(text: id) }
+        for id in group.ids where !found.contains(id) && !group.failed.contains(id) { contents.clear(text: id) }
+        contents.retry.texts.subtract(group.ids)
+        contents.retry.texts.formUnion(group.failed)
         return bytes
     }
 
@@ -284,9 +300,9 @@ public actor SearchIndexer: DocumentSearching {
     @concurrent
     private nonisolated func update() async {
         if let beforeHistory = hooks.beforeHistory { await beforeHistory() }
-        let token = await currentToken()
+        let (token, retry) = await readStart()
         let read = UpdateRead(
-            history: Self.readTextChanges(since: token, history: history, container: container),
+            history: Self.readTextChanges(since: token, retry: retry, history: history, reads: reads),
             metadata: Self.readMetadata(container: container))
         if let afterUpdateRead = hooks.afterUpdateRead { await afterUpdateRead() }
         switch await applyUpdate(read, readSince: token) {
@@ -304,7 +320,7 @@ public actor SearchIndexer: DocumentSearching {
     /// Applies what one update read. Only one update runs at a time (`run`), so the token is still the one the
     /// read started from; if it is not (a rebuild swapped the index meanwhile), the read is dropped and the next
     /// event reads again from the new token.
-    private func currentToken() -> DefaultHistoryToken? { live.token }
+    private func readStart() -> (DefaultHistoryToken?, Retry) { (live.token, live.retry) }
 
     private func applyUpdate(_ read: UpdateRead, readSince token: DefaultHistoryToken?) -> UpdateOutcome {
         guard live.token == token else { return .applied }
@@ -330,17 +346,22 @@ public actor SearchIndexer: DocumentSearching {
 
     /// Applies text changes read since `contents.token` and moves the token on.
     private func apply(_ changes: TextChanges, to contents: inout Contents) {
-        for id in changes.deletes { contents.clear(text: id) }
+        for id in changes.deletes {
+            contents.clear(text: id)
+            contents.retry.texts.remove(id)
+        }
+        contents.retry.documents.subtract(changes.relinkTried)
+        contents.retry.documents.formUnion(changes.relinkFailed)
         for group in changes.groups { apply(group, to: &contents) }
         if let newest = changes.newest { contents.token = newest }
     }
 
     // MARK: Reads (nonisolated: each in fresh contexts of its own)
 
-    /// The text changes since `token` and the text rows they name, read in fresh contexts. History errors are
-    /// logged once per code (`logHistoryError`) and returned, with nothing read.
+    /// The text changes since `token` and the text rows they name, read in fresh contexts, with the rows and
+    /// documents of `retry` first (#132, N-c). History errors are returned with nothing read; the caller logs them.
     private nonisolated static func readTextChanges(
-        since token: DefaultHistoryToken?, history: any SearchHistoryReading, container: ModelContainer
+        since token: DefaultHistoryToken?, retry: Retry, history: any SearchHistoryReading, reads: StoreReads
     ) -> HistoryRead {
         let changes: [TextChange]
         let newest: DefaultHistoryToken?
@@ -353,47 +374,29 @@ public actor SearchIndexer: DocumentSearching {
         }
         var upserts: [PersistentIdentifier] = []
         var seen: Set<PersistentIdentifier> = []
-        var documents: [PersistentIdentifier] = []
+        for id in retry.texts where seen.insert(id).inserted { upserts.append(id) }
+        var documents = Array(retry.documents)
+        var seenDocuments = retry.documents
         var deletes: [PersistentIdentifier] = []
         for change in changes {
             switch change {
             case .upsert(let id):
                 if seen.insert(id).inserted { upserts.append(id) }
             case .documentLink(let id):
-                documents.append(id)
+                if seenDocuments.insert(id).inserted { documents.append(id) }
             case .delete(let id):
                 deletes.append(id)
             }
         }
-        if !documents.isEmpty {
-            do {
-                for start in stride(from: 0, to: documents.count, by: SearchStoreReader.groupSize) {
-                    let group = Array(documents[start..<min(start + SearchStoreReader.groupSize, documents.count)])
-                    for id in try SearchStoreReader.linkedTexts(ofDocuments: group, in: ModelContext(container))
-                    where seen.insert(id).inserted {
-                        upserts.append(id)
-                    }
-                }
-            } catch {
-                Log.search.error("Search could not read relinked texts: \(Log.code(of: error), privacy: .public)")
-            }
-        }
+        let relinked = reads.linkedTexts(ofDocuments: documents)
+        for id in relinked.texts where seen.insert(id).inserted { upserts.append(id) }
         let groups = stride(from: 0, to: upserts.count, by: SearchStoreReader.groupSize).map { start in
-            readTexts(
-                Array(upserts[start..<min(start + SearchStoreReader.groupSize, upserts.count)]), container: container)
+            reads.texts(Array(upserts[start..<min(start + SearchStoreReader.groupSize, upserts.count)]))
         }
-        return .changes(TextChanges(deletes: deletes, groups: groups, newest: newest))
-    }
-
-    /// The text rows of `ids` (at most one group), read in a fresh context; `rows` is `nil` when the read failed
-    /// (logged).
-    private nonisolated static func readTexts(_ ids: [PersistentIdentifier], container: ModelContainer) -> TextGroup {
-        do {
-            return TextGroup(ids: ids, rows: try SearchStoreReader.texts(ids, in: ModelContext(container)))
-        } catch {
-            Log.search.error("Search could not read texts: \(Log.code(of: error), privacy: .public)")
-            return TextGroup(ids: ids, rows: nil)
-        }
+        return .changes(
+            TextChanges(
+                deletes: deletes, groups: groups, relinkTried: documents, relinkFailed: relinked.failed,
+                newest: newest))
     }
 
     /// The metadata of every document, read in a fresh context; `nil` when the read failed (logged).
@@ -446,6 +449,8 @@ extension SearchIndexer {
         /// The text row whose text is indexed per document, and its copy's `createdAt` (copies sharing an
         /// `instanceID` follow `RowRecords.oldestFirst`).
         var owners: [UUID: Owner] = [:]
+        /// What a failed read left to read again (#132, N-c); a rebuild starts without it, as it reads everything.
+        var retry = Retry()
 
         mutating func upsert(_ row: SearchStoreReader.TextRow) {
             if let previous = textDocuments[row.id], previous != row.document?.instanceID { clear(text: row.id) }
@@ -526,13 +531,112 @@ extension SearchIndexer {
     struct TextChanges: Sendable {
         var deletes: [PersistentIdentifier]
         var groups: [TextGroup]
+        /// The documents whose linked text was read, retried ones included.
+        var relinkTried: [PersistentIdentifier]
+        /// Those of them whose read failed.
+        var relinkFailed: Set<PersistentIdentifier>
         var newest: DefaultHistoryToken?
     }
 
-    /// The rows of one group of text identifiers; `rows` is `nil` when the read failed.
+    /// The rows of one group of text identifiers; `failed` holds the ids whose read failed.
     struct TextGroup: Sendable {
         var ids: [PersistentIdentifier]
-        var rows: [SearchStoreReader.TextRow]?
+        var rows: [SearchStoreReader.TextRow]
+        var failed: Set<PersistentIdentifier> = []
+    }
+
+    /// Text rows and documents whose read failed, read again with the next history read (#132, N-c).
+    struct Retry: Sendable {
+        var texts: Set<PersistentIdentifier> = []
+        var documents: Set<PersistentIdentifier> = []
+    }
+
+    /// The reads of text rows and of the texts documents link, each in a fresh context (#132, N-c): a group whose
+    /// read fails is read again id by id, so one failing row does not keep its neighbours out; each error code is
+    /// logged once.
+    final class StoreReads: Sendable {
+        private enum Failure: String {
+            case texts, relinkedTexts
+        }
+
+        private let container: ModelContainer
+        private let readTexts: @Sendable ([PersistentIdentifier], ModelContext) throws -> [SearchStoreReader.TextRow]
+        private let readLinkedTexts: @Sendable ([PersistentIdentifier], ModelContext) throws -> [PersistentIdentifier]
+        private let loggedErrors = Mutex<Set<String>>([])
+
+        init(
+            container: ModelContainer,
+            readTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [SearchStoreReader.TextRow])?,
+            readLinkedTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [PersistentIdentifier])?
+        ) {
+            self.container = container
+            self.readTexts = readTexts ?? { try SearchStoreReader.texts($0, in: $1) }
+            self.readLinkedTexts = readLinkedTexts ?? { try SearchStoreReader.linkedTexts(ofDocuments: $0, in: $1) }
+        }
+
+        /// The text rows of `ids` (at most one group).
+        func texts(_ ids: [PersistentIdentifier]) -> TextGroup {
+            do {
+                return TextGroup(ids: ids, rows: try readTexts(ids, ModelContext(container)))
+            } catch {
+                log(.texts, error)
+            }
+            var group = TextGroup(ids: ids, rows: [])
+            guard ids.count > 1 else {
+                group.failed = Set(ids)
+                return group
+            }
+            for id in ids {
+                do {
+                    group.rows += try readTexts([id], ModelContext(container))
+                } catch {
+                    log(.texts, error)
+                    group.failed.insert(id)
+                }
+            }
+            return group
+        }
+
+        /// The text rows that `documents` link now, read in groups, and the documents whose read failed.
+        func linkedTexts(ofDocuments documents: [PersistentIdentifier]) -> (
+            texts: [PersistentIdentifier], failed: Set<PersistentIdentifier>
+        ) {
+            var texts: [PersistentIdentifier] = []
+            var failed: Set<PersistentIdentifier> = []
+            for start in stride(from: 0, to: documents.count, by: SearchStoreReader.groupSize) {
+                let group = Array(documents[start..<min(start + SearchStoreReader.groupSize, documents.count)])
+                do {
+                    texts += try readLinkedTexts(group, ModelContext(container))
+                    continue
+                } catch {
+                    log(.relinkedTexts, error)
+                }
+                guard group.count > 1 else {
+                    failed.formUnion(group)
+                    continue
+                }
+                for id in group {
+                    do {
+                        texts += try readLinkedTexts([id], ModelContext(container))
+                    } catch {
+                        log(.relinkedTexts, error)
+                        failed.insert(id)
+                    }
+                }
+            }
+            return (texts, failed)
+        }
+
+        private func log(_ failure: Failure, _ error: any Error) {
+            let code = Log.code(of: error)
+            guard loggedErrors.withLock({ $0.insert("\(failure.rawValue) \(code)").inserted }) else { return }
+            switch failure {
+            case .texts:
+                Log.search.error("Search could not read texts: \(code, privacy: .public)")
+            case .relinkedTexts:
+                Log.search.error("Search could not read relinked texts: \(code, privacy: .public)")
+            }
+        }
     }
 
     struct Running: Sendable {
