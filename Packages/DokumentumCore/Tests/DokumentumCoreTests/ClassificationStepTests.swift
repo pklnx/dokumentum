@@ -621,6 +621,47 @@ struct ClassificationStepTests {
         #expect(try store.classified(pending).stateRaw == "done")
     }
 
+    /// T6 the other way round: an interrupted text stage that has not returned blocks the next run's classification
+    /// request until it returns.
+    @Test func aClassificationWaitsForAnInterruptedTextStage() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        try store.insert(device: deviceA, claimedAt: processingStart)
+        let page = Checkpoint()
+        defer { page.release() }
+        let texts = Mutex(0)
+        let stage = ClosureStage { _, progress in
+            let call = texts.withLock {
+                $0 += 1
+                return $0
+            }
+            // The first call ignores its cancellation until released, like a framework call.
+            if call == 1 { await page.pass() }
+            progress(1, 1)
+            return ProcessingResult(pageCount: 1, text: ExtractedText(pages: [billText], source: .pdfText))
+        }
+        let classifier = StubClassifier()
+        let waits = TestSignal()
+        let queue = store.classifyingQueue(
+            classifier: classifier, stage: stage, clock: clock, hooks: .init(waitsForStage: { waits.fire() }))
+
+        let first = Task { await queue.run() }
+        await page.reached()
+        queue.interruptNow()
+        #expect(await first.value.interrupted == 1)
+        // Older than the interrupted document, so the next run starts with its classification.
+        let waiting = try store.insertClassify(created: processingStart.addingTimeInterval(-1))
+
+        let second = Task { await queue.run() }
+        await waits.wait(for: 1, "the classification did not wait for the interrupted text stage")
+        #expect(classifier.count == 0, "a classification request started while the text stage ran")
+        page.release()
+        let report = await second.value
+        #expect(report.classified >= 1)
+        #expect(try store.classified(waiting).stateRaw == "done")
+    }
+
     // MARK: Claims
 
     /// Another device's fresh claim on a document in `classify` is waited for; an expired one is taken over.
