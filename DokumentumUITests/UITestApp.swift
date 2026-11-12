@@ -111,6 +111,7 @@ struct UITestApp {
     /// The prefixes of the app's own accessibility identifiers (`AccessibilityID`, `DokumentumApp.rootIdentifier`).
     static let appIdentifierPrefixes = [
         "sidebar", "documentList", "documentDetail", "documentInfo", "import.", "trash.", "debug.", "dokumentum.",
+        "search.",
     ]
 
     /// An audit issue on one of the app's own elements that the audit reports although the element is right

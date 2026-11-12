@@ -23,6 +23,38 @@ enum DetailState: Equatable {
 @MainActor @Observable
 final class LibraryModel {
     let source: any LibrarySource
+    /// The app's one search index (#7, part 2), shared by every window; `nil` for fixture sources in unit tests.
+    /// The search field queries it.
+    let searcher: (any DocumentSearching)?
+    /// The index's newest state: `observeSearchIndex()` follows its updates. `nil` until the first one.
+    private(set) var searchIndexState: SearchIndexState?
+
+    /// The search field's text, filter chips and scope (#7, part 3). It stays when the sidebar's selection changes
+    /// (P7); on the iPhone it ends when the stack goes back to the sidebar. A new text runs a query at once, without a
+    /// debounce (T10); chips and scope filter the last result again without a query.
+    var search = LibrarySearch() {
+        didSet {
+            if search.tokens.count > oldValue.tokens.count, !search.text.isEmpty {
+                // A chip picked from the suggestions stands for the words typed for it (every word had to match its
+                // name), so they go, as the iPhone's field drops them by itself. (No second `didSet`.)
+                search.text = ""
+            }
+            guard search != oldValue else { return }
+            if search.text != oldValue.text {
+                runSearch()
+            } else {
+                applySelection()
+            }
+        }
+    }
+    /// Counts Edit › Find… (⌘F) on the Mac: each change puts the focus into the search field (P7).
+    private(set) var searchFocusRequests = 0
+    /// The index's answer to the newest query that came back; `nil` without a text.
+    private(set) var searchResult: SearchResult?
+    /// The newest query, for tests: they await its `value`.
+    private(set) var searchTask: Task<Void, Never>?
+    /// Counts queries: only the newest one's result is shown (T10).
+    private var searchGeneration = 0
 
     private(set) var snapshot = LibrarySnapshot.empty
     private(set) var tree = TagTree([])
@@ -36,6 +68,12 @@ final class LibraryModel {
     var selection: LibrarySelection? = .inbox {
         didSet {
             guard selection != oldValue else { return }
+            #if os(iOS)
+                // `nil` on the iPhone, back at the sidebar: the list was left, and its search ends with it (P7).
+                if selection == nil, search != LibrarySearch() {
+                    search = LibrarySearch()
+                }
+            #endif
             applySelection()
         }
     }
@@ -68,8 +106,9 @@ final class LibraryModel {
 
     /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
     ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
-    init(source: any LibrarySource, loadNow: Bool = true) {
+    init(source: any LibrarySource, searcher: (any DocumentSearching)? = nil, loadNow: Bool = true) {
         self.source = source
+        self.searcher = searcher
         if loadNow { reload() }
     }
 
@@ -84,11 +123,16 @@ final class LibraryModel {
         snapshot = source.snapshot()
         tree = TagTree(snapshot.tags)
         counts = LibraryCounts(snapshot.documents, tree: tree)
+        dropGoneTokens()
         applySelection()
     }
 
+    /// The documents of the selection, narrowed by the search when it is active (`LibrarySearch.apply`).
     private func applySelection() {
-        documents = selection.map { $0.filter(snapshot.documents, in: tree) } ?? []
+        documents =
+            selection.map {
+                search.apply(searchResult, to: snapshot.documents, selection: $0, tree: tree)
+            } ?? []
         if let selectedDocumentID, !documents.contains(where: { $0.instanceID == selectedDocumentID }) {
             self.selectedDocumentID = nil
         }
@@ -102,6 +146,86 @@ final class LibraryModel {
             reload()
             if let selectedDocumentID { await loadDetail(for: selectedDocumentID) }
         }
+    }
+
+    /// Follows the search index's updates, one subscription per window (Revision 1, B3), until the calling task is
+    /// cancelled. The root view runs it in `.task`.
+    func observeSearchIndex() async {
+        guard let searcher else { return }
+        let updates = searcher.updates()
+        searchIndexState = await searcher.state
+        for await state in updates {
+            searchIndexState = state
+            // The index changed (a text was processed, a batch of the build is in): the active query again.
+            if search.hasText { runSearch() }
+        }
+    }
+
+    // MARK: Search
+
+    /// Whether the list shows search results.
+    var isSearchActive: Bool { search.isActive && selection != nil }
+
+    /// "Indexing texts… 12 of 40" while the index's texts are being read and a search is active (P5).
+    var indexingProgress: (indexed: Int, total: Int)? {
+        guard isSearchActive, case .building(let indexed, let total) = searchIndexState, total > 0 else { return nil }
+        return (indexed, total)
+    }
+
+    /// The chips offered for the text typed (P3): tags, correspondents, types and the Inbox (not in the Trash).
+    var searchSuggestions: [SearchToken] {
+        guard let selection else { return [] }
+        return search.suggestions(
+            in: snapshot, tree: tree, selection: selection, inboxName: String(localized: "Inbox"))
+    }
+
+    /// The chip's name: the tag's display path, the correspondent's or type's name; empty for the Inbox.
+    func name(of token: SearchToken) -> String {
+        switch token {
+        case .tag(let id): tree.displayPath(of: id)
+        case .correspondent(let id): snapshot.correspondents.first { $0.instanceID == id }?.name ?? ""
+        case .documentType(let id): snapshot.documentTypes.first { $0.instanceID == id }?.name ?? ""
+        case .inbox: ""
+        }
+    }
+
+    /// Edit › Find… (⌘F): the list's search field takes the focus.
+    func focusSearch() {
+        searchFocusRequests += 1
+    }
+
+    /// Asks the index for the current text. Each query has a generation; a result that comes back after a newer query
+    /// started is dropped (T10), as `loadDetail` does. Until the answer comes, the list keeps the previous result.
+    private func runSearch() {
+        searchGeneration += 1
+        let generation = searchGeneration
+        guard search.hasText, let searcher else {
+            searchResult = nil
+            searchTask = nil
+            applySelection()
+            return
+        }
+        let text = search.text
+        searchTask = Task { [weak self] in
+            let result = await searcher.search(text)
+            guard let self, generation == self.searchGeneration else { return }
+            self.searchResult = result
+            self.applySelection()
+        }
+    }
+
+    /// A chip whose tag, correspondent or type is gone (deleted, merged away) is dropped: it would match nothing and
+    /// have no name.
+    private func dropGoneTokens() {
+        let kept = search.tokens.filter { token in
+            switch token {
+            case .tag(let id): tree.tags[id] != nil
+            case .correspondent(let id): snapshot.correspondents.contains { $0.instanceID == id }
+            case .documentType(let id): snapshot.documentTypes.contains { $0.instanceID == id }
+            case .inbox: true
+            }
+        }
+        if kept != search.tokens { search.tokens = kept }
     }
 
     /// Loads the detail of `instanceID` (`nil`: nothing selected). The PDF is read and checked off

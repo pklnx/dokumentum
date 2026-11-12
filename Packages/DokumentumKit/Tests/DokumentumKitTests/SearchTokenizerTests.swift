@@ -30,13 +30,71 @@ struct SearchTokenizerTests {
         ("Kfz-\nSteuer", ["kfz", "steuer"]),
         ("Seite-\n2", ["seite", "2"]),
         ("Steuer-\n\nbescheid", ["steuer", "bescheid"]),
-        ("Steuer-\u{000C}bescheid", ["steuer", "bescheid"]),
         ("Steuer- bescheid", ["steuer", "bescheid"]),
         ("-\nbescheid", ["bescheid"]),
         ("Steuer-", ["steuer"]),
     ])
     func aLineEndHyphenJoinsOnlyBeforeALowercaseLetter(text: String, expected: [String]) {
         #expect(SearchTokenizer.words(of: text) == expected)
+    }
+
+    /// A page end is a line end too (#132, N-e): a form feed, alone or with one line break before or after it.
+    @Test(arguments: [
+        ("Steuer-\u{000C}bescheid", ["steuerbescheid"]),
+        ("Steuer-\n\u{000C}bescheid", ["steuerbescheid"]),
+        ("Steuer-\u{000C}\nbescheid", ["steuerbescheid"]),
+        ("Steuer- \r\n \u{000C} bescheid", ["steuerbescheid"]),
+        ("Steuer\u{00AD}\u{000C}bescheid", ["steuerbescheid"]),
+        ("Kfz-\u{000C}Steuer", ["kfz", "steuer"]),
+        ("Seite-\u{000C}2", ["seite", "2"]),
+        ("Steuer-\n\nbescheid", ["steuer", "bescheid"]),
+        ("Steuer-\u{000C}\u{000C}bescheid", ["steuer", "bescheid"]),
+        ("Steuer-\u{000C}\n\nbescheid", ["steuer", "bescheid"]),
+        ("Steuer-\n\u{000C}\nbescheid", ["steuer", "bescheid"]),
+    ])
+    func aHyphenAtAPageEndJoinsOnlyBeforeALowercaseLetter(text: String, expected: [String]) {
+        #expect(SearchTokenizer.words(of: text) == expected)
+    }
+
+    /// A soft hyphen inside a line is a break opportunity, not a separator (review of #125, N3).
+    @Test(arguments: [
+        ("Steuer\u{00AD}bescheid", ["steuerbescheid"]),
+        ("Grund\u{00AD}\u{00AD}steuer", ["grundsteuer"]),
+        ("Kfz\u{00AD}Steuer", ["kfzsteuer"]),
+        ("Über\u{00AD}weisung", ["uberweisung"]),
+        ("Steuer\u{00AD} bescheid", ["steuer", "bescheid"]),
+        ("Steuer\u{00AD}", ["steuer"]),
+        ("\u{00AD}Steuer", ["steuer"]),
+    ])
+    func aSoftHyphenInsideAWordIsRemoved(text: String, expected: [String]) {
+        #expect(SearchTokenizer.words(of: text) == expected)
+    }
+
+    @Test func aSoftHyphenInsideAQueryWordIsRemoved() {
+        #expect(
+            SearchTokenizer.terms(of: "steuer\u{00AD}bescheid").map(\.forms) == [["steuerbescheid", "steurbescheid"]])
+    }
+
+    /// The infix rule reads the length typed (review of #125, N2): "Mül" has 3 characters, its transcription
+    /// `muel` 4.
+    @Test func aTermAllowsInfixByItsTypedLength() {
+        let short = SearchTokenizer.terms(of: "Mül")
+        #expect(short.map(\.forms) == [["mul", "muel"]])
+        #expect(short.map(\.allowsInfix) == [[false, false]])
+        #expect(SearchTokenizer.terms(of: "Müll").map(\.allowsInfix) == [[true, true]])
+        #expect(SearchTokenizer.terms(of: "θην θηνα").map(\.allowsInfix) == [[false], [true]])
+        #expect(SearchTokenizer.terms(of: "ung nung").map(\.allowsInfix) == [[false], [true]])
+    }
+
+    /// An alternative also needs 4 characters of its own (#132, N-a): "muel" infix-matches as typed, but its
+    /// 3-letter form `mul` only by prefix. The first form keeps the typed-length rule alone.
+    @Test func anAlternativeAllowsInfixOnlyWithFourCharactersOfItsOwn() {
+        let term = SearchTokenizer.terms(of: "muel")
+        #expect(term.map(\.forms) == [["muel", "mul"]])
+        #expect(term.map(\.allowsInfix) == [[true, false]])
+        #expect(SearchTokenizer.terms(of: "muell").map(\.allowsInfix) == [[true, true]])
+        #expect(SearchTerm(forms: ["abcd", "xyz"]).allowsInfix == [true, false])
+        #expect(SearchTerm(forms: ["xyz", "abcd"], typedLength: 4).allowsInfix == [true, true])
     }
 
     @Test func aDecomposedAccentStaysInItsWord() {

@@ -24,8 +24,10 @@ import Foundation
 /// Every word a text has is indexed in its normalised form and, when that contains *ae/oe/ue*, also in its
 /// *a/o/u* form (Revision 1, B1), so "Müller", "Mueller" and "muller" find each other in every direction.
 public struct SearchIndex: Sendable {
-    /// A term of at least this many characters also matches inside a word ("bescheid" finds
-    /// "Steuerbescheid"); a shorter one only at its start ("ung" does not find "Rechnung"). P1.
+    /// A term typed with at least this many characters also matches inside a word ("bescheid" finds
+    /// "Steuerbescheid"); a shorter one only at its start ("ung" does not find "Rechnung"). P1. Characters, not
+    /// bytes, and of the word as typed, for every alternative form; an alternative also needs this many
+    /// characters of its own (`SearchTerm.allowsInfix`).
     public static let infixMinimumLength = 4
 
     /// What `statistics` reports.
@@ -155,7 +157,7 @@ public struct SearchIndex: Sendable {
         var result: [UInt64]?
         for term in terms {
             var bits = [UInt64](repeating: 0, count: wordCount)
-            for form in term.forms { addMatches(of: form, to: &bits) }
+            for (form, infix) in zip(term.forms, term.allowsInfix) { addMatches(of: form, infix: infix, to: &bits) }
             if var accumulated = result {
                 var any: UInt64 = 0
                 for index in 0..<wordCount {
@@ -182,10 +184,10 @@ public struct SearchIndex: Sendable {
 
     // MARK: Lookup
 
-    private func addMatches(of form: String, to bits: inout [UInt64]) {
+    private func addMatches(of form: String, infix: Bool, to bits: inout [UInt64]) {
         let needle = Array(form.utf8)
         guard !needle.isEmpty else { return }
-        if form.unicodeScalars.count < Self.infixMinimumLength {
+        if !infix {
             var index = lowerBound(needle)
             while index < sorted.count {
                 let token = sorted[index]
