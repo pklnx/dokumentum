@@ -159,13 +159,26 @@ struct FoundationModelsClassifierTests {
 
 /// The real model (#8, part 2, T12): the synthetic bill of the plan's P-b through the classification step. Runs
 /// where the model is available (the development Mac, also its iOS simulator on #138); skips wherever it is not
-/// (the plan's probe P-m found the simulator without it).
+/// (the plan's probe P-m found the simulator without it). The simulator of a GitHub Actions macOS runner reports
+/// the model as available but has no model assets (`ModelManagerError 1026`, "no underlying assets"), so the tests
+/// also ask the model one trivial question first and are cancelled with the reason when even that fails.
 struct FoundationModelsRealModelTests {
     static let availability = SystemLanguageModel.default.availability
     static let skipReason = Comment(rawValue: "The on-device model is not available here: \(availability)")
 
+    /// Cancels the test (a skip with the reason) when the model reports itself available but cannot answer at all.
+    /// A failure of the classification itself is not caught here: the preflight asks only a trivial question.
+    static func requireAnsweringModel() async throws {
+        do {
+            _ = try await LanguageModelSession().respond(to: "Answer with the word yes.")
+        } catch let error as LanguageModelError {
+            try Test.cancel("The on-device model is available but cannot answer here (no assets?): \(error)")
+        }
+    }
+
     @Test(.enabled(if: availability == .available, skipReason), .timeLimit(.minutes(2)))
     func theModelClassifiesASyntheticBill() async throws {
+        try await Self.requireAnsweringModel()
         let store = try ProcessingStore()
         defer { store.remove() }
         let clock = TestClock()
@@ -199,6 +212,7 @@ struct FoundationModelsRealModelTests {
     /// the budget, so the request does not exceed the context.
     @Test(.enabled(if: availability == .available, skipReason), .timeLimit(.minutes(2)))
     func aTextOfTheCapIsCutToTheBudget() async throws {
+        try await Self.requireAnsweringModel()
         let text = String(repeating: syntheticBill + "\n", count: 500_000 / (syntheticBill.utf8.count + 1))
         #expect(text.utf8.count > 490_000)
         let suggestion = try await FoundationModelsClassifier().classify(
