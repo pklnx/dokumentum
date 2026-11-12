@@ -153,4 +153,22 @@ struct SyncLabTests {
         await writes.wait(for: 2, "the flag was not reset")
         #expect(!lab.isRequeueDone)
     }
+
+    /// A change of the classification switch outside the lab (later #8 part 3's settings switch) shows at the "This
+    /// device" section's next periodic read and when the lab refreshes, so step Z's check never reads a stale value
+    /// (review B of round 2, N1).
+    @Test func theClassificationLineFollowsAChangeOutsideTheLab() async throws {
+        let (lab, _, _) = try makeLab(onDisk: true)
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(lab.isClassificationEnabled)
+
+        ClassificationSettings(defaultsSuite: suite).isEnabled = false
+        _ = await lab.refreshThisDevice()
+        #expect(!lab.isClassificationEnabled, "the periodic read kept the old value")
+
+        ClassificationSettings(defaultsSuite: suite).isEnabled = true
+        await lab.refresh()
+        #expect(lab.isClassificationEnabled, "the lab's refresh kept the old value")
+    }
 }

@@ -196,6 +196,7 @@
         // MARK: Documents
 
         func refresh() async {
+            refreshDeviceSettings()
             do {
                 rows = try await SyncLabDocuments.rows(in: container)
                 metadata = try await SyncLabDocuments.metadata(in: container)
@@ -450,6 +451,14 @@
         func runRepair() {
             repair?.requestRun()
             report(repair == nil ? "No repair for an in-memory store" : "Repair requested")
+        }
+
+        /// The "This device" section's periodic read (once a second): the device settings are read again, so the
+        /// "Classification" line never shows a stale value after a change outside the lab (#8 part 3's switch; review
+        /// B, N1 of round 2), and the search index's summary is returned.
+        func refreshThisDevice() async -> String {
+            refreshDeviceSettings()
+            return await searchIndexSummary()
         }
 
         /// The search index's state, statistics and last history error.

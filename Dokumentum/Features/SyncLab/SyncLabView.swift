@@ -122,7 +122,7 @@
                         line("Repair", lab.lastRepairCounts)
                         line("Search index", searchSummary)
                     }
-                    .task(id: context.date) { searchSummary = await lab.searchIndexSummary() }
+                    .task(id: context.date) { searchSummary = await lab.refreshThisDevice() }
                 }
                 Toggle(
                     isOn: Binding(get: { lab.isHeld }, set: { lab.setHold($0) })
