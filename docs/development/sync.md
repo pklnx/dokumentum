@@ -25,11 +25,12 @@ account-change check moved to the simulator (#31, P4).
   #4 M1 (2026-11-11) stay and take part (R0); the Sync lab never writes to them directly.
 - No TestFlight build of Dokumentum is installed on either device during the protocol.
 - **Classification is switched back on before any sitting ends** (step Z). The Sync lab's **Classify on this device**
-  writes #8's per-device setting `classification.enabled` into the app's defaults. Debug and Release builds share the
-  bundle ID (`space.pklnx.Dokumentum`), so a TestFlight build installed on the same device later reads the value the
-  development build left. Release builds have no switch until #8 part 3 (#139), and no development build may go onto
-  the devices after the protocol (P3) to turn it back on: a switch left off would silently turn off classification
-  in the maintainer's TestFlight app.
+  writes #8's per-device setting `classification.enabled` into the app's defaults, the same setting as the app's own
+  switch "Suggest metadata with Apple Intelligence" (Settings › Suggestions, #8 part 3, #139). Debug and Release
+  builds share the bundle ID (`space.pklnx.Dokumentum`), so a TestFlight build installed on the same device later
+  reads the value the development build left. The TestFlight app has the switch in its settings, so a switch left
+  off can be turned on there, but nothing in that app says that the protocol turned it off: classification would
+  stay silently off until someone looks. Z therefore stays part of every sitting.
 
 ## What the status shows
 
@@ -106,8 +107,11 @@ it. Edits through the editor and the trash (title, date, tags, move to the trash
 as in the app.
 
 Two **device settings** (never synced) change only with a store on disk, after the same question: the re-queue flag
-(write 4) and **Classify on this device**, #8's per-device switch `classification.enabled` (on unless set; the
-setting that #8 part 3 shows in the app's settings). With an in-memory store both are disabled.
+(write 4) and **Classify on this device**, #8's per-device switch `classification.enabled` (on unless set). It is
+the same setting as the app's switch "Suggest metadata with Apple Intelligence" (Settings › Suggestions; on the Mac
+⌘, , on the iPhone the gear in the sidebar): the lab writes the suite the app's settings and the processing queue
+use, the app's settings show the lab's change when they open, and the lab's line "Classification" follows a change
+made there. With an in-memory store both are disabled.
 
 Sections:
 - **This device:** the short device ID, the store that opened, the takeover interval in effect (120 s with
@@ -329,14 +333,16 @@ never the title, date or metadata)
 
 **Z, classification on, both devices (closing step; also at every stop)**
 - On the Mac and on the iPhone: open the Sync lab, turn **Classify on this device** on (answer the question with
-  **Write**) and check that the line "Classification" reads `on`. Record it in the results row Z, for both devices.
+  **Write**) and check that the line "Classification" reads `on`. Instead of the lab's toggle, the app's own switch
+  works too: Settings › Suggestions, "Suggest metadata with Apple Intelligence" on (on the Mac ⌘, , on the iPhone the
+  gear in the sidebar); the lab's line then reads `on` as well. Record it in the results row Z, for both devices.
 - Run it at the end of run 1 and before every stop: at the end of a sitting, after step 0 stops (entitlement), after
   C7's recovery fails, when M1/M2 are stopped or skipped, and before closing the apps for any other reason (for
   example the end of the day). **After a crash** of either app, relaunch both apps and run Z before anything else;
   the run continues afterwards as a later sitting does. A later sitting turns it off again on both before its first
   case.
-- The line "Classification" reads the stored setting again every second, so it also shows a change made elsewhere
-  (for example #8 part 3's switch in the app's settings, once it exists).
+- The line "Classification" reads the stored setting again every second, so it also shows a change made in the
+  app's settings.
 
 ## Run 2 (M1, M2; about 30 minutes, run within run 1 on this build)
 
