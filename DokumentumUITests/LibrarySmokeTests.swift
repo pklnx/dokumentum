@@ -203,6 +203,9 @@ final class LibrarySmokeTests: XCTestCase {
         #if os(macOS)
             ui.assertTextContrast("settings.suggestions.availability", in: self, file: file, line: line)
             ui.assertTextContrast("settings.suggestions.privacy", in: self, file: file, line: line)
+        #else
+            // The system "Done" in its glass capsule: accepted in the audit, so measured here (#136, #139).
+            ui.assertTextContrast("settings.done", in: self, file: file, line: line)
         #endif
         ui.auditAccessibility("settings-\(availability)", in: self, file: file, line: line)
 

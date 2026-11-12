@@ -179,10 +179,10 @@ struct UITestApp {
                     + "element for \"turned off\". LibrarySmokeTests measures its contrast in every run."),
         ]
     #else
-        /// The iPhone's accepted issues, all on the cleanup sheet (#136). The toolbar's Cancel and Save are the
-        /// system's own toolbar buttons (a glass capsule; the sheet sets no tint, font or background on them).
-        /// `ScanSmokeTests` measures their text contrast from their screenshots in every run
-        /// (`assertTextContrast`), so a real contrast loss still fails.
+        /// The iPhone's accepted issues, on the cleanup sheet (#136) and the settings sheet's "Done" (#139). The
+        /// toolbar's Cancel, Save and Done are the system's own toolbar buttons (a glass capsule; the sheets set no
+        /// tint, font or background on them). `ScanSmokeTests` and `LibrarySmokeTests` measure their text contrast
+        /// from their screenshots in every run (`assertTextContrast`), so a real contrast loss still fails.
         static let acceptedAuditIssues =
             ["cleanup.cancel", "cleanup.save"].flatMap { identifier in
                 [
@@ -209,6 +209,21 @@ struct UITestApp {
                         + "text; its colours behind depend on the photo (#136)."
                 )
             }
+            + [
+                AcceptedAuditIssue(
+                    identifier: "settings.done", auditType: .dynamicType,
+                    description: "Dynamic Type font sizes are partially unsupported",
+                    reason:
+                        "the settings sheet's \"Done\", the system toolbar button in a glass capsule like the "
+                        + "cleanup sheet's; navigation bar buttons cap their text size and offer the large content "
+                        + "viewer instead (#139)."),
+                AcceptedAuditIssue(
+                    identifier: "settings.done", auditType: .contrast, description: "Contrast failed",
+                    reason:
+                        "the settings sheet's \"Done\", the system toolbar button in a glass capsule; the audit "
+                        + "fails text on the capsule whatever its contrast (#136). LibrarySmokeTests measures it "
+                        + "in every run (#139)."),
+            ]
     #endif
 
     /// Runs the system's accessibility audit on what is shown now (plan of #3, T12). An issue on an element with
