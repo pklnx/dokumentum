@@ -378,6 +378,28 @@ struct ProcessingSchedulerTests {
         #expect(runner.cancelled.withLock { $0 } == [true, false])
     }
 
+    /// A `releaseHold()` while the run that `hold()` interrupted is still ending queues one more run, which starts
+    /// once the interrupted one has returned (review B, N3 of PR #155; as `resume()` does after a `pause()`).
+    @Test func aReleaseWhileTheInterruptedRunIsEndingRunsAgain() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.hold()
+        scheduler.releaseHold()
+        #expect(scheduler.isRunning, "the interrupted run has not returned yet")
+        #expect(scheduler.isQueued, "the release did not queue a run behind the ending one")
+        gate.release()
+        await setup.runs.wait(for: 2)
+        #expect(runner.started.count == 2)
+        #expect(runner.cancelled.withLock { $0 } == [true, false])
+    }
+
     /// The hold writes nothing (T14): with the real queue and a pending document of this device, a hold before the
     /// launch run and a `resume()` while held save nothing and run no stage; `releaseHold()` processes the document.
     @Test func theHoldWritesNothing() async throws {
