@@ -20,7 +20,7 @@ struct DokumentumApp: App {
     let storeChanges: StoreChangeObserver?
     /// The one importer of the app (plan of #4, N2): every window's `ImportController` uses it, so all
     /// imports go through one actor.
-    let importer: DocumentImporter
+    let importer: any DocumentImporting
     /// Runs the processing queue (plan of #4, part 5): at launch, after imports, on every activation, after store
     /// changes and at the next claim expiry or backoff end; paused in the background on iOS and when the Mac app
     /// quits (`ProcessingLifecycle`). `nil` for an in-memory store, as the repair.
@@ -33,6 +33,9 @@ struct DokumentumApp: App {
     /// window's library follows it. Built at launch off the main actor, then updated from saves and store changes.
     let search: SearchIndexer
     #if os(iOS)
+        /// The processing queue's background tasks (plan of #6, part 5): continued processing after a user's import,
+        /// the processing task when the app goes to the background. `nil` where `processing` is.
+        let background: BackgroundProcessing?
         /// Imports what the share extension queued (plan of #4, part 4): at launch and on every activation, on
         /// the one importer. `nil` without the app group, and in runs that stay away from real data.
         let shareQueue: ShareQueueImporter?
@@ -85,7 +88,7 @@ struct DokumentumApp: App {
         #endif
         search.start(storeChanges: storeChanges?.changes())
         let deviceID = DeviceIdentity.processingDeviceID()
-        importer = DocumentImporter(container: container, deviceID: deviceID)
+        let documentImporter = DocumentImporter(container: container, deviceID: deviceID)
         // The processing queue (#4, part 5), for the stores on disk only, like the repair.
         if let storeChanges {
             #if DEBUG
@@ -106,8 +109,35 @@ struct DokumentumApp: App {
             retrier = ProcessingQueue(container: container, deviceID: deviceID, failures: ProcessingFailures())
         }
         #if os(iOS)
+            // Registered before the app finishes launching, once per identifier (T13, N4). Every user import goes
+            // through the importer below, which asks for a continued-processing task; a CloudKit import never does.
+            if let processing {
+                let container = container
+                let background = BackgroundProcessing(
+                    scheduler: processing, tasks: SystemBackgroundTasks(),
+                    openDocuments: { instanceIDs in
+                        do {
+                            return try OpenDocuments.count(in: container, among: instanceIDs)
+                        } catch {
+                            Log.processing.error("Open documents not counted: \(Log.code(of: error), privacy: .public)")
+                            return 0
+                        }
+                    },
+                    applicationIsInForeground: { UIApplication.shared.applicationState != .background })
+                background.register()
+                if let storeChanges {
+                    background.followStoreChanges(storeChanges.changes())
+                }
+                self.background = background
+                importer = BackgroundImportNotifying(base: documentImporter) { background.userImported($0) }
+            } else {
+                background = nil
+                importer = documentImporter
+            }
             shareQueue = ShareQueueImporter.forApp(importer: importer)
             shareQueue?.requestRun()
+        #else
+            importer = documentImporter
         #endif
     }
 
@@ -132,7 +162,11 @@ struct DokumentumApp: App {
             #if os(iOS)
                 if phase == .active { shareQueue?.requestRun() }
             #endif
-            ProcessingLifecycle.scenePhaseChanged(to: phase, scheduler: processing)
+            #if os(iOS)
+                ProcessingLifecycle.scenePhaseChanged(to: phase, scheduler: processing, background: background)
+            #else
+                ProcessingLifecycle.scenePhaseChanged(to: phase, scheduler: processing)
+            #endif
         }
         // On the scene, not the view, so the root view keeps its type.
         .modelContainer(container)

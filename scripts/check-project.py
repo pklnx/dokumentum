@@ -21,6 +21,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   and xcodebuild accept), into PlugIns. It links exactly the package product DokumentumKit, for the
   share queue's format (plan of #4, part 4, T8), and nothing else, and its Info.plist holds exactly the
   reviewed keys and activation rule.
+- The app's iOS Info.plist holds exactly the reviewed background modes and background task identifiers
+  (IOS_APP_INFO_CONTENT, plan of #6, part 5), and no permitted identifier falls under another one's
+  wildcard: the continued-processing tasks and the processing task stay apart (N4).
 - No .swift file under DokumentumShare/ contains the words SwiftData or DokumentumCore anywhere, as whole
   words, in code, strings or comments: the extension must never touch the store. On purpose a plain word
   search and no parser. It has no misses, where anything short of a real Swift lexer misreads raw strings,
@@ -156,6 +159,17 @@ SHARE_FOLDER = "DokumentumShare"
 SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
 # The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
 SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
+# The app's whole iOS Info.plist file (plan of #6, part 5, T13 and N4): CloudKit's silent pushes, and the
+# processing task with the continued-processing tasks, whose identifiers do not overlap. A change of the rule is a
+# change here, on purpose.
+BACKGROUND_TASK_PREFIX = "space.pklnx.Dokumentum."
+IOS_APP_INFO_CONTENT = {
+    "BGTaskSchedulerPermittedIdentifiers": [
+        "space.pklnx.Dokumentum.continued.*",
+        "space.pklnx.Dokumentum.backgroundProcessing",
+    ],
+    "UIBackgroundModes": ["remote-notification", "processing"],
+}
 # The extension's whole Info.plist file: PDFs and images only. A change of the rule is a change here, on purpose.
 SHARE_INFO_CONTENT = {"NSExtension": {
     "NSExtensionAttributes": {
@@ -508,15 +522,39 @@ def check_info_plists(root):
         camera = actual.pop(CAMERA_USAGE_KEY, None)
         if not isinstance(camera, str) or not camera.strip():
             problems.append(f"{IOS_APP_INFO}: {CAMERA_USAGE_KEY} must hold the camera's usage text, found {camera!r}")
-        if actual != {"UIBackgroundModes": ["remote-notification"]}:
-            problems.append(f"{IOS_APP_INFO}: holds only UIBackgroundModes = [remote-notification] and "
-                            f"{CAMERA_USAGE_KEY}, found {actual}")
+        if actual != IOS_APP_INFO_CONTENT:
+            problems.append(f"{IOS_APP_INFO}: must hold exactly the reviewed background modes and task identifiers "
+                            f"and {CAMERA_USAGE_KEY} (IOS_APP_INFO_CONTENT in scripts/check-project.py), found {actual}")
+        problems += check_task_identifiers(actual.get("BGTaskSchedulerPermittedIdentifiers"))
     actual, problem = read_plist(root, SHARE_INFO)
     if problem:
         problems.append(problem)
     elif actual != SHARE_INFO_CONTENT:
         problems.append(f"{SHARE_INFO}: must hold exactly the reviewed keys and activation rule "
                         f"(SHARE_INFO_CONTENT in scripts/check-project.py), found {actual}")
+    return problems
+
+
+def check_task_identifiers(identifiers):
+    """Background task identifiers: under the app's bundle identifier, no duplicates, and none falls under
+    another one's wildcard (`<prefix>.*`), so a continued-processing task can never take the processing task's
+    identifier (plan of #6, N4)."""
+    if identifiers is None:
+        return []
+    if not isinstance(identifiers, list) or not all(isinstance(item, str) for item in identifiers):
+        return [f"{IOS_APP_INFO}: BGTaskSchedulerPermittedIdentifiers must be a list of strings"]
+    problems = []
+    for identifier in identifiers:
+        if not identifier.startswith(BACKGROUND_TASK_PREFIX):
+            problems.append(f"{IOS_APP_INFO}: task identifier {identifier} is not under {BACKGROUND_TASK_PREFIX}")
+    for duplicate in sorted({item for item in identifiers if identifiers.count(item) > 1}):
+        problems.append(f"{IOS_APP_INFO}: task identifier {duplicate} is listed twice")
+    for wildcard in identifiers:
+        if not wildcard.endswith(".*"):
+            continue
+        for other in identifiers:
+            if other != wildcard and other.startswith(wildcard[:-1]):
+                problems.append(f"{IOS_APP_INFO}: task identifier {other} overlaps the wildcard {wildcard}")
     return problems
 
 
@@ -849,9 +887,12 @@ def write_fixture(root):
         os.chmod(root / script, 0o755)
     for name, content in ENTITLEMENTS.items():
         (root / name).write_bytes(plistlib.dumps(content))
-    (root / IOS_APP_INFO).write_bytes(plistlib.dumps(
-        {"UIBackgroundModes": ["remote-notification"], CAMERA_USAGE_KEY: "Dokumentum uses the camera."}))
+    (root / IOS_APP_INFO).write_bytes(plistlib.dumps(IOS_APP_INFO_FIXTURE))
     (root / SHARE_INFO).write_bytes(plistlib.dumps(SHARE_INFO_CONTENT))
+
+
+# The self-test's Info.plist: the reviewed content plus a camera text (its value is the maintainer's, not pinned).
+IOS_APP_INFO_FIXTURE = {**IOS_APP_INFO_CONTENT, CAMERA_USAGE_KEY: "Dokumentum uses the camera."}
 
 
 def self_test_post_clone():
@@ -1129,9 +1170,32 @@ def self_test():
         ("an entitlements file is not a plist", write(IOS_APP_ENTITLEMENTS, "<plist"), "not a valid property list"),
         ("an unknown entitlements file", write("Config/Other.entitlements", ""), "Config/Other.entitlements is not a reviewed"),
         # Info.plist files.
-        ("an extra key in the app's Info.plist", write(IOS_APP_INFO, plistlib.dumps({"UIBackgroundModes": ["remote-notification"], "X": "y"}).decode()),
-         "holds only UIBackgroundModes"),
-        ("another background mode", write(IOS_APP_INFO, plistlib.dumps({"UIBackgroundModes": ["audio"]}).decode()), "holds only UIBackgroundModes"),
+        ("an extra key in the app's Info.plist", write(IOS_APP_INFO, plistlib.dumps({**IOS_APP_INFO_FIXTURE, "X": "y"}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("another background mode", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "UIBackgroundModes": ["remote-notification", "processing", "audio"]}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("no processing background mode", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "UIBackgroundModes": ["remote-notification"]}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("no permitted task identifiers", write(IOS_APP_INFO, plistlib.dumps(
+            {key: value for key, value in IOS_APP_INFO_FIXTURE.items() if key != "BGTaskSchedulerPermittedIdentifiers"}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("a task identifier under the continued wildcard", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
+                "space.pklnx.Dokumentum.continued.*", "space.pklnx.Dokumentum.continued.background"]}).decode()),
+         "overlaps the wildcard space.pklnx.Dokumentum.continued.*"),
+        ("a wildcard over every task", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
+                "space.pklnx.Dokumentum.*", "space.pklnx.Dokumentum.backgroundProcessing"]}).decode()),
+         "space.pklnx.Dokumentum.backgroundProcessing overlaps the wildcard space.pklnx.Dokumentum.*"),
+        ("a task identifier listed twice", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": [
+                "space.pklnx.Dokumentum.backgroundProcessing", "space.pklnx.Dokumentum.backgroundProcessing"]}).decode()),
+         "is listed twice"),
+        ("a task identifier of another app", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "BGTaskSchedulerPermittedIdentifiers": ["com.example.task"]}).decode()),
+         "is not under space.pklnx.Dokumentum."),
         ("another extension point", write(SHARE_INFO, plistlib.dumps({"NSExtension": {
             **SHARE_INFO_CONTENT["NSExtension"], "NSExtensionPointIdentifier": "x"}}).decode()),
          "must hold exactly the reviewed keys"),
