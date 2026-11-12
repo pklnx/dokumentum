@@ -9,13 +9,17 @@ public struct ProcessingResult: Equatable, Sendable {
     /// The document's text and its source; `nil` leaves the text record and `textSource` as they are (a test's
     /// stage that only counts pages).
     public var text: ExtractedText?
+    /// The PDF with the invisible text layer (#6, part 3), which replaces the stored file; `nil` keeps the stored
+    /// bytes as they are.
+    public var layeredPDF: Data?
     /// The thumbnail to insert when the document has none (`Thumbnail`): set by the queue, only for a document the
     /// re-queue pass recorded for the backfill (#6, part 4, N3); `nil` otherwise.
     public var thumbnail: Data?
 
-    public init(pageCount: Int, text: ExtractedText? = nil, thumbnail: Data? = nil) {
+    public init(pageCount: Int, text: ExtractedText? = nil, layeredPDF: Data? = nil, thumbnail: Data? = nil) {
         self.pageCount = pageCount
         self.text = text
+        self.layeredPDF = layeredPDF
         self.thumbnail = thumbnail
     }
 }
@@ -41,10 +45,14 @@ public protocol ProcessingStage: Sendable {
 ///   `VisionTextRecognizer`), its lines joined by newlines.
 ///
 /// The text is the pages' texts in page order, joined with a form feed (`ExtractedText`); the source is `.pdfText`
-/// when every page was a text page, else `.vision`, also when nothing was found. Before each page the stage checks
-/// for cancellation, after it reports progress (page k of n). One page image is alive at a time (an autorelease pool
-/// per render), and the `PDFDocument` is kept alive for the whole stage, because PDFKit cannot draw a page whose
-/// document was released (P-h).
+/// when every page was a text page, else `.vision`, also when nothing was found. When pages were recognised, the
+/// stage then builds the invisible text layer (`TextLayer`, part 3): a PDF that passes its rules and its guard is
+/// returned as `layeredPDF`; otherwise the stored bytes stay as they are, and the reason is logged.
+///
+/// Before each page the stage checks for cancellation, after it reports progress (page k of n; during the layer's
+/// redraw and guard, n of n per page). One page image is alive at a time (an autorelease pool per render), and the
+/// `PDFDocument` is kept alive for the whole stage, because PDFKit cannot draw a page whose document was released
+/// (P-h).
 public struct DocumentStage: ProcessingStage {
     public enum Failure: Error, Equatable {
         /// PDFKit cannot open it, it is locked, or it has no page.
@@ -54,9 +62,11 @@ public struct DocumentStage: ProcessingStage {
     }
 
     public let recognizer: any TextRecognizing
+    public let textLayer: TextLayer
 
-    public init(recognizer: any TextRecognizing = VisionTextRecognizer()) {
+    public init(recognizer: any TextRecognizing = VisionTextRecognizer(), textLayer: TextLayer = TextLayer()) {
         self.recognizer = recognizer
+        self.textLayer = textLayer
     }
 
     @concurrent
@@ -70,6 +80,7 @@ public struct DocumentStage: ProcessingStage {
         progress(0, total)
         var pages: [String] = []
         var recognised = false
+        var recognisedLines: [Int: [RecognizedLine]] = [:]
         for index in 0..<total {
             try Task.checkCancellation()
             guard let page = document.page(at: index) else { throw Failure.unreadablePDF }
@@ -81,11 +92,31 @@ public struct DocumentStage: ProcessingStage {
                 guard let image else { throw Failure.renderFailed }
                 let lines = try await recognizer.recognizeText(in: image)
                 pages.append(lines.map(\.text).joined(separator: "\n"))
+                recognisedLines[index] = lines
                 recognised = true
             }
             progress(index + 1, total)
         }
+        var layered: Data?
+        if recognised {
+            try Task.checkCancellation()
+            // Progress during the redraw and the guard too, so a large rewrite never looks like a stall (N1).
+            switch textLayer.apply(
+                to: pdfData, document: document, lines: recognisedLines,
+                progress: {
+                    progress(total, total)
+                })
+            {
+            case .layered(let data):
+                layered = data
+            case .kept(.cancelled):
+                throw CancellationError()
+            case .kept(let reason):
+                Log.processing.notice("No text layer; the file is kept as it is: \(reason.code, privacy: .public)")
+            }
+        }
         return ProcessingResult(
-            pageCount: total, text: ExtractedText(pages: pages, source: recognised ? .vision : .pdfText))
+            pageCount: total, text: ExtractedText(pages: pages, source: recognised ? .vision : .pdfText),
+            layeredPDF: layered)
     }
 }
