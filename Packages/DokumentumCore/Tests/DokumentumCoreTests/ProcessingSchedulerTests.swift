@@ -41,6 +41,30 @@ struct ProcessingSchedulerTests {
         }
     }
 
+    /// Records the scheduler's activity (#130): how often it began and ended, and the most held at once.
+    @MainActor
+    final class ActivityLog: ProcessingActivityHolding {
+        let ended = TestSignal()
+        private(set) var begins = 0
+        private(set) var ends = 0
+        private(set) var held = 0
+        private(set) var mostHeld = 0
+
+        var isActive: Bool { held > 0 }
+
+        func begin() {
+            begins += 1
+            held += 1
+            mostHeld = max(mostHeld, held)
+        }
+
+        func end() {
+            ends += 1
+            held -= 1
+            ended.fire()
+        }
+    }
+
     /// The durations the expiry timer asked to sleep.
     final class SleepLog: Sendable {
         let durations = Mutex<[Duration]>([])
@@ -57,7 +81,8 @@ struct ProcessingSchedulerTests {
     }
 
     private func makeScheduler(
-        runner: any ProcessingRunning, clock: TestClock = TestClock(), sleeps: SleepLog? = nil
+        runner: any ProcessingRunning, clock: TestClock = TestClock(), sleeps: SleepLog? = nil,
+        activity: ActivityLog = ActivityLog()
     ) throws -> Setup {
         let container = try TestSupport.makeContainer()
         let center = NotificationCenter()
@@ -71,7 +96,7 @@ struct ProcessingSchedulerTests {
             sleep: { duration in
                 sleeps?.durations.withLock { $0.append(duration) }
                 try await expirySleep(duration)
-            }, now: clock.function)
+            }, now: clock.function, activity: activity)
         let runs = TestSignal()
         scheduler.didFinishRun = { _ in runs.fire() }
         return Setup(
@@ -281,6 +306,118 @@ struct ProcessingSchedulerTests {
         #expect(stage.count == 2)
         #expect(scheduler.scheduledWake == clock.now.addingTimeInterval(10 * 60))
     }
+
+    /// A run holds one activity from its start until it ends (#130); nothing is held before or after.
+    @Test func aRunHoldsOneActivityUntilItEnds() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let activity = ActivityLog()
+        let setup = try makeScheduler(runner: runner, activity: activity)
+        defer { setup.scheduler.stop() }
+
+        #expect(activity.begins == 0, "an activity before any run")
+        setup.scheduler.start()
+        await gate.reached()
+        #expect(activity.isActive, "the run holds no activity")
+        #expect(activity.begins == 1)
+        gate.release()
+        await activity.ended.wait(for: 1)
+        await setup.runs.wait(for: 1)
+        #expect(!activity.isActive)
+        #expect(activity.begins == 1)
+        #expect(activity.ends == 1)
+    }
+
+    /// A run that `pause()` cancelled ends its activity when it returns, and the paused scheduler holds none.
+    @Test func aPausedRunEndsItsActivity() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let activity = ActivityLog()
+        let setup = try makeScheduler(runner: runner, activity: activity)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.pause()
+        gate.release()
+        await activity.ended.wait(for: 1, "the paused run left its activity open")
+        await setup.runs.wait(for: 1)
+        #expect(runner.cancelled.withLock { $0 } == [true])
+        #expect(!activity.isActive)
+        #expect(activity.begins == 1)
+        #expect(activity.ends == 1)
+        scheduler.requestRun()
+        #expect(activity.begins == 1, "a paused scheduler began an activity")
+    }
+
+    /// The runs queued during a run follow it in the same drain, under the same activity: one, never nested.
+    @Test func queuedRunsShareTheirDrainsActivity() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let activity = ActivityLog()
+        let setup = try makeScheduler(runner: runner, activity: activity)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.requestRun()
+        scheduler.requestRun()
+        #expect(scheduler.isQueued)
+        gate.release()
+        await setup.runs.wait(for: 2)
+        await activity.ended.wait(for: 1)
+        #expect(runner.started.count == 2)
+        #expect(activity.begins == 1, "the queued run began an activity of its own")
+        #expect(activity.ends == 1)
+        #expect(activity.mostHeld == 1, "activities nested")
+        #expect(!activity.isActive)
+    }
+
+    /// While the scheduler waits for a claim expiry or a backoff end, no activity is held; the run the timer starts
+    /// holds its own.
+    @Test func noActivityIsHeldWhileIdle() async throws {
+        let clock = TestClock()
+        var waiting = ProcessingReport()
+        waiting.waiting = 1
+        waiting.nextExpiry = clock.now.addingTimeInterval(5 * hour)
+        let runner = StubRunner(reports: [waiting])
+        let activity = ActivityLog()
+        let setup = try makeScheduler(runner: runner, clock: clock, activity: activity)
+        defer { setup.scheduler.stop() }
+
+        setup.scheduler.start()
+        await setup.runs.wait(for: 1)
+        await activity.ended.wait(for: 1)
+        await setup.expiry.waitForStarts(1)
+        #expect(!activity.isActive, "the wake timer holds an activity")
+        #expect(activity.begins == 1)
+        setup.expiry.fire()
+        await setup.runs.wait(for: 2)
+        await activity.ended.wait(for: 2)
+        #expect(activity.begins == 2)
+        #expect(activity.mostHeld == 1)
+        #expect(!activity.isActive)
+    }
+
+    #if os(macOS)
+        /// The Mac's holder begins one activity, and a second `end()` does nothing.
+        @Test func theSystemActivityEndsOnce() {
+            let activity = SystemProcessingActivity()
+            #expect(!activity.isActive)
+            activity.begin()
+            activity.begin()
+            #expect(activity.isActive)
+            activity.end()
+            #expect(!activity.isActive)
+            activity.end()
+            #expect(!activity.isActive)
+        }
+    #endif
 
     /// `ModelContext.didSave` names an inserted `Document` for an import, and only then.
     @Test func onlyASaveThatInsertsADocumentIsAnImport() async throws {

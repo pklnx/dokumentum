@@ -103,6 +103,27 @@ final class FailingHistory: SearchHistoryReading {
     }
 }
 
+/// The store's history, whose reads of changes stop at `checkpoint` while `armed` is on, on the thread of the reader
+/// (#132, N-d): an update then holds inside its history read.
+final class BlockingHistory: SearchHistoryReading {
+    private let base: StoreSearchHistory
+    private let armed: Armed
+    private let checkpoint: Checkpoint
+
+    init(container: ModelContainer, armed: Armed, checkpoint: Checkpoint) {
+        base = StoreSearchHistory(container: container)
+        self.armed = armed
+        self.checkpoint = checkpoint
+    }
+
+    func newestToken() throws -> DefaultHistoryToken? { try base.newestToken() }
+
+    func changes(since token: DefaultHistoryToken?) throws -> (changes: [TextChange], newest: DefaultHistoryToken?) {
+        if armed.isOn { checkpoint.passBlocking() }
+        return try base.changes(since: token)
+    }
+}
+
 /// A switch a hook reads: off until the test turns it on.
 final class Armed: Sendable {
     private let value = Mutex(false)

@@ -20,9 +20,11 @@ import Synchronization
 ///
 /// **Updates** (T2, T3) start after `.ready` (N4). Events: `ModelContext.didSave` of any context of the container
 /// at once, and the elements of `storeChanges` (the app's `StoreChangeObserver`: remote changes and the end of each
-/// CloudKit import). A burst leaves one pending event. On each event the indexer applies the history since its
+/// CloudKit import). A burst leaves one pending event. On each event the indexer reads the history since its
 /// token (text inserts, `extractedText` and `document` updates, deletes; each changed row is read again by key)
-/// and re-reads the metadata, which the index compares per document (`SearchIndex.setMetadata`).
+/// and the metadata **off the actor** (#132, N-d: queries typed while the processing queue writes texts do not
+/// wait for these reads), then applies both in one actor call: the changed texts, and the metadata, which the index
+/// compares per document (`SearchIndex.setMetadata`).
 /// - An expired token (`SwiftDataError.historyTokenExpired`, P-c): a rebuild.
 /// - Any other history error (N5): logged once per code; the first one in a launch rebuilds, later ones keep the
 ///   index and the token, and the next event tries the history again.
@@ -42,12 +44,17 @@ public actor SearchIndexer: DocumentSearching {
         public var afterBatch: (@Sendable (Int) async -> Void)?
         /// Runs before each update reads the history.
         public var beforeHistory: (@Sendable () async -> Void)?
+        /// Runs after an update read the history, the changed texts and the metadata, off the actor, before it
+        /// applies them.
+        public var afterUpdateRead: (@Sendable () async -> Void)?
 
         public init(
-            afterBatch: (@Sendable (Int) async -> Void)? = nil, beforeHistory: (@Sendable () async -> Void)? = nil
+            afterBatch: (@Sendable (Int) async -> Void)? = nil, beforeHistory: (@Sendable () async -> Void)? = nil,
+            afterUpdateRead: (@Sendable () async -> Void)? = nil
         ) {
             self.afterBatch = afterBatch
             self.beforeHistory = beforeHistory
+            self.afterUpdateRead = afterUpdateRead
         }
     }
 
@@ -203,13 +210,14 @@ public actor SearchIndexer: DocumentSearching {
         textsDone: ContinuousClock.Instant
     ) {
         withContents(aside: aside) { contents in
-            do {
-                try applyHistory(to: &contents)
-            } catch {
+            switch Self.readTextChanges(since: contents.token, history: history, container: container) {
+            case .changes(let changes):
+                apply(changes, to: &contents)
+            case .expired(let code), .failed(let code):
                 // Never a rebuild from inside a build; the next event tries the history again.
-                logHistoryError(error)
+                logHistoryError(code: code)
             }
-            readMetadata(into: &contents)
+            if let metadata = Self.readMetadata(container: container) { contents.setMetadata(metadata) }
             contents.index.mergeOverflow()
         }
         if aside, let fresh = self.aside {
@@ -250,29 +258,38 @@ public actor SearchIndexer: DocumentSearching {
     /// Reads the text rows of `group` in a fresh context and indexes them; a row that is gone clears its text.
     /// Returns the bytes indexed.
     private func upsertTexts(_ group: [PersistentIdentifier], into contents: inout Contents) -> Int {
-        do {
-            let rows = try SearchStoreReader.texts(group, in: ModelContext(container))
-            var found: Set<PersistentIdentifier> = []
-            var bytes = 0
-            for row in rows {
-                found.insert(row.id)
-                bytes += row.text.utf8.count
-                contents.upsert(row)
-            }
-            for id in group where !found.contains(id) { contents.clear(text: id) }
-            return bytes
-        } catch {
-            Log.search.error("Search could not read texts: \(Log.code(of: error), privacy: .public)")
-            return 0
+        apply(Self.readTexts(group, container: container), to: &contents)
+    }
+
+    /// Indexes the rows read for one group; a row that is gone clears its text. A group whose read failed changes
+    /// nothing. Returns the bytes indexed.
+    @discardableResult
+    private func apply(_ group: TextGroup, to contents: inout Contents) -> Int {
+        guard let rows = group.rows else { return 0 }
+        var found: Set<PersistentIdentifier> = []
+        var bytes = 0
+        for row in rows {
+            found.insert(row.id)
+            bytes += row.text.utf8.count
+            contents.upsert(row)
         }
+        for id in group.ids where !found.contains(id) { contents.clear(text: id) }
+        return bytes
     }
 
     // MARK: Updates (T2, T3)
 
+    /// One event: the reads off the actor (#132, N-d), then one actor call that applies them. A rebuild is decided
+    /// there and run here.
     @concurrent
     private nonisolated func update() async {
         if let beforeHistory = hooks.beforeHistory { await beforeHistory() }
-        switch await applyUpdate() {
+        let token = await currentToken()
+        let read = UpdateRead(
+            history: Self.readTextChanges(since: token, history: history, container: container),
+            metadata: Self.readMetadata(container: container))
+        if let afterUpdateRead = hooks.afterUpdateRead { await afterUpdateRead() }
+        switch await applyUpdate(read, readSince: token) {
         case .applied:
             break
         case .rebuild:
@@ -284,34 +301,60 @@ public actor SearchIndexer: DocumentSearching {
         case applied, rebuild
     }
 
-    /// One event: the history since the token, then the metadata. A rebuild is decided here and run by the caller.
-    private func applyUpdate() -> UpdateOutcome {
-        do {
-            try applyHistory(to: &live)
-        } catch let error as SwiftDataError where error == .historyTokenExpired {
+    /// Applies what one update read. Only one update runs at a time (`run`), so the token is still the one the
+    /// read started from; if it is not (a rebuild swapped the index meanwhile), the read is dropped and the next
+    /// event reads again from the new token.
+    private func currentToken() -> DefaultHistoryToken? { live.token }
+
+    private func applyUpdate(_ read: UpdateRead, readSince token: DefaultHistoryToken?) -> UpdateOutcome {
+        guard live.token == token else { return .applied }
+        switch read.history {
+        case .changes(let changes):
+            apply(changes, to: &live)
+        case .expired:
             Log.search.notice("Search history expired; rebuilding the index")
             return .rebuild
-        } catch {
-            logHistoryError(error)
+        case .failed(let code):
+            logHistoryError(code: code)
             if !rebuiltForHistoryError {
                 rebuiltForHistoryError = true
                 Log.search.notice("Search history failed; rebuilding the index once")
                 return .rebuild
             }
         }
-        readMetadata(into: &live)
+        if let metadata = read.metadata { live.setMetadata(metadata) }
         live.index.mergeOverflow()
         publish(.ready)
         return .applied
     }
 
-    /// Applies the text changes since `contents.token` and moves the token on. Throws the history's errors with
-    /// the token unchanged.
-    private func applyHistory(to contents: inout Contents) throws {
-        let (changes, newest) = try history.changes(since: contents.token)
+    /// Applies text changes read since `contents.token` and moves the token on.
+    private func apply(_ changes: TextChanges, to contents: inout Contents) {
+        for id in changes.deletes { contents.clear(text: id) }
+        for group in changes.groups { apply(group, to: &contents) }
+        if let newest = changes.newest { contents.token = newest }
+    }
+
+    // MARK: Reads (nonisolated: each in fresh contexts of its own)
+
+    /// The text changes since `token` and the text rows they name, read in fresh contexts. History errors are
+    /// logged once per code (`logHistoryError`) and returned, with nothing read.
+    private nonisolated static func readTextChanges(
+        since token: DefaultHistoryToken?, history: any SearchHistoryReading, container: ModelContainer
+    ) -> HistoryRead {
+        let changes: [TextChange]
+        let newest: DefaultHistoryToken?
+        do {
+            (changes, newest) = try history.changes(since: token)
+        } catch let error as SwiftDataError where error == .historyTokenExpired {
+            return .expired(code: Log.code(of: error))
+        } catch {
+            return .failed(code: Log.code(of: error))
+        }
         var upserts: [PersistentIdentifier] = []
         var seen: Set<PersistentIdentifier> = []
         var documents: [PersistentIdentifier] = []
+        var deletes: [PersistentIdentifier] = []
         for change in changes {
             switch change {
             case .upsert(let id):
@@ -319,7 +362,7 @@ public actor SearchIndexer: DocumentSearching {
             case .documentLink(let id):
                 documents.append(id)
             case .delete(let id):
-                contents.clear(text: id)
+                deletes.append(id)
             }
         }
         if !documents.isEmpty {
@@ -335,18 +378,31 @@ public actor SearchIndexer: DocumentSearching {
                 Log.search.error("Search could not read relinked texts: \(Log.code(of: error), privacy: .public)")
             }
         }
-        for start in stride(from: 0, to: upserts.count, by: SearchStoreReader.groupSize) {
-            _ = upsertTexts(
-                Array(upserts[start..<min(start + SearchStoreReader.groupSize, upserts.count)]), into: &contents)
+        let groups = stride(from: 0, to: upserts.count, by: SearchStoreReader.groupSize).map { start in
+            readTexts(
+                Array(upserts[start..<min(start + SearchStoreReader.groupSize, upserts.count)]), container: container)
         }
-        if let newest { contents.token = newest }
+        return .changes(TextChanges(deletes: deletes, groups: groups, newest: newest))
     }
 
-    private func readMetadata(into contents: inout Contents) {
+    /// The text rows of `ids` (at most one group), read in a fresh context; `rows` is `nil` when the read failed
+    /// (logged).
+    private nonisolated static func readTexts(_ ids: [PersistentIdentifier], container: ModelContainer) -> TextGroup {
         do {
-            contents.setMetadata(try SearchStoreReader.metadata(in: ModelContext(container)))
+            return TextGroup(ids: ids, rows: try SearchStoreReader.texts(ids, in: ModelContext(container)))
+        } catch {
+            Log.search.error("Search could not read texts: \(Log.code(of: error), privacy: .public)")
+            return TextGroup(ids: ids, rows: nil)
+        }
+    }
+
+    /// The metadata of every document, read in a fresh context; `nil` when the read failed (logged).
+    private nonisolated static func readMetadata(container: ModelContainer) -> [UUID: SearchFields]? {
+        do {
+            return try SearchStoreReader.metadata(in: ModelContext(container))
         } catch {
             Log.search.error("Search could not read the metadata: \(Log.code(of: error), privacy: .public)")
+            return nil
         }
     }
 
@@ -366,7 +422,10 @@ public actor SearchIndexer: DocumentSearching {
     }
 
     private func logHistoryError(_ error: any Error) {
-        let code = Log.code(of: error)
+        logHistoryError(code: Log.code(of: error))
+    }
+
+    private func logHistoryError(code: String) {
         guard loggedHistoryErrors.insert(code).inserted else { return }
         Log.search.error("Search history failed: \(code, privacy: .public)")
     }
@@ -445,6 +504,35 @@ extension SearchIndexer {
             }
             for continuation in all { continuation.finish() }
         }
+    }
+
+    /// What one update read off the actor (#132, N-d).
+    struct UpdateRead: Sendable {
+        var history: HistoryRead
+        /// `nil` when the read failed (logged).
+        var metadata: [UUID: SearchFields]?
+    }
+
+    /// The history since a token and the text rows it names, or why there is none.
+    enum HistoryRead: Sendable {
+        case changes(TextChanges)
+        /// `SwiftDataError.historyTokenExpired`: a rebuild.
+        case expired(code: String)
+        /// Any other history error (N5), by its code.
+        case failed(code: String)
+    }
+
+    /// The text changes since a token, with their rows read.
+    struct TextChanges: Sendable {
+        var deletes: [PersistentIdentifier]
+        var groups: [TextGroup]
+        var newest: DefaultHistoryToken?
+    }
+
+    /// The rows of one group of text identifiers; `rows` is `nil` when the read failed.
+    struct TextGroup: Sendable {
+        var ids: [PersistentIdentifier]
+        var rows: [SearchStoreReader.TextRow]?
     }
 
     struct Running: Sendable {

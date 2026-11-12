@@ -362,6 +362,11 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
   suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
   power loss during a stage still counts.
+- **App Nap** (#130): on the Mac each drain of the scheduler (a run and the runs queued during it) holds one
+  `ProcessInfo` activity with `.userInitiatedAllowingIdleSystemSleep` (`SystemProcessingActivity`, begun at the top of
+  `drain()` and ended in its `defer`, also after `pause()`), so App Nap does not slow a run while the window is hidden
+  and an idle Mac still sleeps; the wake timer between runs holds none, so a wake at a claim expiry or a backoff end
+  may come late while the app is napped, when nothing is running.
 - **The stage** (#6, part 2): `DocumentStage` opens the PDF with PDFKit (unreadable, locked or page-less fails the
   attempt) and keeps the `PDFDocument` alive until it returns, because PDFKit cannot draw a page of a released document
   (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters (counted as
@@ -378,6 +383,39 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   form feeds are exactly the page boundaries. `textSource` is `.pdfText` when every page was a text page, else `.vision`, also for
   a blank document, so `.none` means "never extracted". The stage checks for cancellation before each page and reports
   progress after it (and once before the first), one page image alive at a time.
+- **The text layer** (#6, part 3, T4, B1, N5, R1-N1; `TextLayer`): when pages were recognised, the stage draws their
+  lines invisibly into a copy of the PDF, which then **replaces the stored file; no original is kept** (the
+  maintainer's P4). Data integrity comes first, so the stored bytes stay exactly as they are unless all of these hold:
+  at least one recognised line with a box to draw; not encrypted (an owner password too); no `DokumentumTextLayer` key
+  in the Info dictionary (a layered PDF is never layered again, also when a short page is recognised again); a catalog
+  with only `/Type` and `/Pages`; page dictionaries with only `/Type /Parent /Contents /Resources /MediaBox /CropBox
+  /Rotate`; and no font without an embedded program (`/FontFile`, `/FontFile2`, `/FontFile3`; checked in each page's
+  resources, inherited ones included, form XObjects, tiling patterns and Type 3 fonts). So e-invoices with embedded
+  files, page labels, XMP metadata (PDF/A), tags, bookmarks, forms, links and other annotations, extra page boxes and
+  most born-digital PDFs keep their bytes and are searchable in the app only; scans and imported images (written by a
+  `CGContext`) get the layer. A source written by PDFKit (a PDF rotated in Preview) may carry further catalog keys and
+  then keeps its bytes too (R1-N2). The rewrite redraws every page with `drawPDFPage` into a `CGContext` page with the
+  source's media and crop box, draws each line in Helvetica, invisible, into its box (font size the box height, scaled
+  to its width; the box is placed on the page as shown and mapped back through the page's rotation), then a PDFKit
+  pass sets each page's rotation, and an incremental update replaces the Info dictionary with the source's entries,
+  each with its CoreGraphics type and exact value (strings and names as their bytes), plus the marker. PDFKit's own
+  Info would change values (Keywords to an array, which Spotlight no longer reads; dates to this device's time zone;
+  booleans to integers; PR #134's B1), and an Info entry that cannot be carried exactly (a stream) means no rewrite. **The guard** keeps the original
+  unless the new PDF opens unencrypted with the same page count, catalog and pages within the allow-lists, the same
+  media box, crop box and rotation per page, the same Info attributes (PDFKit) and every Info entry with its type and
+  exact value (CoreGraphics; a date compared as its original text) plus the marker, each source page's
+  own text lines and every drawn line in the page's text (whitespace ignored), and every page pixel-identical to the
+  source at 300 px (RGB, crop box, rotation). The 300 px compare alone misses a substituted font (measured: a page in
+  Helvetica without its program, redrawn, differs at 300 px on macOS at 48 pt but not on the iOS simulator, and at
+  16 pt on neither), which is why the font check comes first. Why a file was kept is logged as a fixed code. The
+  redraw and the guard report progress per page, for the watchdog, and stop between pages when the stage is
+  cancelled. During the layer the stage holds the original, the rewrite and the renders: about twice the file in
+  memory. A rewrite **keeps** every page's look, size, boxes, rotation, order and count, the page's own text, and
+  every Info entry with its type and exact value; it **drops** the original bytes (the file is re-encoded;
+  `contentHash` stays the hash of the imported bytes, so importing them again is still a duplicate), the trailer's
+  `/ID` of the original and its earlier incremental revisions; bilevel images (CCITT, JBIG2) may be re-encoded
+  losslessly as Flate, so such a file can grow; and it gains the invisible text. A layered file that is exported or
+  shared and imported again is **not** a duplicate of its document, because `contentHash` is the original's.
 - **Re-queue of step 3's documents** (#6, part 2, T6, N7): `ProcessingRequeue`, run by the queue at the start of each
   run until one pass completed, then never again on this device (the flag `processingRequeue.textV1` in the per-device
   defaults). Every `Document` that is `done` with `textSource == .none` (trashed ones too) goes back to `pending` **with
@@ -390,11 +428,13 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
 - **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
-  (`pageCount` and `textSource` when they differ, the text record's `extractedText`, `done` or `failed`). The text is
+  (`pageCount` and `textSource` when they differ, the text record's `extractedText`, with a text layer the file
+  record's `pdfData` and the document's `fileSize`, `done` or `failed`). The text is
   capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page with text
   alone is over it, at its last whole character, after one form feed per blank page before it; the report counts it (`textsCapped`) and it is logged. The result write's check
-  also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), so a save
-  to the text in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
+  also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), and with
+  a layer the file row (`RowState.readFile`, without comparing `pdfData`; the only writer of a linked file's data, under
+  the exact claim, T16), so a save to either in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
   fetches the document, re-checks what the decision was based on (state, claim device and time, not trashed, the same
   file, a text record) and writes nothing if one differs; it sets only the changed fields, reads the row again in a
   second fresh context (`RowState.read`) and saves only if every field still equals what it fetched. Otherwise it rolls
@@ -459,8 +499,8 @@ no window. On the maintainer's signed, sandboxed build (#1, step 9, 2026-11-11) 
 from the old root (`75340a0`) to `LibraryRootView`. The container's `Saved Application State` stayed empty in both
 runs, though, so that run did not show whether the scene id overrides a stale state.
 
-**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Move to
-Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
+**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Find… ⌘F
+(the search field, see "The search field"), Move to Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
 nothing to act on (`@FocusedValue` of the focused window). ⌘⌫ while a text field is edited stays with the
 field (`CommandDeleteRouting`), so the field must lose the focus when the user turns to the list: a click on a
 document row, the selected one too, and a change of the selection give the list the focus (`DocumentListView`;
@@ -689,7 +729,8 @@ Step 4 (#5): the document scanner on the iPhone (part 2, #111) and the photo cle
 
 Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search`, Foundation only, so
 `kit-linux` runs every test of it. Part 2 (#122) adds the indexer that builds and updates it and the
-benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
+benchmark (`DokumentumCore/Search`); part 3 (#123) adds the search field in the library (see "The search field"
+below).
 
 - **Normalisation** (`SearchNormalizer.normalizedWord`): NFKC, then Foundation's case, diacritic and width
   folding with `locale: nil` (the device language never changes a result), then a table for what folding
@@ -698,13 +739,18 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
 - **Words** (`SearchTokenizer`): maximal runs of letters, digits and combining marks; everything else
   separates (hyphen, U+2011, slash, apostrophe, the form feed between pages). "12.03.2024" is three words. A
   hyphen (`-`, U+2010 or a soft hyphen) at a line end joins the word only before a lowercase letter
-  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). A soft hyphen inside a word is
-  removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
+  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). The line end may also be a form feed (a
+  page end), alone or with one line break before or after it ("Steuer-\fbescheid", "Steuer-\n\fbescheid" and
+  "Steuer-\f\nbescheid" → `steuerbescheid`); two line breaks or two form feeds separate. A soft hyphen inside a
+  word is removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
   other words are normalised once per distinct form (`SearchNormalizer.Cache`, kept until `mergeOverflow`).
 - **Matching** (P1): every term of a query must match, each in any field. A term matches a word that starts
   with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. The 4 counts
   the characters of the word as typed (not bytes: `θην` does not find "Αθήνα"), and it holds for every
-  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. Transcriptions: the
+  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. An
+  alternative also needs 4 characters of its own, so "muel" does not infix-match "Formular" through `mul`
+  (#132). The trade-off: "muel" also no longer finds "Schmüller" (indexed `schmuller`) by infix; it still finds
+  "Schmueller", "Mueller", "Müller" and "Müll", and "Müll"/"muell" infix-match "Schmüller". Transcriptions: the
   index also stores the *a/o/u* form of every word with *ae/oe/ue* (`mueller` → also `muller`; a side effect is
   `steuer` → also `steur`); a query term also tries its *a/o/u* form and, typed with ä/ö/ü, its *ae/oe/ue*
   form. So "Müller", "Mueller" and "muller" find each other in every direction.
@@ -746,7 +792,11 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
   batch at most, and at most 25 rows are in memory); then the history since the step-1 token and the
   metadata again, so nothing saved during the build is missed; then `.ready`. Each batch yields
   `.building(indexed:total:)`.
-- **Updates** start after `.ready`; events that come during the build leave one pending event. Events:
+- **Updates** start after `.ready`; events that come during the build leave one pending event. Each update reads
+  the history, the changed text rows and the metadata **off the actor**, in fresh contexts, and then applies them
+  in one actor call (#132, N-d), so a query typed while the processing queue writes texts waits only for that
+  call: about 2 ms for the metadata compare of 5,000 documents in a Debug build on the Mac (`setMetadata` with equal
+  fields, measured for #123), plus tokenising the changed texts. Events:
   `ModelContext.didSave` of any context of the container at once, and the shared observer's debounced
   stream (remote changes the mirroring saves, the end of each CloudKit import). On each event:
   - **texts** through SwiftData's persistent history since the indexer's token (`StoreSearchHistory`):
@@ -771,7 +821,8 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
 - **Memory:** the index of 5,000 synthetic documents (37 MB of text) costs about 66 MB of
   `phys_footprint` on the Mac (R-b); the benchmark reports the figure of the device it runs on.
 - **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
-  a change during the build, two subscribers, a persistent history error), `SearchIndexerRemoteTests`
+  a change during the build, two subscribers, a persistent history error, a query answered while an update's
+  history read is held), `SearchIndexerRemoteTests`
   (another container's write with the remote change, an expired history with the rebuild swap) and
   `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
   changed text row by key).
@@ -812,6 +863,44 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
   contingency is an FTS5 index behind `DocumentSearching` (T13).
 - **M2 of #7** checks on two devices that the mirroring's imports reach the history: a word imported on
   the Mac is found on the iPhone, without relaunching it, once its text was processed.
+
+### The search field
+
+Part 3 (#123), in `DocumentListView` and `LibraryModel`:
+
+- **Field:** `.searchable` on the list column, prompt "Search". On the iPhone it sits in the list's navigation
+  bar (`navigationBarDrawer`, always shown); on the Mac in the window's toolbar. The Mac's **Edit › Find… (⌘F)**
+  (`LibraryCommands`) puts the focus into it (`LibraryModel.focusSearch`, `.searchFocused`): `.searchable` adds no
+  Find item and does not answer ⌘F by itself (measured on macOS 27). `SearchSmokeTests` checks that the menu bar
+  has exactly one Find item (by title, in English or German) and that ⌘F focuses the field.
+- **Query:** each change of the text runs `DocumentSearching.search` at once, no debounce (T10); each query has a
+  generation, and an answer that comes after a newer query started is dropped. Until the answer comes the list
+  keeps the previous result. Each `updates()` element of the index runs the active query again. The result goes
+  through `LibrarySearch.apply`: the usual rows in the usual order (P4).
+- **Scope** (`.searchScopes`, shown while the search is presented): the selected list's name or All Documents;
+  none while All Documents is the list. The scope applies only to an active search; an empty field shows the
+  selected list. On the Mac the segments carry `search.scope.selection`/`search.scope.all`; the iPhone's scope bar
+  is a system segmented control (`scopeBar`) whose segments keep only their titles.
+- **Chips** (`SearchToken`, `SearchTokenLabel`): suggested while typing through `.searchSuggestions` with
+  `.searchCompletion(token)` ("Tag: Auto › Golf", "Correspondent: …", "Type: …", "Inbox"; not `suggestedTokens`,
+  which the Mac does not show). Picking one drops the words typed for it. Chips combine with each other and the
+  text; they work in the Trash, which offers no Inbox chip. A chip whose record is gone is dropped at the next
+  read.
+- **Empty result:** "No Results for “x”" (or "No Results" for chips alone), `search.empty`; the Mac's
+  `PlaceholderView`, the iPhone's `ContentUnavailableView`.
+- **Indexing line:** "Indexing texts… 12 of 40" (`search.indexing`) over the results while the index is
+  `.building` and a search is active (P5). In the primary colour on the list's background; the Mac uses 15 pt
+  semibold (`.title3`), because the audit failed the line at 10 pt medium in dark mode ("not high enough unless font
+  size is larger") and at 13 pt medium and semibold in light mode, although its pixels measure 14.94:1.
+  `SearchSmokeTests` also measures its contrast from its pixels (`assertTextContrast`).
+- **Sidebar (P7):** the search stays when another list is chosen on the Mac. On the iPhone it ends when the
+  stack goes back to the sidebar (`selection` becomes `nil`).
+- **`-UITestHoldSearchIndex YES`** (Debug, in-memory stores only): the index stops after its first text batch and
+  stays `.building`, so `SearchSmokeTests` sees and audits the indexing line; the sample texts all fit in that
+  batch.
+- **Tests:** `LibraryModelSearchTests` (text and scope, chips incl. the Trash, generations, index updates, the
+  indexing line, the sidebar) and `SearchSmokeTests` (UISmoke, iPhone and Mac: a word from one text, the scope,
+  a chip, ⌘F and a sidebar change on the Mac; audited).
 
 ## Logging
 

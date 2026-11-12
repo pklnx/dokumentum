@@ -322,6 +322,17 @@
         }
       }
     },
+    "Correspondent: %@" : {
+      "comment" : "Search filter chip and suggestion: documents from this correspondent. %@ is its name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Korrespondent: %@"
+          }
+        }
+      }
+    },
     "Correspondents" : {
       "comment" : "Sidebar section.",
       "localizations" : {
@@ -493,6 +504,17 @@
         }
       }
     },
+    "Find…" : {
+      "comment" : "Mac Edit menu item (⌘F): puts the focus into the library's search field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suchen …"
+          }
+        }
+      }
+    },
     "Full Page" : {
       "comment" : "Photo cleanup sheet: uses the whole photo instead of the page's edges.",
       "localizations" : {
@@ -649,6 +671,23 @@
         }
       }
     },
+    "Indexing texts… %@ of %@" : {
+      "comment" : "Line under the search field while the documents' texts are being indexed: how many texts are in, of how many.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texte werden indiziert … %1$@ von %2$@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indexing texts… %1$@ of %2$@"
+          }
+        }
+      }
+    },
     "Info" : {
       "comment" : "iPhone: title of the info panel.",
       "localizations" : {
@@ -755,6 +794,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Neu …"
+          }
+        }
+      }
+    },
+    "No Results" : {
+      "comment" : "The list when no document matches the search's filter chips (no words typed).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Treffer"
+          }
+        }
+      }
+    },
+    "No Results for “%@”" : {
+      "comment" : "The list when no document matches the words typed; %@ is the search text.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Treffer für „%@“"
           }
         }
       }
@@ -1063,6 +1124,17 @@
         }
       }
     },
+    "Search" : {
+      "comment" : "Prompt of the library's search field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suchen"
+          }
+        }
+      }
+    },
     "Show Info" : {
       "comment" : "Toolbar button and Mac menu item (Document › Show Info, ⌘I) that shows the info panel.",
       "localizations" : {
@@ -1092,6 +1164,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Synchronisierung aus: %@"
+          }
+        }
+      }
+    },
+    "Tag: %@" : {
+      "comment" : "Search filter chip and suggestion: documents with this tag (or a tag below it). %@ is the tag's path, e.g. “Tax › 2024”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tag: %@"
           }
         }
       }
@@ -1230,6 +1313,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Papierkorb leer"
+          }
+        }
+      }
+    },
+    "Type: %@" : {
+      "comment" : "Search filter chip and suggestion: documents of this document type. %@ is its name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typ: %@"
           }
         }
       }

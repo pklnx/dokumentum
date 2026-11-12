@@ -210,6 +210,44 @@ struct SearchIndexerTests {
         #expect(await indexer.search("tankquittung").matches == [document])
     }
 
+    /// An update reads the history, the changed texts and the metadata off the actor (#132, N-d): a query typed while
+    /// an update reads is answered at once, not after the reads.
+    @Test func aQueryDoesNotWaitForAnUpdatesReads() async throws {
+        let container = try TestSupport.makeContainer()
+        let document = try SearchStore.insert(title: "Stromrechnung", text: "Zählerstand", in: container)
+        let armed = Armed()
+        let reading = Checkpoint()
+        let indexer = SearchIndexer(
+            container: container, history: BlockingHistory(container: container, armed: armed, checkpoint: reading))
+        let recorder = StateRecorder(indexer.updates())
+        defer {
+            reading.release()
+            recorder.cancel()
+            indexer.stop()
+        }
+        indexer.start()
+        await recorder.ready.wait()
+
+        armed.turnOn()
+        try SearchStore.setText("Abschlag", of: document, in: container)
+        await reading.reached()
+        // The update now holds inside its history read.
+        let answered = TestSignal()
+        let query = Task {
+            let result = await indexer.search("stromrechnung")
+            answered.fire()
+            return result
+        }
+        let wasAnswered = await answered.wait(timeout: .seconds(10), "the query waited for the update's reads")
+        reading.release()
+        #expect(wasAnswered)
+        #expect(await query.value.matches == [document])
+
+        await recorder.ready.wait(for: 2)
+        #expect(await indexer.search("abschlag").matches == [document])
+        #expect(await indexer.search("zählerstand").matches == [])
+    }
+
     // MARK: History errors (N5)
 
     /// A history error that is no expiry rebuilds once per launch; later events keep the index and retry the
