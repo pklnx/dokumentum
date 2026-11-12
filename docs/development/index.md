@@ -599,7 +599,7 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     the correspondent matched to the existing record, the date 14.01.2026). It is skipped, with the availability as
     the reason, where the model is not available (the macOS runner of GitHub Actions, possibly Xcode Cloud). The iOS
     simulator of the GitHub Actions runner reports it available but has no model assets (`ModelManagerError 1026`),
-    so each test first asks the model one trivial question and is cancelled with the reason when that fails. On the
+    so each test first asks the model one trivial question and is cancelled with the reason when that request throws any error. On the
     development Mac they ran in the macOS
     plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release

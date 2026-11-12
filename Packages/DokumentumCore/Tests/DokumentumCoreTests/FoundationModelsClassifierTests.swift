@@ -167,11 +167,13 @@ struct FoundationModelsRealModelTests {
     static let skipReason = Comment(rawValue: "The on-device model is not available here: \(availability)")
 
     /// Cancels the test (a skip with the reason) when the model reports itself available but cannot answer at all.
-    /// A failure of the classification itself is not caught here: the preflight asks only a trivial question.
+    /// Any error of this one trivial request cancels (as the Vision preflight does): on the runner's iOS simulator a
+    /// release run failed both tests with `ModelManagerError 1026` although the `LanguageModelError` catch was there.
+    /// A failure of the classification itself is not caught here.
     static func requireAnsweringModel() async throws {
         do {
             _ = try await LanguageModelSession().respond(to: "Answer with the word yes.")
-        } catch let error as LanguageModelError {
+        } catch {
             try Test.cancel("The on-device model is available but cannot answer here (no assets?): \(error)")
         }
     }
