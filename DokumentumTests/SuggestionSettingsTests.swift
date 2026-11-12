@@ -115,6 +115,20 @@ struct SuggestionSettingsTests {
         #expect(runs == (changeable ? 1 : 0))
     }
 
+    /// The app's choice of suite (review N1 of #159): a store on disk keeps the switch in the processing queue's
+    /// suite, the environment's (`UserDefaults.standard` in the app), so the queue reads what the settings write; an
+    /// in-memory launch keeps it in a suite of its own, never the device's real one.
+    @Test func theAppKeepsTheSwitchWhereTheQueueReadsIt() {
+        #expect(DokumentumApp.settingsSuite(isOnDisk: true) == nil, "the app's live suite is UserDefaults.standard")
+        let suite = "DokumentumTests-SettingsSuite-\(UUID().uuidString)"
+        ProcessingEnvironment.$current.withValue(ProcessingEnvironment(defaultsSuite: suite)) {
+            #expect(DokumentumApp.settingsSuite(isOnDisk: true) == suite)
+            #expect(DokumentumApp.settingsSuite(isOnDisk: true) == ProcessingFailures().defaultsSuite)
+            #expect(DokumentumApp.settingsSuite(isOnDisk: false) == DokumentumApp.inMemorySettingsSuite)
+        }
+        #expect(DokumentumApp.settingsSuite(isOnDisk: false) != DokumentumApp.settingsSuite(isOnDisk: true))
+    }
+
     // MARK: Availability (T17)
 
     /// The availability is the classifier's when the settings are made, and follows each change of its stream.

@@ -43,6 +43,13 @@ struct DokumentumApp: App {
     /// The suite of the classification switch for an in-memory store (tests and UI tests): emptied at each such
     /// launch, so a UI test that turns the switch off never changes this device's real setting.
     nonisolated static let inMemorySettingsSuite = "Dokumentum.InMemoryLaunchSettings"
+
+    /// The suite of the classification switch (#139, review N1 of #159): for a store on disk the processing queue's
+    /// (`ProcessingFailures`' suite, which the queue's `ClassificationSettings` defaults to, `ProcessingQueue.init`),
+    /// so the settings write the key the queue reads; for an in-memory store `inMemorySettingsSuite`.
+    static func settingsSuite(isOnDisk: Bool) -> String? {
+        isOnDisk ? ProcessingFailures().defaultsSuite : inMemorySettingsSuite
+    }
     #if os(iOS)
         /// The processing queue's background tasks (plan of #6, part 5): continued processing after a user's import,
         /// the processing task when the app goes to the background. `nil` where `processing` is.
@@ -141,11 +148,8 @@ struct DokumentumApp: App {
         }
         // The switch lives where the queue reads it (`ProcessingQueue`: the failure counter's suite); a store that runs
         // no queue gets a suite of its own that each launch empties. A change of the switch requests a run.
-        let settingsSuite: String?
-        if choice.isOnDisk {
-            settingsSuite = ProcessingFailures().defaultsSuite
-        } else {
-            settingsSuite = Self.inMemorySettingsSuite
+        let settingsSuite = Self.settingsSuite(isOnDisk: choice.isOnDisk)
+        if !choice.isOnDisk {
             UserDefaults().removePersistentDomain(forName: Self.inMemorySettingsSuite)
         }
         let scheduler = processing
