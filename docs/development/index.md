@@ -14,7 +14,7 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 | The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
 | The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
-| Xcode Cloud | The PR check for build and app tests (workflows `PR` and `Main`), later TestFlight. Configured by the maintainer in Xcode and App Store Connect. |
+| Xcode Cloud | Kept for the TestFlight uploads (step 8). It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). Configured by the maintainer in Xcode and App Store Connect. |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
 ## Setup on the development Mac
@@ -77,7 +77,7 @@ live in `Packages/`.
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
 - **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine. Agents'
-  local builds and Xcode Cloud's test workflows build macOS without team and entitlements, see "The unsigned
+  local builds and the CI test jobs (GitHub Actions, formerly Xcode Cloud) build macOS without team and entitlements, see "The unsigned
   path".
 
 ## Build and test
@@ -112,9 +112,9 @@ does not apply, and the flag stays barred for agents. The fix for a forgotten pr
 `Config/Unsigned.xcconfig` makes the macOS build ad hoc, without a team and without entitlements. It
 sets only macOS-conditioned keys, so the simulator keeps the real team and keys, which a build shows in
 its `*-Simulated.xcent` files. The project does not reference the file: it reaches a build only through
-this variable, or through Xcode Cloud's copy (see "Xcode Cloud").
+this variable, or, for Xcode Cloud's test workflows, through its copy (see "Xcode Cloud"; the GitHub Actions jobs use the variable).
 
-**What this leaves untested.** macOS tests in local unsigned builds and in Xcode Cloud run without the entitlements and
+**What this leaves untested.** macOS tests in local unsigned builds and in CI (GitHub Actions, formerly Xcode Cloud) run without the entitlements and
 outside the sandbox, with no iCloud or push keys. Only the maintainer's signed build exercises them. A
 macOS test passing here says nothing about behaviour that depends on them.
 
@@ -598,7 +598,10 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     `FoundationModels` (review N6).
   - **The real model** runs in one test, `FoundationModelsRealModelTests` (the plan's synthetic bill through the step:
     the correspondent matched to the existing record, the date 14.01.2026). It is skipped, with the availability as
-    the reason, where the model is not available (possibly Xcode Cloud). On the development Mac they ran in the macOS
+    the reason, where the model is not available (the macOS runner of GitHub Actions, possibly Xcode Cloud). The iOS
+    simulator of the GitHub Actions runner reports it available but has no model assets (`ModelManagerError 1026`),
+    so each test first asks the model one trivial question and is cancelled with the reason when that fails. On the
+    development Mac they ran in the macOS
     plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
   - **The switch's consequences** (#8 part 3; P3, P4, plan review N8): the text result write on the device that
     recognised the text decides whether a document gets `classify`, so a document added while the switch is off or the
@@ -1155,7 +1158,8 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |
+| `app-ios` | GitHub Actions, `app.yml` | Since 2026-11-12 the PR check for build and app tests (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. |
+| `app-macos` | GitHub Actions, `app.yml` | The same on macOS. |
 
 Run the Python checks from the repository root:
 
@@ -1179,10 +1183,31 @@ finds strings the code uses that never reached their target's catalog: `xcodebui
 Xcode's IDE does. Run it after a build with `-derivedDataPath <derived data path>`. A macOS build has no
 strings of the iOS-only extension, so they are checked only once its target was built.
 
+### GitHub Actions macOS
+
+Since 2026-11-12 `.github/workflows/app.yml` is the PR check for build and app tests. It runs on pull
+requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app-ios` and `app-macos`
+(the required checks). Each selects the Xcode in `.xcode-version` through `DEVELOPER_DIR`, runs
+`ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the test plan
+`Default` (`build-for-testing`), runs the localisation check on the derived data, and then runs the tests
+(`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
+(`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
+iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
+is set. The tests run serially (`-parallel-testing-enabled NO`) as a workaround for #164: in parallel mode the
+`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure, in one run of each job; the
+hosted app tests had finished; thread pool starvation is suspected, the trigger is not proven). Switch back to
+parallel mode when #164 is fixed. No per-test time allowance is set (it is not verified that it bounds Swift Testing
+tests, and a frozen pool stops `.timeLimit` too), so the bound of a stuck run is the job timeout of 30 minutes. A
+failed or cancelled run uploads its `.xcresult` bundles as an artifact (kept 7 days). The workflow needs no secrets and only
+`contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.
+
 ### Xcode Cloud
 
-The maintainer sets up the workflows in Xcode and App Store Connect (plan on #1, maintainer step 6);
-the repository holds only the shared scheme and `ci_scripts/`.
+Kept for the TestFlight uploads (step 8). It was the PR check until 2026-11-12, when its monthly usage
+limit was reached and every build was cancelled; the repository is public, so GitHub Actions macOS runners
+are free and took over (plan.md, section 6, question 1). The maintainer sets up the workflows in Xcode
+and App Store Connect (plan on #1, maintainer step 6); the repository holds only the shared scheme and
+`ci_scripts/`. The workflows `PR` and `Main` below are no longer required checks.
 
 - Workflow `PR` (Pull Request Changes, target `main`, no file filter) and workflow `Main` (Branch
   Changes on `main`): Test action, scheme `Dokumentum`, test plan `Default`, once for one iPhone
