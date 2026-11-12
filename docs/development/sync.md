@@ -93,9 +93,15 @@ goes through the app's own code (the importer, the editor, the trash), except fi
 4. **Reset re-queue flag** (this device's per-device flag, not synced), for R.
 5. **Move tag** under another tag, for C6 (the app has no tag editing yet).
 
-Writes 2, 3 and 5 accept **only lab records**: documents whose original file name starts with `SyncLab-`, tags whose
-name does. Everything the lab creates gets that prefix (tags, correspondents and types too, so "Stadtwerke" becomes
-"SyncLab-Stadtwerke"); nothing else in the store can be deleted or overwritten by it.
+Writes 2, 3 and 5 and the lab's **Empty lab trash** accept **only lab records**: documents whose original file name
+starts with `SyncLab-`, tags whose name does. Everything the lab creates gets that prefix (tags, correspondents and
+types too, so "Stadtwerke" becomes "SyncLab-Stadtwerke"); nothing else in the store can be deleted or overwritten by
+it. Edits through the editor and the trash (title, date, tags, move to the trash, restore) are offered on every row,
+as in the app.
+
+Two **device settings** (never synced) change only with a store on disk, after the same question: the re-queue flag
+(write 4) and **Classify on this device**, #8's per-device switch `classification.enabled` (on unless set; the
+setting that #8 part 3 shows in the app's settings). With an in-memory store both are disabled.
 
 Sections:
 - **This device:** the short device ID, the store that opened, the takeover interval in effect (120 s with
@@ -103,6 +109,8 @@ Sections:
   running or idle, and the last run's counts), the repair's last counts (orphans, two files/thumbnails/texts, `id`
   duplicates, tombstones) with **Run repair now**, the search index (state, counts, last history error), the raw sync
   status, the CloudKit user (short) and the **event log** (kind, start, end, ok or the error codes; newest first).
+  **Classify on this device** turns #8's classification on or off on this device (the line "Classification" shows
+  it); with it off, processing ends in `done` without suggestions.
   **Hold processing on this device** stops processing on this device until it is turned off or the app quits: an
   import still writes its claim, file and text record, but nothing is processed. It writes no data; scene changes
   and background tasks do not end it; on the iPhone an import while held asks for no background "Processing
@@ -110,19 +118,24 @@ Sections:
 - **Create:** a *text document* (N pages of real text, with tags, a correspondent and a type by name), a *scan-like
   document* (N rendered page images, imported as a scan: Vision OCR and the text layer run), a *large file* (about
   20 MB of noise images) and a *legacy document*. Each gets a fresh **unique word** (`syncw` and 6 letters, shown with
-  **Copy**) on every page, for the search cases.
+  **Copy**) on every page, for the search cases. **Letter page** (text and scan-like documents, off by default) makes
+  page 1 read like a letter (sender, date, amount) for M1/M2 only; without it no page offers the classifier a
+  correspondent, type or date.
 - **Documents:** every document, trashed ones included: title, state, claim (this device, another device's short ID,
   or none, with its age), text source, pages, file size. Tap a row for its actions: **Read text, file and
   thumbnail** (length, hash prefix, text layer yes/no), set title, date, inbox, tags, correspondent, type, move to
-  the trash or restore; for lab documents also **Write large text** and **Delete directly**. **Empty trash** at the
-  top empties the trash as the app does.
+  the trash or restore; for lab documents also **Write large text** and **Delete directly**. **Empty lab trash** at
+  the top deletes the trashed **lab** documents through the app's trash code; other trashed documents stay (the
+  message names how many).
 - **Metadata:** create a tag, correspondent or type; move a lab tag under another (or to the top level).
 - **Search probe:** searches the app's index as the library's search field does, with the hits' titles.
-- **Export state:** the dump, with **Copy dump** and **Share dump**. Its first line is `dump sha256=…`: two devices
-  agree when these are equal. The next seven lines give one hash per entity (Document, DocumentFile,
-  DocumentThumbnail, DocumentText, Tag, Correspondent, DocumentType), so a difference is found per entity. Records
-  follow, every field of the schema, dates in milliseconds, files, thumbnails and texts as length and SHA-256 only.
-  The last section (this device's ID, re-queue flag, failure counters, claim sightings) is not in any hash.
+- **Export state:** the dump, with **Copy dump** and **Share dump**. Its first line is `dump sha256=… dates=…`: two
+  devices agree when these are equal. **Dates** chooses how dates become whole milliseconds: *round to nearest ms*
+  (the default) or *truncate to ms*; both devices must use the same (step 0 decides which). The next seven lines give
+  one hash per entity (Document, DocumentFile, DocumentThumbnail, DocumentText, Tag, Correspondent, DocumentType), so
+  a difference is found per entity. Records follow, every field of the schema, dates in milliseconds, files,
+  thumbnails and texts as length and SHA-256 only. The last section (this device's ID, re-queue flag, failure
+  counters, claim sightings) is not in any hash.
 - **CloudKit schema:** **Initialize CloudKit schema** (only with the CloudKit store) creates every record type in
   Development, for a look in the CloudKit Console.
 
@@ -156,15 +169,26 @@ Sections:
 
 ## Run 1 (merge gate of #31 part 2; about 3 hours, in two or three sittings)
 
-Order: **0, S1–S3, U1, Q** (DW1), then **C, T, K, L, R** (DW2), then **M1, M2**, then **U2, U3**. The classifier
-(#8 parts 1 and 2, #146 and #150) is in this build, so the cases of run 2 join run 1 (P5 of #31); they are described
-under "Run 2" below and belong to #8's Done-when, not to DW2.
+Order: **R0, 0, S1–S3, U1, Q** (DW1), then **C1–C6, T, K, L, R, C7** (DW2; C7 last because a stalled upload could
+hold up the cases after it), then **M1, M2**, then **U2, U3**. The classifier (#8 parts 1 and 2, #146 and #150) is in
+this build, so the cases of run 2 join run 1 (P5 of #31); they are described under "Run 2" below and belong to #8's
+Done-when, not to DW2.
 
-**R0 first, before anything else on a fresh launch:** open the Sync lab on both devices and write down "Re-queue
-flag" (set or not set) for each. Then let both apps run once with the store loaded.
-- Expected: every document a step-3 build imported before this run (the Mac's documents of 2026-11-11, if any) ends
-  `done` with text on both devices. If neither device's flag allows it (both already set before those documents
-  arrived), record that as the N-e case occurring for real.
+**Classification stays off until M1.** #8's classifier fills the title, date, correspondent, type and tags of a
+document nobody has edited yet. In the other cases it would write fields the case does not expect (L1–L3 measure the
+text layer against an edit, not a classification). So in R0 both devices turn **Classify on this device** off, and
+only M1/M2 turn it on, on A alone. Only M1/M2 use **Letter page**. After the protocol, turn it on again on both.
+
+**R0 first, before anything else on a fresh launch:** open the Sync lab on both devices and, before creating
+anything, write down for each:
+- "Re-queue flag" (set or not set). The launch's pass runs before the lab opens, so this normally reads "set".
+- The "Last run" line, in particular `requeued N`: what this launch's pass re-queued. A later run replaces the line,
+  so read it first.
+- Then turn **Classify on this device** off on both (answer the question with **Write**). The line "Classification"
+  reads `off`.
+- Let both apps run with the store loaded. Expected: every document a step-3 build imported before this run (the
+  Mac's documents of 2026-11-11, if any) ends `done` with text on both devices. If neither device re-queued them
+  (`requeued 0` on both, and the documents stay without text), record that as the N-e case occurring for real.
 
 **0, preflight**
 1. Both apps start; the footer leaves "Checking iCloud…" within a minute.
@@ -173,7 +197,16 @@ flag" (set or not set) for each. Then let both apps run once with the store load
 3. The Mac syncs at all (a text document created on the Mac appears on the iPhone). If not, and the Console shows a
    network denial, the sandboxed Mac needs `com.apple.security.network.client`: record it and stop; that is a
    follow-up change with its own review.
-4. Optional: **Initialize CloudKit schema** on one device and a look at the CloudKit Console (Development).
+4. **Dates in the dump.** Once that document is `done` on both, **Export state** on both (Dates: *round to nearest
+   ms*) and compare the first lines.
+   - Equal: keep *round to nearest ms* for the whole run.
+   - Not equal: **Copy dump** on both and compare that document's date lines (`createdAt`, `modifiedAt`,
+     `documentDate`, `processingClaimedAt`). If they differ by exactly 1 ms and nothing else differs, CloudKit
+     truncates: switch **Dates** to *truncate to ms* on both and export again. If the first lines are now equal, use
+     *truncate to ms* for the whole run and note it in the results. If they still differ, or other lines differ,
+     record it, paste both dumps into the results comment and continue: the cases are then compared by the entity
+     lines that do not carry dates (the session compares the pasted dumps).
+5. Optional: **Initialize CloudKit schema** on one device and a look at the CloudKit Console (Development).
 
 **S1–S3, documents and metadata (DW1)**
 - **S1:** A creates a *text document* with 3 pages, tags "Rot, Blau", correspondent "Stadtwerke" and type
@@ -197,37 +230,41 @@ same answer and the index state).
 - **Q4:** B adds a new word W2 to that document's title; A finds W2 without a relaunch.
 - A miss: record the "Search index" line (state and last history error) of the device that missed.
 
-**C1–C7, conflicts (DW2)** (each on a fresh text document both devices show `done`):
+**C1–C6, conflicts (DW2)** (each on a fresh text document both devices show `done`; C7 comes after R):
 - **C1, different fields offline:** both offline. A changes the title; B changes the date and the inbox flag. Both
   online. Expected: A's title and B's date and inbox flag on both.
 - **C2, same field offline:** both offline. A sets the title "A", then B sets "B" (later by the clock). A online
   first, then B. Then the same with B online first. Record which title wins each time: by edit time or by export
   order.
-- **C3, to-many:** both offline; A adds tag "X", B adds tag "Y" to the same document. Both online. Expected: both tags
+- **C3, to-many:** both offline; A adds tag "X3", B adds tag "Y3" to the same document. Both online. Expected: both tags
   (record if one is lost).
 - **C4, delete against edit:** both offline; A deletes the document directly, B changes its title. Both online.
   Record the result on both (gone, or back with B's title).
-- **C5, same-name metadata:** both offline; both create the correspondent "Stadtwerke" (Metadata section) and assign
-  it to different documents. Both online, then **Run repair now** on both. Expected: one live "SyncLab-Stadtwerke"
-  with both documents on both devices, the other a tombstone (repair line: tombstones +1 on both); equal dumps.
-- **C6, concurrent tag moves:** create tags "X" and "Y" on A, wait until B has them. Both offline; A moves X under Y,
-  B moves Y under X. Both online, **Run repair now** on both. Expected: no cycle, the same tag at the top on both;
+- **C5, same-name metadata:** both offline; both create the correspondent "Kanzlei C5" (Metadata section) and
+  assign it to different documents. The name must be new: no earlier case may have created it, because creating a
+  name that exists returns the existing record, and then there is nothing to merge. Both online, then **Run repair
+  now** on both. Expected: one live "SyncLab-Kanzlei C5" with both documents on both devices, the other a tombstone
+  (repair line: tombstones +1 on both); equal dumps.
+- **C6, concurrent tag moves:** create tags "X6" and "Y6" on A, wait until B has them. Both offline; A moves X6 under
+  Y6, B moves Y6 under X6. Both online, **Run repair now** on both. Expected: no cycle, the same tag at the top on both;
   equal dumps.
-- **C7, size:** on a `done` lab document, **Write large text** with 2 MB; separately, create a *large file*. Record
-  whether both arrive on the other device (text length and file hash in "Read text, file and thumbnail"), how long
-  they took, and any failed event codes. The result decides whether the 500,000-byte text cap can be lifted (a
-  follow-up issue, not this part).
 
 **T-A–T-C, the trash across devices (#3)**
 - **T-A:** A moves a document to the trash; B shows it in the trash. B restores it; A shows it back.
-- **T-B:** A empties the trash; B no longer has the document or its file.
-- **T-C:** B offline restores a trashed document; meanwhile A empties the trash; B online. Record the result on both.
+- **T-B:** A empties the trash with the Sync lab's **Empty lab trash** (Documents section; it deletes only lab
+  documents, so nothing else in the trash is lost); B no longer has the document or its file.
+- **T-C:** B offline restores a trashed document; meanwhile A empties the trash, again with **Empty lab trash**; B
+  online. Record the result on both.
+- The app's own Empty Trash (Trash list) would also delete every other document in the trash; it is not used in the
+  protocol.
 
 **K1–K3, claims across devices (#4 M4).** The Mac (A) runs with `-ProcessingTakeoverSeconds 120`; check it first.
 - **K1:** B turns on **Hold processing on this device** and creates a *scan-like document* with 5 pages. Once A's
   Sync lab lists it with B's claim, close B from the app switcher (the hold ends with it). After 2 minutes A shows
   A's claim, processes it (it ends `done` with `vision` and a layered file) and B, when reopened, shows the same.
-  Expected: repair line `two texts 0` on both; equal dumps.
+  Expected: repair line `two texts 0` on both; equal dumps. Turn the hold on **before** the import: a "Processing
+  documents" task asked for before the hold, or a hold turned on while such a task runs, makes no progress until the
+  system ends it (harmless; it shows as a stalled progress line on the iPhone).
 - **K2:** as K1 with 20 pages, but B is reopened (without the hold) while A is still processing. Expected: one text
   record, equal dumps, one device's result on both. Record B's "Last run" line (did B start a stage before A's claim
   arrived, and was its result dropped: "dropped 1").
@@ -236,7 +273,9 @@ same answer and the index state).
   online. Expected: `done` on both, one text record, equal dumps; record whose text and file remain and whether the
   two texts differed (text hash on each device before B went online).
 
-**L1–L3, text layer against a metadata edit**
+**L1–L3, text layer against a metadata edit** (scan-like documents without the letter page; classification off on
+both, so A's processing writes only the text, the layered file, `pageCount`, `fileSize`, `textSource` and the state,
+never the title, date or metadata)
 - **L1:** A turns on the hold and creates a scan-like document. Once B shows it (`pending`, A's claim), B goes
   offline. A turns the hold off and processes (A shows `done`, `vision`, layered). B, offline, changes title, date and
   a tag. B online. Expected on both: B's title, date and tag; A's file, text, pages, file size, `vision`, `done`.
@@ -253,6 +292,17 @@ same answer and the index state).
 - **R2:** B offline. A creates 3 legacy documents. B resets its flag and is relaunched (still offline; its pass runs
   on a store without them). B online. A resets its flag and is relaunched. Expected: A re-queues and processes all
   three; B never claims them; text on both.
+
+**C7, size (last of DW2)**
+- On a `done` lab document, **Write large text** with 2 MB; separately, create a *large file*. Record whether both
+  arrive on the other device (text length and file hash in "Read text, file and thumbnail"), how long they took, and
+  any failed event codes. The result decides whether the 500,000-byte text cap can be lifted (a follow-up issue, not
+  this part).
+- **Recovery before M1:** wait until neither event log shows an event `running` (at most 15 minutes). Then change a
+  title on A and check that B shows it, and the other way round. If an export keeps failing (the same failed event
+  repeating), use **Delete directly** on the two C7 documents on the device that wrote them, wait for the event log
+  to settle and check both directions again. Record what was needed. If sync still does not recover, stop the run
+  here and record it: M1/M2 and U2/U3 then run in another sitting.
 
 **U2, U3, the status under failure (last)**
 - **U2:** A offline; change a title on A. Record what A's footer shows (the mirroring may just wait without an error).
@@ -275,15 +325,18 @@ That A classified shows in A's Sync lab: "Last run" reads `classified 1` right a
 gains the suggested correspondent or type. If the row stays without suggestions (the on-device model unavailable on
 A), record that and stop the case.
 
-- **M1:** A turns on the hold and creates a *text document* (its first page reads like a letter: "Stadtwerke
-  Musterstadt", a date, an amount). Once B shows it, B goes offline and changes the title. A turns the hold off; A
-  extracts the text, classifies it (empty fields filled) and exports. B online. Expected: B's title on both; A's other
-  suggestions (correspondent, type, date, tags) kept.
-- **M2, the reverse export order** (the loss case of N1): A creates with the hold on. Once B shows it, A goes offline.
-  B changes the title (exported). A turns the hold off and classifies offline, not having seen the edit, and fills
-  the title. A online. Expected: B's title on both. If A's suggested title wins on both, "never overwrites an edit"
-  does not hold across devices: the coordinator's follow-up for #8 applies (a synced per-field marker in schema V2);
-  record it here and on #8.
+**Before M1:** on A only, turn **Classify on this device** on (the line reads `on`); B stays off, so B never
+classifies. After M2, turn it on again on B too, so both devices are back at the default.
+
+- **M1:** A turns on the hold and creates a *text document* with **Letter page** on (its first page reads like a
+  letter: "Stadtwerke Musterstadt", a date, an amount). Once B shows it, B goes offline and changes the title. A turns
+  the hold off; A extracts the text, classifies it (empty fields filled) and exports. B online. Expected: B's title on
+  both; A's other suggestions (correspondent, type, date, tags) kept.
+- **M2, the reverse export order** (the loss case of N1): A creates with the hold on (again with **Letter page**).
+  Once B shows it, A goes offline. B changes the title (exported). A turns the hold off and classifies offline, not
+  having seen the edit, and fills the title. A online. Expected: B's title on both. If A's suggested title wins on
+  both, "never overwrites an edit" does not hold across devices: the coordinator's follow-up for #8 applies (a synced
+  per-field marker in schema V2); record it here and on #8.
 
 ## Results
 
