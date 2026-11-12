@@ -1,4 +1,5 @@
 import DokumentumCore
+import DokumentumKit
 import SwiftUI
 
 /// The library window: sidebar, list and detail in one `NavigationSplitView`. The Mac shows three
@@ -18,8 +19,12 @@ struct LibraryRootView: View {
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
-    init(source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting) {
-        let model = LibraryModel(source: source, loadNow: false)
+    /// - Parameter searcher: the app's one search index (#7, part 2); every window's model follows its updates.
+    init(
+        source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting,
+        searcher: (any DocumentSearching)? = nil
+    ) {
+        let model = LibraryModel(source: source, searcher: searcher, loadNow: false)
         _model = State(initialValue: model)
         _trash = State(initialValue: LibraryTrash(model: model))
         _importController = State(initialValue: ImportController(importer: importer, library: model))
@@ -45,6 +50,7 @@ struct LibraryRootView: View {
         #endif
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
+        .task { await model.observeSearchIndex() }
         .focusedSceneValue(\.libraryModel, model)
         .environment(trash)
         .focusedSceneValue(\.libraryTrash, trash)
@@ -52,6 +58,9 @@ struct LibraryRootView: View {
         .modifier(ImportSupport(controller: importController, launchStore: launchStore))
         #if DEBUG
             .modifier(sampleDocumentsCommand)
+        #endif
+        #if DEBUG || SEARCH_BENCHMARK
+            .modifier(SearchBenchmarkPresenter())
         #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(DokumentumApp.rootIdentifier)

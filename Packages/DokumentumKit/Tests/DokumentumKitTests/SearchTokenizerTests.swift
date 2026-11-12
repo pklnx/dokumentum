@@ -39,6 +39,36 @@ struct SearchTokenizerTests {
         #expect(SearchTokenizer.words(of: text) == expected)
     }
 
+    /// A soft hyphen inside a line is a break opportunity, not a separator (review of #125, N3).
+    @Test(arguments: [
+        ("Steuer\u{00AD}bescheid", ["steuerbescheid"]),
+        ("Grund\u{00AD}\u{00AD}steuer", ["grundsteuer"]),
+        ("Kfz\u{00AD}Steuer", ["kfzsteuer"]),
+        ("Über\u{00AD}weisung", ["uberweisung"]),
+        ("Steuer\u{00AD} bescheid", ["steuer", "bescheid"]),
+        ("Steuer\u{00AD}", ["steuer"]),
+        ("\u{00AD}Steuer", ["steuer"]),
+    ])
+    func aSoftHyphenInsideAWordIsRemoved(text: String, expected: [String]) {
+        #expect(SearchTokenizer.words(of: text) == expected)
+    }
+
+    @Test func aSoftHyphenInsideAQueryWordIsRemoved() {
+        #expect(
+            SearchTokenizer.terms(of: "steuer\u{00AD}bescheid").map(\.forms) == [["steuerbescheid", "steurbescheid"]])
+    }
+
+    /// The infix rule reads the length typed (review of #125, N2): "Mül" has 3 characters, its transcription
+    /// `muel` 4.
+    @Test func aTermAllowsInfixByItsTypedLength() {
+        let short = SearchTokenizer.terms(of: "Mül")
+        #expect(short.map(\.forms) == [["mul", "muel"]])
+        #expect(short.map(\.allowsInfix) == [false])
+        #expect(SearchTokenizer.terms(of: "Müll").map(\.allowsInfix) == [true])
+        #expect(SearchTokenizer.terms(of: "θην θηνα").map(\.allowsInfix) == [false, true])
+        #expect(SearchTokenizer.terms(of: "ung nung").map(\.allowsInfix) == [false, true])
+    }
+
     @Test func aDecomposedAccentStaysInItsWord() {
         #expect(SearchTokenizer.words(of: "Cafe\u{301} Mu\u{308}ller") == ["cafe", "muller"])
     }

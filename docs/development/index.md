@@ -658,8 +658,8 @@ scanner (part 2) build on it.
 ## Search
 
 Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search`, Foundation only, so
-`kit-linux` runs every test of it. The indexer that builds and updates it (part 2) and the search field
-(part 3) follow.
+`kit-linux` runs every test of it. Part 2 (#122) adds the indexer that builds and updates it and the
+benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
 
 - **Normalisation** (`SearchNormalizer.normalizedWord`): NFKC, then Foundation's case, diacritic and width
   folding with `locale: nil` (the device language never changes a result), then a table for what folding
@@ -668,10 +668,13 @@ Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search
 - **Words** (`SearchTokenizer`): maximal runs of letters, digits and combining marks; everything else
   separates (hyphen, U+2011, slash, apostrophe, the form feed between pages). "12.03.2024" is three words. A
   hyphen (`-`, U+2010 or a soft hyphen) at a line end joins the word only before a lowercase letter
-  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). Plain ASCII words are only lowercased;
+  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). A soft hyphen inside a word is
+  removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
   other words are normalised once per distinct form (`SearchNormalizer.Cache`, kept until `mergeOverflow`).
 - **Matching** (P1): every term of a query must match, each in any field. A term matches a word that starts
-  with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. Transcriptions: the
+  with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. The 4 counts
+  the characters of the word as typed (not bytes: `θην` does not find "Αθήνα"), and it holds for every
+  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. Transcriptions: the
   index also stores the *a/o/u* form of every word with *ae/oe/ue* (`mueller` → also `muller`; a side effect is
   `steuer` → also `steur`); a query term also tries its *a/o/u* form and, typed with ä/ö/ü, its *ae/oe/ue*
   form. So "Müller", "Mueller" and "muller" find each other in every direction.
@@ -698,6 +701,87 @@ Step 6 (#7). Part 1 (#121) adds the index and its rules in `DokumentumKit/Search
 - **Measured** on the Mac mini (M4), not asserted in any test: building the index over 5,000 synthetic
   documents takes 1.4 s optimised and 7.7 s unoptimised; the slowest of 24 queries × 5 runs takes 2.3 ms
   optimised and 14 ms unoptimised. The device measurement is part 2's benchmark.
+
+### The indexer
+
+- **`SearchIndexer`** (Core) is a plain actor that makes its own `ModelContext`s on the app's container,
+  as `ProcessingQueue` does, and only reads. `DokumentumApp` creates one for every store, in-memory ones
+  included (`start(storeChanges:)` with the shared `StoreChangeObserver`'s stream, `nil` in memory), and
+  every window's `LibraryModel` subscribes to it (`observeSearchIndex()`, `searchIndexState`; the search
+  field of part 3 queries it).
+- **Build** at launch, in this order: the newest history token; the metadata of every document through
+  the light list query (`StoreLibrarySource.read`, no text, no blob), so titles and names are found at
+  once; the texts, from the text rows' identifiers, in batches of 1 MB of text, each batch one actor call
+  that reads rows by identifier in groups of 25 with a fresh context per group (queries wait for one
+  batch at most, and at most 25 rows are in memory); then the history since the step-1 token and the
+  metadata again, so nothing saved during the build is missed; then `.ready`. Each batch yields
+  `.building(indexed:total:)`.
+- **Updates** start after `.ready`; events that come during the build leave one pending event. Events:
+  `ModelContext.didSave` of any context of the container at once, and the shared observer's debounced
+  stream (remote changes the mirroring saves, the end of each CloudKit import). On each event:
+  - **texts** through SwiftData's persistent history since the indexer's token (`StoreSearchHistory`):
+    a `DocumentText` inserted or updated in `extractedText` or `document` (a relink), or a `Document`
+    updated in `text`, is read again by key and its document's text replaced; a deleted text clears it.
+    An unlinked text is indexed once its link arrives. The history records another container's saves on
+    the same file (as the mirroring writes) and works for in-memory stores;
+  - **metadata** by re-reading the list query; `SearchIndex.setMetadata` skips equal fields, so a tag
+    rename, a merge, a classification or a trash move re-tokenises only the documents it changed;
+    documents that are gone are removed.
+- **History errors:** an expired token (`SwiftDataError.historyTokenExpired`) rebuilds. Any other error
+  is logged once per code; the first one of a launch rebuilds, later ones keep the index and the token,
+  and the next event reads the history again.
+- **Rebuild:** a fresh index is built aside through the same steps while the old one answers queries
+  (state `.building`), then replaces it in one assignment. Until then both are in memory: about 2 × 66 MB
+  for 5,000 documents (the plan review's measurement R-b on the Mac).
+- **`updates()`** returns a new stream per call (one per subscriber, newest state only), like
+  `StoreChangeObserver.changes()`. It yields after each batch, each applied event and each rebuild.
+- **Copies sharing an `instanceID`** follow `RowRecords.oldestFirst`: the text of the copy with the oldest
+  `createdAt` is indexed. Known gap: if that copy and its text are deleted, the other copy's text is
+  indexed only at the next launch (copies exist only until step 16's dedupe).
+- **Memory:** the index of 5,000 synthetic documents (37 MB of text) costs about 66 MB of
+  `phys_footprint` on the Mac (R-b); the benchmark reports the figure of the device it runs on.
+- **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
+  a change during the build, two subscribers, a persistent history error), `SearchIndexerRemoteTests`
+  (another container's write with the remote change, an expired history with the rebuild swap) and
+  `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
+  changed text row by key).
+
+### The benchmark
+
+- **`SearchBenchmark`** (Core) opens its own in-memory container (never the app's store), writes a
+  `SyntheticCorpus` into it through the real models, builds the index with the real `SearchIndexer`, and
+  runs `SearchBenchmark.queries` (30) 5 times each through the library's path: `search`, then
+  `LibrarySearch.apply` over the library's snapshot, timed on the main actor from the call to the
+  ordered list. The report (text and JSON) has per query the median and the maximum and the hits, the
+  overall maximum (**pass: under 200 ms**), the build times, the index's size, and `phys_footprint`
+  before and after the build and its delta. The runner and the corpus are in the packages without a
+  condition; the app's entry points are under `#if DEBUG || SEARCH_BENCHMARK`.
+- `SearchBenchmarkTests` runs it with 300 documents and checks the report and every hit count against
+  an index built straight from the corpus. **No time assertion.**
+- **Debug app:** the launch argument `-SearchBenchmark <count>` (1…20,000; missing or out of range is
+  5,000) opens an empty in-memory store (`SearchBenchmarkArgument`, so no repair, processing or real
+  index runs beside it) and shows the benchmark over the library: progress, then the report with
+  **Copy**. It logs the summary (`Log.search`) and writes `SearchBenchmark.json` to the app's temporary
+  folder. On the Mac also **Debug › Run Search Benchmark** (5,000 documents, on its own store too).
+- **In the simulator:**
+
+  ```sh
+  xcrun simctl install <device> <DerivedData>/Build/Products/Debug-iphonesimulator/Dokumentum.app
+  xcrun simctl launch <device> space.pklnx.Dokumentum -SearchBenchmark 5000
+  # when the report shows:
+  cat "$(xcrun simctl get_app_container <device> space.pklnx.Dokumentum data)/tmp/SearchBenchmark.json"
+  ```
+- **On the iPhone (M1 of #7):** a Debug build from Xcode with `-SearchBenchmark 5000` under Edit Scheme ›
+  Run › Arguments; wait for the report (writing the corpus plus 20–40 s of indexing are normal in Debug),
+  tap Copy and paste it into a comment on #7. Pass: the overall max under 200 ms.
+- **Release measurement (T12)**, only if a Debug run misses: locally and uncommitted, (1) add
+  `SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Release] = $(inherited) SEARCH_BENCHMARK` to
+  `Config/Project.xcconfig`; (2) Edit Scheme › Run › Info: Build Configuration **Release**, Arguments
+  `-SearchBenchmark 5000`; (3) run on the iPhone and copy the report; (4) revert both
+  (`git checkout Config/Project.xcconfig`, the scheme back to Debug). If Release misses too, the plan's
+  contingency is an FTS5 index behind `DocumentSearching` (T13).
+- **M2 of #7** checks on two devices that the mirroring's imports reach the history: a word imported on
+  the Mac is found on the iPhone, without relaunching it, once its text was processed.
 
 ## Logging
 

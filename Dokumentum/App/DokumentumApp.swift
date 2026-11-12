@@ -25,6 +25,9 @@ struct DokumentumApp: App {
     /// changes and at the next claim expiry or backoff end; paused in the background on iOS and when the Mac app
     /// quits (`ProcessingLifecycle`). `nil` for an in-memory store, as the repair.
     let processing: ProcessingScheduler?
+    /// The one search index of the app (plan of #7, part 2, T9), for every store, in-memory ones included; every
+    /// window's library follows it. Built at launch off the main actor, then updated from saves and store changes.
+    let search: SearchIndexer
     #if os(iOS)
         /// Imports what the share extension queued (plan of #4, part 4): at launch and on every activation, on
         /// the one importer. `nil` without the app group, and in runs that stay away from real data.
@@ -34,6 +37,10 @@ struct DokumentumApp: App {
 
     init() {
         var choice = ArchiveStore.currentChoice()
+        #if DEBUG || SEARCH_BENCHMARK
+            // A `-SearchBenchmark` launch runs on an empty in-memory store (#7, part 2).
+            choice = SearchBenchmarkArgument.storeChoice(choice, arguments: ProcessInfo.processInfo.arguments)
+        #endif
         #if DEBUG
             #if os(macOS)
                 UITestAppearance.apply(arguments: ProcessInfo.processInfo.arguments)
@@ -65,6 +72,8 @@ struct DokumentumApp: App {
         } else {
             repair = nil
         }
+        search = SearchIndexer(container: container)
+        search.start(storeChanges: storeChanges?.changes())
         let deviceID = DeviceIdentity.processingDeviceID()
         importer = DocumentImporter(container: container, deviceID: deviceID)
         // The processing queue (#4, part 5), for the stores on disk only, like the repair.
@@ -99,7 +108,7 @@ struct DokumentumApp: App {
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
                 source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
-                launchStore: launchStore, importer: importer
+                launchStore: launchStore, importer: importer, searcher: search
             )
             #if os(iOS)
                 .environment(shareQueue)

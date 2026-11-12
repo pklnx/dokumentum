@@ -38,7 +38,7 @@ struct SearchIndexOracleTests {
                 var found: Set<UUID> = []
                 for form in term.forms {
                     let needle = Array(form.utf8)
-                    let infix = form.unicodeScalars.count >= SearchIndex.infixMinimumLength
+                    let infix = term.allowsInfix
                     for (word, ids) in entries where Self.matches(word, needle, infix: infix) {
                         found.formUnion(ids)
                     }
