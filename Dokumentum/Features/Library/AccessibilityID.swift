@@ -72,6 +72,25 @@ enum AccessibilityID {
     static let importPhotos = "import.photos"
     static let importNoticeOK = "import.notice.ok"
 
+    /// The search (#7, part 3): the empty result, the "Indexing texts…" line, the chips and suggestions, and the scope
+    /// switch's two segments.
+    static let searchEmpty = "search.empty"
+    static let searchIndexing = "search.indexing"
+    static func searchToken(_ token: SearchToken) -> String {
+        switch token {
+        case .tag(let id): "search.token.tag.\(id.uuidString)"
+        case .correspondent(let id): "search.token.correspondent.\(id.uuidString)"
+        case .documentType(let id): "search.token.documentType.\(id.uuidString)"
+        case .inbox: "search.token.inbox"
+        }
+    }
+    static func searchScope(_ scope: SearchScope) -> String {
+        switch scope {
+        case .selection: "search.scope.selection"
+        case .all: "search.scope.all"
+        }
+    }
+
     /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
     static let debugMenu = "debug.menu"
     static let debugAddSampleDocuments = "debug.addSampleDocuments"

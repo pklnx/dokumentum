@@ -74,6 +74,18 @@ struct SearchIndexTests {
         #expect(numbers(index.search("Müll")) == [1, 2, 3, 4])
     }
 
+    /// An alternative needs 4 characters of its own to infix-match (#132, N-a): "muel" no longer finds "Formular"
+    /// through `mul`, still finds "Schmueller" by infix on what was typed, and (the trade-off) no longer finds
+    /// "Schmüller", which "Müll" and "muell" still find.
+    @Test func anAlternativeInfixMatchesOnlyWithFourCharactersOfItsOwn() {
+        let index = Self.index(texts: [
+            1: "Schmueller", 2: "Schmüller", 3: "Müller", 4: "Mueller", 5: "Müll", 6: "Formular",
+        ])
+        #expect(numbers(index.search("muel")) == [1, 3, 4, 5])
+        #expect(numbers(index.search("muell")) == [1, 2, 3, 4, 5])
+        #expect(numbers(index.search("Müll")) == [1, 2, 3, 4, 5])
+    }
+
     @Test func numbersAndCodesAreFoundByTheirParts() {
         let index = Self.index(texts: [1: "Datum 12.03.2024, Kunde ABC-123456", 2: "Datum 13.03.2023"])
         #expect(numbers(index.search("12.03.2024")) == [1])

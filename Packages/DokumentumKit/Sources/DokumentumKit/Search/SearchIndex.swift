@@ -26,7 +26,8 @@ import Foundation
 public struct SearchIndex: Sendable {
     /// A term typed with at least this many characters also matches inside a word ("bescheid" finds
     /// "Steuerbescheid"); a shorter one only at its start ("ung" does not find "Rechnung"). P1. Characters, not
-    /// bytes, and of the word as typed, for every alternative form (`SearchTerm.allowsInfix`).
+    /// bytes, and of the word as typed, for every alternative form; an alternative also needs this many
+    /// characters of its own (`SearchTerm.allowsInfix`).
     public static let infixMinimumLength = 4
 
     /// What `statistics` reports.
@@ -156,7 +157,7 @@ public struct SearchIndex: Sendable {
         var result: [UInt64]?
         for term in terms {
             var bits = [UInt64](repeating: 0, count: wordCount)
-            for form in term.forms { addMatches(of: form, infix: term.allowsInfix, to: &bits) }
+            for (form, infix) in zip(term.forms, term.allowsInfix) { addMatches(of: form, infix: infix, to: &bits) }
             if var accumulated = result {
                 var any: UInt64 = 0
                 for index in 0..<wordCount {
