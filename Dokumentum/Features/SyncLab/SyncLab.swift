@@ -27,6 +27,9 @@
         let takeoverInterval: TimeInterval
         /// The defaults suite of the per-device values; `nil` is the app's.
         let defaultsSuite: String?
+        /// The suite of the classification switch: the one the app's settings (#139) and the processing queue use,
+        /// `DokumentumApp.settingsSuite(isOnDisk:)`, so the lab's toggle and the app's switch are one setting.
+        let classificationSuite: String?
 
         /// The documents as the list shows them; `nil` before the first read.
         private(set) var rows: [SyncLabDocuments.Row]?
@@ -52,7 +55,8 @@
         init(
             container: ModelContainer, launchStore: LaunchStore, deviceID: String, importer: any DocumentImporting,
             processing: ProcessingScheduler?, repair: RepairScheduler?, search: SearchIndexer,
-            monitor: CloudSyncMonitor?, takeoverInterval: TimeInterval?, defaultsSuite: String? = nil
+            monitor: CloudSyncMonitor?, takeoverInterval: TimeInterval?, defaultsSuite: String? = nil,
+            classificationSuite: String?? = nil
         ) {
             self.container = container
             self.launchStore = launchStore
@@ -64,6 +68,7 @@
             self.monitor = monitor
             self.takeoverInterval = takeoverInterval ?? ProcessingClaimRules.takeoverInterval
             self.defaultsSuite = defaultsSuite
+            self.classificationSuite = classificationSuite ?? defaultsSuite
             refreshDeviceSettings()
         }
 
@@ -383,7 +388,7 @@
 
         /// Reads the device settings the lab shows again (the classification switch).
         func refreshDeviceSettings() {
-            isClassificationEnabled = ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled
+            isClassificationEnabled = ClassificationSettings(defaultsSuite: classificationSuite).isEnabled
         }
 
         /// Sets the classification switch (a device setting, not a data write; read at each decision, so the next
@@ -394,7 +399,7 @@
                 return
             }
             perform { [self] in
-                ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled = enabled
+                ClassificationSettings(defaultsSuite: classificationSuite).isEnabled = enabled
                 refreshDeviceSettings()
                 Log.processing.notice("Sync lab: classification \(enabled ? "on" : "off", privacy: .public)")
                 report("Classification on this device: \(enabled ? "on" : "off")")

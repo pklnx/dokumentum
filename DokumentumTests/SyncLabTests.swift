@@ -12,12 +12,28 @@ import Testing
 /// a store on disk waits for the question, the lab's "Empty lab trash" deletes lab documents only, and the device
 /// settings (re-queue flag, classification switch) change only with a store on disk. In-memory stores stand in for
 /// the store; the `LaunchStore` decides whether the lab asks.
+/// A classifier that is available and never asked to classify (the app's settings need one).
+private final class AvailableClassifier: DocumentClassifying, @unchecked Sendable {
+    var availability: ClassifierAvailability { .available }
+
+    func availabilityChanges() -> AsyncStream<ClassifierAvailability> {
+        AsyncStream { $0.finish() }
+    }
+
+    func classify(text: String, known: KnownMetadata) async throws -> ClassificationSuggestion {
+        Issue.record("the settings never classify")
+        return ClassificationSuggestion()
+    }
+}
+
 @MainActor
 struct SyncLabTests {
     /// A defaults suite of the test's own, so the app's settings are never touched.
     private let suite = "DokumentumTests-SyncLab-\(UUID().uuidString)"
 
-    private func makeLab(onDisk: Bool) throws -> (lab: SyncLab, container: ModelContainer, writes: TestSignal) {
+    private func makeLab(
+        onDisk: Bool, classificationSuite: String?? = nil
+    ) throws -> (lab: SyncLab, container: ModelContainer, writes: TestSignal) {
         let container = try makeInMemoryContainer()
         let launchStore =
             onDisk
@@ -26,7 +42,8 @@ struct SyncLabTests {
         let lab = SyncLab(
             container: container, launchStore: launchStore, deviceID: "LAB-DEVICE",
             importer: DocumentImporter(container: container, deviceID: "LAB-DEVICE"), processing: nil, repair: nil,
-            search: SearchIndexer(container: container), monitor: nil, takeoverInterval: nil, defaultsSuite: suite)
+            search: SearchIndexer(container: container), monitor: nil, takeoverInterval: nil, defaultsSuite: suite,
+            classificationSuite: classificationSuite)
         let writes = TestSignal()
         lab.didFinishWrite = { writes.fire() }
         return (lab, container, writes)
@@ -152,6 +169,36 @@ struct SyncLabTests {
         lab.resetRequeueFlag()
         await writes.wait(for: 2, "the flag was not reset")
         #expect(!lab.isRequeueDone)
+    }
+
+    /// The lab's "Classify on this device" and the app's own switch (#139, `SuggestionSettings`) are one setting: the
+    /// lab reads and writes the switch in the suite the app gives it (`DokumentumApp.settingsSuite(isOnDisk:)`, the
+    /// processing queue's for a store on disk), apart from the lab's other per-device values. A change in the lab shows
+    /// in the app's settings when they open (`refresh()`), and a change in the app's settings shows in the lab's line.
+    @Test func theLabToggleAndTheAppSettingsAreOneSwitch() async throws {
+        #expect(DokumentumApp.settingsSuite(isOnDisk: true) == ProcessingFailures().defaultsSuite)
+        let switchSuite = "DokumentumTests-SyncLab-Switch-\(UUID().uuidString)"
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+            UserDefaults.standard.removePersistentDomain(forName: switchSuite)
+        }
+        let (lab, _, writes) = try makeLab(onDisk: true, classificationSuite: switchSuite)
+        let settings = SuggestionSettings(
+            classifier: AvailableClassifier(), settings: ClassificationSettings(defaultsSuite: switchSuite),
+            requestRun: {})
+        #expect(lab.isClassificationEnabled)
+        #expect(settings.isEnabled)
+
+        lab.setClassification(false)
+        lab.confirmWrites()
+        await writes.wait(for: 1, "the lab's switch was not written")
+        settings.refresh()
+        #expect(!settings.isEnabled, "the app's settings do not show the lab's change")
+        #expect(ClassificationSettings(defaultsSuite: suite).isEnabled, "the lab wrote its own suite, not the app's")
+
+        settings.setEnabled(true)
+        _ = await lab.refreshThisDevice()
+        #expect(lab.isClassificationEnabled, "the lab's line does not follow the app's settings")
     }
 
     /// A change of the classification switch outside the lab (later #8 part 3's settings switch) shows at the "This

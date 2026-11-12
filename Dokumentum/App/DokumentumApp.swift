@@ -196,7 +196,7 @@ struct DokumentumApp: App {
             syncLab = SyncLab(
                 container: container, launchStore: launchStore, deviceID: deviceID, importer: importer,
                 processing: processing, repair: repair, search: search, monitor: syncMonitor,
-                takeoverInterval: takeoverInterval)
+                takeoverInterval: takeoverInterval, classificationSuite: settingsSuite)
         #endif
     }
 
