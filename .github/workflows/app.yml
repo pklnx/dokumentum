@@ -4,6 +4,8 @@ name: App
 # section 6, question 1). Both jobs mirror Xcode Cloud's former "Default - iOS" and "Default - macOS" actions:
 # the Dokumentum scheme, built unsigned, then the Default test plan. The UISmoke plan is not part of it.
 # There is deliberately no `paths` filter: these jobs are required checks, so they must run on every pull request.
+# The tests run serially, with test timeouts: in parallel, the hosted app tests stalled on these 3-CPU runners
+# (a run of each job stopped producing output until it was cancelled, no test had failed).
 # `xcode-27` is a preview runner image; it has Xcode 27.1 as the default, so each job selects the pinned Xcode.
 on:
   push:
@@ -87,6 +89,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test-without-building -scheme Dokumentum -testPlan Default \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 \
+            -parallel-testing-enabled NO \
             -destination 'platform=macOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/test.xcresult"
       - name: Upload the result bundles
