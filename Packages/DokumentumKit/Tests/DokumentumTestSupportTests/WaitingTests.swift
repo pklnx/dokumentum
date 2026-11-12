@@ -189,6 +189,13 @@ struct WaitingTests {
         }
     }
 
+    /// A task that prefers an `OwnThreadExecutor` runs its nonisolated work there, off the pool.
+    @Test func anOwnThreadExecutorRunsOffThePool() async {
+        let executor = TestSupport.OwnThreadExecutor(name: "WaitingTests")
+        #expect(await Task(executorPreference: executor) { TestSupport.isOnCooperativePool }.value == false)
+        #expect(await Task(executorPreference: nil) { TestSupport.isOnCooperativePool }.value, "without it: the pool")
+    }
+
     /// Suspends until cancelled, built on `Checkpoint`.
     @Test func waitForCancellationEndsWithItsTask() async {
         let started = TestSignal()
@@ -282,7 +289,7 @@ struct WaitingTests {
 }
 
 /// The safety net while the waiter's actor is blocked. Each test blocks its actor for its whole run; the
-/// actor runs on a queue of its own (`BusyActor`), so no thread of the cooperative pool is held (#164).
+/// actor runs on a thread of its own (`BusyActor`), so no thread of the cooperative pool is held (#164).
 /// Serialized, so that the nets each test compares run with as little load from the others as possible.
 @Suite(.serialized) struct BlockedActorTests {
     /// The safety net takes its rounds on the waiter's actor: while that actor is blocked, the
@@ -369,12 +376,12 @@ struct WaitingTests {
     }
 }
 
-/// An actor whose executor a test blocks (`BlockedActorTests`). It runs on a queue of its own, so blocking it
-/// holds a thread of that queue, not one of the cooperative pool (#164).
+/// An actor whose executor a test blocks (`BlockedActorTests`). It runs on a thread of its own, so blocking it
+/// holds that thread, not one of the cooperative pool (#164).
 private actor BusyActor {
-    private let queue = DispatchSerialQueue(label: "BusyActor")
+    private let executor = TestSupport.OwnThreadExecutor(name: "BusyActor")
 
-    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+    nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
 
     /// Blocks this actor's thread until `checkpoint` is released.
     func block(_ checkpoint: Checkpoint) {

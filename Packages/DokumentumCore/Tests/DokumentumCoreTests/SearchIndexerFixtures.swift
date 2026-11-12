@@ -105,8 +105,8 @@ final class FailingHistory: SearchHistoryReading {
 }
 
 /// The store's history, whose reads of changes stop at `checkpoint` while `armed` is on, on the thread of the reader
-/// (#132, N-d): an update then holds inside its history read. The indexer reads on a thread of the cooperative pool,
-/// so the stop holds that thread (`Checkpoint.passBlockingOnPool()`, #164): one thread, for one update at a time.
+/// (#132, N-d): an update then holds inside its history read. That thread must not be one of the cooperative pool's
+/// (#164): the indexer runs on a `TestSupport.OwnThreadExecutor` (`SearchIndexer.Hooks.executor`).
 final class BlockingHistory: SearchHistoryReading {
     private let base: StoreSearchHistory
     private let armed: Armed
@@ -121,7 +121,7 @@ final class BlockingHistory: SearchHistoryReading {
     func newestToken() throws -> DefaultHistoryToken? { try base.newestToken() }
 
     func changes(since token: DefaultHistoryToken?) throws -> (changes: [TextChange], newest: DefaultHistoryToken?) {
-        if armed.isOn { checkpoint.passBlockingOnPool() }
+        if armed.isOn { checkpoint.passBlocking() }
         return try base.changes(since: token)
     }
 }

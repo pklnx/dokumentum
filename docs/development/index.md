@@ -192,14 +192,14 @@ pool, as wide as the CPU count: 3 threads on the CI runners. A thread that block
 semaphore, a lock held by a paused hook, `DispatchQueue.main.sync`) is gone for every task: the test's own,
 every safety net and Swift Testing's time limits included. Three such threads froze the whole
 `DokumentumCoreTests` process in parallel mode, with no output and no failure. Work that blocks runs on a
-thread of its own: `TestSupport.onOwnThread { … }`, or an actor on a queue of its own (`BusyActor` in
-`WaitingTests`). `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking. The one
-exception is a synchronous hook that the code under test calls on the pool itself, such as the search
-indexer's history read (`BlockingHistory`): it uses `passBlockingOnPool()` and holds one thread, for one
-test at a time. Both give up with an issue after their timeout, so a missing `release()` fails the test
-instead of hanging it. `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns
-such a block into a certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows
-it on any Mac.
+thread of its own: `TestSupport.onOwnThread { … }`, or a `TestSupport.OwnThreadExecutor` as an actor's
+executor (`BusyActor` in `WaitingTests`) or as the executor preference of the task in which the code under
+test runs its nonisolated work (`SearchIndexer.Hooks.executor`, used by `BlockingHistory`). Not a dispatch
+queue: on the 3-CPU runners, tasks blocked on the pool kept even a `DispatchQueue.global()` timer from
+running. `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking, and
+gives up with an issue after its timeout, so a missing `release()` fails the test instead of hanging it.
+`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns such a block into a
+certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows it on any Mac.
 
 **The safety net waits with the waiter's actor.** A `TestSignal` wait (and `Checkpoint.reached`,
 `ManualDebounce.waitForStarts`) passes its caller's isolation (`#isolation`) to

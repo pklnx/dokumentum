@@ -106,6 +106,50 @@ extension TestSupport {
         return try result.get()
     }
 
+    /// An executor with a thread of its own, outside the cooperative pool and outside libdispatch's
+    /// worker threads: it runs its jobs one after another on that thread. The thread and the executor
+    /// live as long as the test process, so make one per test, not one per job. Two uses, both for code that blocks its thread at `Checkpoint.passBlocking()`:
+    /// - as a task's executor preference (`Task(executorPreference:)`), for code under test that runs
+    ///   its nonisolated work in a task of its own (`SearchIndexer.Hooks.executor`);
+    /// - as an actor's executor (`unownedExecutor`), for an actor a test blocks (`BusyActor`).
+    ///
+    /// Why a thread and not a dispatch queue: on the 3-CPU runners, tasks blocked on the pool kept
+    /// even a `DispatchQueue.global()` timer from running (#164).
+    public final class OwnThreadExecutor: SerialExecutor, TaskExecutor {
+        private final class Jobs: @unchecked Sendable {
+            // Guarded by `condition`.
+            var waiting: [UnownedJob] = []
+            let condition = NSCondition()
+        }
+
+        private let jobs = Jobs()
+
+        public init(name: String = "OwnThreadExecutor") {
+            let jobs = self.jobs
+            // The thread keeps the executor alive, so it never runs a job for an executor that is gone.
+            let thread = Thread { [self] in
+                while true {
+                    jobs.condition.lock()
+                    while jobs.waiting.isEmpty { jobs.condition.wait() }
+                    let job = jobs.waiting.removeFirst()
+                    jobs.condition.unlock()
+                    job.runSynchronously(
+                        isolatedTo: self.asUnownedSerialExecutor(), taskExecutor: self.asUnownedTaskExecutor())
+                }
+            }
+            thread.name = name
+            thread.start()
+        }
+
+        public func enqueue(_ job: consuming ExecutorJob) {
+            let job = UnownedJob(job)
+            jobs.condition.lock()
+            jobs.waiting.append(job)
+            jobs.condition.signal()
+            jobs.condition.unlock()
+        }
+    }
+
     /// Whether the calling thread is one of the cooperative pool's (`onOwnThread`): the pool's
     /// threads run the root queues `com.apple.root.<QoS>.cooperative`.
     public static var isOnCooperativePool: Bool {
@@ -257,13 +301,13 @@ public final class Checkpoint: Sendable {
     }
 
     /// `pass()` for a synchronous hook that runs on a thread of its own (`TestSupport.onOwnThread`, a
-    /// `Thread`, an actor on a queue of its own): blocks that thread until `release()`. Returns
+    /// `Thread`, `TestSupport.OwnThreadExecutor`): blocks that thread until `release()`. Returns
     /// `false` after recording an issue (`comment`) when the release does not come within `timeout`
     /// (scaled), so a test that never releases fails instead of hanging.
     ///
-    /// Never on a thread of the cooperative pool (#164, `TestSupport.onOwnThread`): there it records an
-    /// issue and returns `false` at once, without blocking. A hook that the code under test calls on
-    /// the pool, where the test cannot move it, uses `passBlockingOnPool()`.
+    /// Never on a thread of the cooperative pool (#164, `TestSupport.onOwnThread`,
+    /// `TestSupport.OwnThreadExecutor`): there it records an issue and returns `false` at once, without
+    /// blocking.
     @discardableResult
     public func passBlocking(
         timeout: Duration = .seconds(60), _ comment: Comment? = nil,
@@ -274,7 +318,7 @@ public final class Checkpoint: Sendable {
             Issue.record(
                 """
                 passBlocking() on a thread of the cooperative pool: run the hook on a thread of its own \
-                (TestSupport.onOwnThread), or use passBlockingOnPool()
+                (TestSupport.onOwnThread, TestSupport.OwnThreadExecutor)
                 """,
                 sourceLocation: sourceLocation)
             return false
@@ -282,22 +326,9 @@ public final class Checkpoint: Sendable {
         return block(timeout: timeout, comment, sourceLocation: sourceLocation)
     }
 
-    /// `passBlocking()` for a synchronous hook that the code under test calls on a thread of the
-    /// cooperative pool, where the test cannot move it: blocks that pool thread until `release()`,
-    /// for at most `timeout` (scaled). The test then holds one of the pool's threads (3 on the CI
-    /// runners, #164), so the work it waits for meanwhile must not need more than the rest of the pool,
-    /// and only one hook of a test may stand here at a time.
-    @discardableResult
-    public func passBlockingOnPool(
-        timeout: Duration = .seconds(60), _ comment: Comment? = nil,
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) -> Bool {
-        block(timeout: timeout, comment, sourceLocation: sourceLocation)
-    }
-
     /// Blocks the calling thread until `release()` or until `timeout` (scaled) has passed on the
-    /// clock. The clock is right here, unlike in the waits of the pool (`TestSupport.safetyNet`): a
-    /// blocked thread wakes up at its deadline whether or not the pool has threads to spare.
+    /// clock. The clock is right here, unlike in the waits of the pool (`TestSupport.safetyNet`): the
+    /// blocked thread is not the pool's, and it wakes up at its deadline whatever the pool does.
     private func block(timeout: Duration, _ comment: Comment?, sourceLocation: SourceLocation) -> Bool {
         arrivals.fire()
         let semaphore = DispatchSemaphore(value: 0)
