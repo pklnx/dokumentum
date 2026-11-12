@@ -1,0 +1,68 @@
+name: App test
+description: >
+  Builds the Dokumentum scheme unsigned and runs test plans on one destination, on a macOS runner
+  (docs/development/index.md, "GitHub Actions macOS"). Selects the pinned Xcode, runs the toolchain check
+  and the localisation check, runs the tests serially (a workaround for #164: in parallel mode the
+  DokumentumCoreTests process froze on the 3-CPU runners), and uploads the result bundles when the run fails
+  or is cancelled. Needs a checkout before it.
+inputs:
+  destination:
+    description: The xcodebuild destination.
+    required: true
+  plans:
+    description: Test plans to run, separated by spaces.
+    required: true
+  artifact:
+    description: Name of the artifact for the result bundles.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Select the pinned Xcode
+      shell: bash
+      run: |
+        echo "DEVELOPER_DIR=/Applications/Xcode_$(tr -d '[:space:]' < .xcode-version).app/Contents/Developer" >> "$GITHUB_ENV"
+    - name: Toolchain check
+      shell: bash
+      run: CI_PRIMARY_REPOSITORY_PATH="$PWD" ci_scripts/ci_post_clone.sh
+    - name: Build
+      shell: bash
+      env:
+        DESTINATION: ${{ inputs.destination }}
+        PLANS: ${{ inputs.plans }}
+        # Every test wait multiplies its timeout by this (the runners have 3 CPUs). `xcodebuild` strips the
+        # TEST_RUNNER_ prefix and passes the variable on to the test host.
+        TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
+        # Agents' unsigned path: macOS without team and entitlements, the simulator keeps its real keys.
+        XCODE_XCCONFIG_FILE: Config/Unsigned.xcconfig
+      run: |
+        set -o pipefail
+        plan_args=()
+        for plan in $PLANS; do plan_args+=(-testPlan "$plan"); done
+        xcodebuild build-for-testing -scheme Dokumentum "${plan_args[@]}" -destination "$DESTINATION" \
+          -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/build.xcresult"
+    - name: Localisation
+      shell: bash
+      run: python3 scripts/check-localization.py "$RUNNER_TEMP/DerivedData"
+    - name: Test
+      shell: bash
+      env:
+        DESTINATION: ${{ inputs.destination }}
+        PLANS: ${{ inputs.plans }}
+        TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
+        XCODE_XCCONFIG_FILE: Config/Unsigned.xcconfig
+      run: |
+        set -o pipefail
+        for plan in $PLANS; do
+          xcodebuild test-without-building -scheme Dokumentum -testPlan "$plan" -parallel-testing-enabled NO \
+            -destination "$DESTINATION" -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/test-$plan.xcresult"
+        done
+    - name: Upload the result bundles
+      if: failure() || cancelled()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/*.xcresult
+        if-no-files-found: ignore
+        retention-days: 7

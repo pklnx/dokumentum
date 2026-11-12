@@ -27,7 +27,7 @@ Commands per operation: `.claude/github-operations.md`, read before the first Gi
 - Every behaviour change has tests; a bug fix has a regression test that fails without the fix. Tests wait for signals, never for time.
 - CloudKit schema changes are additive only; every model change comes with a schema version and a migration test. Synced enums are stored as raw strings with a fallback for unknown values.
 - The share extension never opens the store; it hands files to the app through the app-group queue.
-- Locally run only the tests of what changed; CI runs everything. Agents never watch CI.
+- Locally run only the tests of what changed. In CI, a pull request that changes only docs and process files (`docs/**`, `*.md`, `.github/ISSUE_TEMPLATE/**`, `.github/labels.json`) skips the app tests; any other pull request runs the full Default plan, and so does every push to main and the nightly run (`scripts/app-scope.py`). Agents never watch CI.
 - Builds and app tests run on the maintainer's Mac mini (local sessions, unsigned builds); GitHub Actions macOS (`app.yml`: `app-ios`, `app-macos`) is the PR check since 2026-11-12, Xcode Cloud is kept for TestFlight; cloud sessions verify only what runs on Linux.
 - Ask instead of guessing on product decisions (AskUserQuestion, recommendation first).
 
