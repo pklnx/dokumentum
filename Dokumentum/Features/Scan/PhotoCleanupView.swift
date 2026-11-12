@@ -251,6 +251,9 @@ private struct CleanupBar: View {
             }
             .accessibilityIdentifier(AccessibilityID.cleanupRotate)
             Spacer()
+            // VoiceOver's name for the menu, "Filter" (the iPhone's label, the Mac's title; asserted in `ScanSmokeTests`).
+            // The label's title gives the same name today; the modifier keeps it if the label ever becomes an icon,
+            // whose symbol's own name is read otherwise (measured, #136).
             filterControl
                 .accessibilityLabel(Text("Filter"))
                 .accessibilityIdentifier(AccessibilityID.cleanupFilter)
