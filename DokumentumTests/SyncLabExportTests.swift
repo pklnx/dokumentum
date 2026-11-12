@@ -148,7 +148,8 @@ struct SyncLabExportTests {
         let type: DocumentType
 
         init(_ container: ModelContainer) throws {
-            context = ModelContext(container)
+            let context = ModelContext(container)
+            self.context = context
             func one<T: PersistentModel>(_ type: T.Type, _ match: (T) -> Bool) throws -> T {
                 try #require(try context.fetch(FetchDescriptor<T>()).first(where: match))
             }
@@ -166,7 +167,7 @@ struct SyncLabExportTests {
     }
 
     /// One change per attribute and relationship of the schema, each on a record of the seed.
-    private static let fieldChanges: [String: (Records) -> Void] = {
+    private static func fieldChanges() -> [String: (Records) -> Void] {
         let later = Seed.base.addingTimeInterval(1_000)
         let other = UUID(uuidString: "00000000-0000-0000-0000-000000000999")!
         let data = Data([7, 7, 7, 7])
@@ -237,22 +238,23 @@ struct SyncLabExportTests {
             "DocumentType.mergedAt": { $0.type.mergedAt = later },
             "DocumentType.documents": { $0.type.documents = [] },
         ]
-    }()
+    }
 
     /// Each attribute and relationship of the schema, changed alone on the seed, changes its entity's hash: the dump
     /// writes each field's value, not only its key (review B, N1 of PR #155). The table must name every field of the
     /// schema, so a field added later needs a change here too.
     @Test func eachFieldChangedAloneChangesItsEntityHash() throws {
+        let changes = Self.fieldChanges()
         let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
         var schemaFields: Set<String> = []
         for entity in model.entities {
             let name = try #require(entity.name)
             for property in entity.propertiesByName.keys { schemaFields.insert("\(name).\(property)") }
         }
-        #expect(Set(Self.fieldChanges.keys) == schemaFields, "the table does not name exactly the schema's fields")
+        #expect(Set(changes.keys) == schemaFields, "the table does not name exactly the schema's fields")
 
         let base = try dump(seed: 9)
-        for (field, change) in Self.fieldChanges.sorted(by: { $0.key < $1.key }) {
+        for (field, change) in changes.sorted(by: { $0.key < $1.key }) {
             let container = try makeInMemoryContainer()
             var generator = SplitMix64(seed: 9)
             try Seed.insert(into: container, order: &generator)
