@@ -191,9 +191,11 @@ archive folder format (step 16) can stay compatible with its version 1.x.
 ### 3.4 Processing pipeline
 Import → PDF (images become PDF pages) → store → background processing:
 text from the PDF, else Vision OCR (German and English) → invisible text
-layer → thumbnail → page count → (from step 7) classification. A processing
-queue with one Vision job and one model job at a time (the old app's
-`VisionGate` / `OnDeviceGate` idea).
+layer → thumbnail → page count → (from step 7) classification, the same run
+classifying a document right after its text. A processing queue with one job
+at a time across the Vision and the model stage (the plan of #8, T6: the
+system runs model requests one after the other anyway). Classification runs
+once per document (state `classify`, then `done`).
 - **Claims:** a device processes only documents it has claimed
   (`processingDeviceID`, `processingClaimedAt`). The importing device claims
   first. Another device takes over a claim older than 6 hours (the Mac
@@ -224,7 +226,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 ### 3.6 Porting from document-archive
 | Ported (cleaned up, tests along) | Rebuilt | Dropped |
 |---|---|---|
-| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), image cleanup and scanner wrapper, tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows; new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
+| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows, image cleanup and scanner wrapper (built in step 4, #5; the predecessor's code was not read, maintainer decision M1); new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
 
 ## 4. Development process
 - Workflow, roles, labels and review rules as in `pklnx/dev-process`; the

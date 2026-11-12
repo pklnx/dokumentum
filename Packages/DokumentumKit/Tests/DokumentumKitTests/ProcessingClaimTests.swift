@@ -62,14 +62,14 @@ struct ProcessingClaimTests {
         }
     }
 
-    @Test(arguments: [ProcessingState.pending, .processing])
+    @Test(arguments: [ProcessingState.pending, .processing, .classify])
     func noClaimIsClaimed(state: ProcessingState) {
         #expect(decide(state, by: "", age: nil) == .process(.claim))
         #expect(decide(state, by: "", age: Self.hour) == .process(.claim), "a time without a device is no claim")
         #expect(decide(state, by: Self.other, age: nil) == .process(.claim), "a device without a time is no claim")
     }
 
-    @Test(arguments: [ProcessingState.pending, .processing])
+    @Test(arguments: [ProcessingState.pending, .processing, .classify])
     func anOwnFreshClaimIsKeptAndAStaleOneRenewed(state: ProcessingState) {
         #expect(decide(state, by: Self.me, age: 0) == .process(.keep))
         #expect(decide(state, by: Self.me, age: Self.interval - 1) == .process(.keep))
@@ -77,7 +77,7 @@ struct ProcessingClaimTests {
         #expect(decide(state, by: Self.me, age: -(Self.interval + 1)) == .process(.claim))
     }
 
-    @Test(arguments: [ProcessingState.pending, .processing])
+    @Test(arguments: [ProcessingState.pending, .processing, .classify])
     func anotherDevicesFreshClaimWaitsUntilItExpires(state: ProcessingState) {
         let claimedAt = Self.now.addingTimeInterval(-Self.hour)
         #expect(
@@ -86,7 +86,7 @@ struct ProcessingClaimTests {
         #expect(decide(state, by: Self.other, age: 0).isWait)
     }
 
-    @Test(arguments: [ProcessingState.pending, .processing])
+    @Test(arguments: [ProcessingState.pending, .processing, .classify])
     func anotherDevicesExpiredClaimIsTakenOver(state: ProcessingState) {
         #expect(decide(state, by: Self.other, age: Self.interval) == .process(.takeOver))
         #expect(decide(state, by: Self.other, age: 400 * 24 * Self.hour) == .process(.takeOver))
@@ -166,7 +166,7 @@ struct ProcessingClaimTests {
 
     // MARK: Further conditions
 
-    @Test(arguments: [ProcessingState.pending, .processing, .failed])
+    @Test(arguments: [ProcessingState.pending, .processing, .classify, .failed])
     func aTrashedDocumentIsSkipped(state: ProcessingState) {
         #expect(decide(state, by: Self.me, age: 0, isTrashed: true) == .skip(.trashed))
         #expect(decide(state, by: "", age: nil, isTrashed: true) == .skip(.trashed))
@@ -178,6 +178,33 @@ struct ProcessingClaimTests {
         #expect(decide(state, by: Self.me, age: 0, hasFile: false) == .wait(.noFile))
         #expect(decide(state, by: Self.me, age: 0, hasText: false) == .wait(.noText))
         #expect(decide(state, by: Self.other, age: Self.interval, hasFile: false, hasText: false) == .wait(.noFile))
+    }
+
+    /// The classification step (#8) reads the text, never the file: a document in `classify` waits for its text
+    /// record only.
+    @Test func classifyNeedsTheTextRecordButNotTheFile() {
+        #expect(decide(.classify, by: Self.me, age: 0, hasFile: false) == .process(.keep))
+        #expect(decide(.classify, by: Self.me, age: 0, hasText: false) == .wait(.noText))
+        #expect(decide(.classify, by: Self.me, age: 0, hasFile: false, hasText: false) == .wait(.noText))
+        #expect(decide(.classify, by: "", age: nil, hasFile: false) == .process(.claim))
+    }
+
+    /// The new raw value on an older build (frozen-enum rule, #8): a build that does not know `classify` reads it
+    /// as `.unknown`, and the rules skip `.unknown` before trash, claims, files and backoff, so such a build never
+    /// claims, takes over or writes a document waiting for classification.
+    @Test func aStateAnOlderBuildDoesNotKnowIsSkippedBeforeEveryOtherRule() {
+        for raw in ["classify-v2", "suggest", "Classify"] {
+            let state = ProcessingState(storedValue: raw)
+            #expect(state == .unknown)
+            for device in ["", Self.me, Self.other] {
+                for age in [nil, 0, Self.interval, 48 * Self.hour] as [TimeInterval?] {
+                    #expect(
+                        decide(
+                            state, by: device, age: age, failures: 0, hasFile: false, hasText: false, retryIn: 60)
+                            == .skip(.unknownState))
+                }
+            }
+        }
     }
 
     @Test func aShorterIntervalIsUsed() {

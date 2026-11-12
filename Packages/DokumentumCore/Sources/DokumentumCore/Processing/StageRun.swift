@@ -1,3 +1,4 @@
+import DokumentumKit
 import Foundation
 import Synchronization
 
@@ -7,6 +8,8 @@ import Synchronization
 /// How one stage run ended for the queue.
 enum StageOutcome: Sendable {
     case returned(ProcessingResult)
+    /// The classification stage answered (#8).
+    case suggested(ClassificationSuggestion)
     case threw(any Error)
     /// No progress for the stall timeout: the stage was cancelled and left behind.
     case timedOut
@@ -98,8 +101,8 @@ final class StallWatchdog: Sendable {
     }
 }
 
-/// The stage the queue waits for, and the stages it let go that have not returned yet (N1). One Vision job at a
-/// time: before a stage starts, every stage cancelled by `interruptNow()` has returned (it stops after its current
+/// The stage the queue waits for, and the stages it let go that have not returned yet (N1). One job at a time,
+/// across both kinds of stage (the text stage and the classification stage, #8 T6): before a stage starts, every stage cancelled by `interruptNow()` has returned (it stops after its current
 /// page), and at most one stage abandoned after a timeout is still alive. A stage that never returns therefore
 /// blocks the next stage, never more than one extra job runs, and the run that would leave two abandoned stages ends
 /// as `stalled`.
@@ -111,6 +114,9 @@ final class StageTracker: Sendable {
     struct Current: Sendable {
         let id: UInt64
         let attempt: ProcessingFailures.Attempt
+        /// The counter the attempt was counted in (the text step's or the classification step's, #8): a refund
+        /// goes there.
+        let counter: ProcessingFailures
         let outcome: FirstOutcome
         var task: Task<Void, Never>?
         var ended = false
@@ -204,10 +210,10 @@ final class StageTracker: Sendable {
     }
 
     /// The stage the queue is about to start.
-    func begin(attempt: ProcessingFailures.Attempt, outcome: FirstOutcome) -> UInt64 {
+    func begin(attempt: ProcessingFailures.Attempt, counter: ProcessingFailures, outcome: FirstOutcome) -> UInt64 {
         state.withLock { state in
             state.nextID += 1
-            state.current = Current(id: state.nextID, attempt: attempt, outcome: outcome)
+            state.current = Current(id: state.nextID, attempt: attempt, counter: counter, outcome: outcome)
             return state.nextID
         }
     }

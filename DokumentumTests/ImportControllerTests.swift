@@ -17,6 +17,7 @@ final class StubImporter: DocumentImporting {
     let imagesResult: ImageImportResult
     private let calls = Mutex<[String]>([])
     private let imageCalls = Mutex<[(items: [Data], title: String?, source: DocumentSource)]>([])
+    private let editedCalls = Mutex<[(items: [EditedImage], title: String, source: DocumentSource)]>([])
     /// Called at the start of each `importImages`, before it answers (a test reads the controller's state there).
     let onImportImages: (@Sendable () async -> Void)?
 
@@ -33,6 +34,10 @@ final class StubImporter: DocumentImporting {
     var fileNames: [String] { calls.withLock { $0 } }
     /// The items, titles and sources `importImages` was given, per call.
     var imageImports: [(items: [Data], title: String?, source: DocumentSource)] { imageCalls.withLock { $0 } }
+    /// The edited images, titles and sources `importEditedImages` was given, per call (#5, part 3).
+    var editedImports: [(items: [EditedImage], title: String, source: DocumentSource)] {
+        editedCalls.withLock { $0 }
+    }
 
     func importImages(_ items: [Data], fileName: String, title: String?, source: DocumentSource) async
         -> ImageImportResult
@@ -42,11 +47,11 @@ final class StubImporter: DocumentImporting {
         return imagesResult
     }
 
-    /// The edited import of the cleanup (#5) answers like `importImages`; nothing in the app calls it yet.
+    /// The cleanup's edited import (#5, part 3) answers like `importImages`.
     func importEditedImages(_ items: [EditedImage], title: String, source: DocumentSource) async
         -> ImageImportResult
     {
-        imageCalls.withLock { $0.append((items.map(\.data), title, source)) }
+        editedCalls.withLock { $0.append((items, title, source)) }
         return imagesResult
     }
 
@@ -270,59 +275,122 @@ struct ImportControllerTests {
         }
     }
 
-    /// Photos picked together (part 3): one import of their bytes in selection order, titled with the time.
-    @Test func photosAreImportedTogetherInTheirOrderWithAPhotoTitle() async throws {
+    /// Photos picked together (#5, part 3, plan test 17): they open the cleanup, a page per photo in selection
+    /// order, and nothing is imported until Save; Save imports the kept pages as one edited import, titled with the
+    /// time, which opens (PQ1).
+    @Test func photosOpenTheCleanupAndSaveImportsThemTogetherWithAPhotoTitle() async throws {
         let id = UUID()
         let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id)))
         let library = LibraryModel(source: SnapshotSource([Self.row(id)]))
         let controller = ImportController(
-            importer: importer, reader: StubReader(), library: library, now: { Self.date })
-        let photos = ["eins", "zwei", "drei"].map { StubPhoto(data: Data($0.utf8)) }
+            importer: importer, reader: StubReader(), library: library, detector: StubPageDetector(),
+            now: { Self.date })
+        let bytes = ["eins", "zwei", "drei"].map(CleanupPhotos.photo)
 
-        let report = await controller.importPhotos(photos)
+        let picked = await controller.importPhotos(bytes.map { StubPhoto(data: $0) })
 
-        let call = try #require(importer.imageImports.first)
-        #expect(importer.imageImports.count == 1)
-        #expect(call.items == ["eins", "zwei", "drei"].map { Data($0.utf8) })
+        #expect(picked.entries.isEmpty, "nothing imported before Save")
+        #expect(importer.imageImports.isEmpty && importer.editedImports.isEmpty)
+        let cleanup = try #require(controller.cleanup)
+        #expect(cleanup.pages.map(\.image) == [0, 1, 2])
+        #expect(cleanup.images == bytes)
+
+        // Save closes the sheet first and imports once it is gone (the sheet's onDismiss).
+        controller.closeCleanupForSave()
+        #expect(controller.cleanup == nil)
+        #expect(controller.isSavingPhotos, "“Saving photos…” while the import runs")
+        #expect(importer.editedImports.isEmpty, "nothing imported while the sheet closes")
+        let report = await controller.importSavedCleanup()
+        #expect(!controller.isSavingPhotos)
+        #expect(await controller.importSavedCleanup().entries.isEmpty, "imported once")
+
+        let call = try #require(importer.editedImports.first)
+        #expect(importer.editedImports.count == 1)
+        #expect(importer.imageImports.isEmpty, "not the unedited import")
+        #expect(call.items.map(\.data) == bytes)
         #expect(call.title == ImportController.photoTitle(at: Self.date))
+        #expect(call.source == .image)
         #expect(report.entries.map(\.outcome) == [.imported(instanceID: id)])
+        #expect(controller.cleanup == nil)
         #expect(library.selection == .inbox)
         #expect(library.selectedDocumentID == id, "one new document opens (PQ1)")
         #expect(controller.notices.shown == nil, "nothing to report (PQ4)")
     }
 
-    /// A photo Photos cannot hand over is left out of the import and counted with the ones the importer
-    /// could not decode.
-    @Test func aPhotoThatIsNotHandedOverIsLeftOutAndCounted() async throws {
+    /// A photo Photos cannot hand over, or one that is no image, is not in the cleanup and is counted, after
+    /// Save, with the ones the importer could not decode.
+    @Test func aPhotoThatIsNotHandedOverOrNotAnImageIsLeftOutAndCounted() async throws {
         let id = UUID()
         let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id), leftOut: 1))
         let controller = ImportController(
-            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([Self.row(id)])))
+            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([Self.row(id)])),
+            detector: StubPageDetector())
+        let (first, last) = (CleanupPhotos.photo("eins"), CleanupPhotos.photo("vier"))
 
-        let report = await controller.importPhotos([
-            StubPhoto(data: Data("eins".utf8)), StubPhoto(data: nil), StubPhoto(fails: true),
-            StubPhoto(data: Data("vier".utf8)),
+        await controller.importPhotos([
+            StubPhoto(data: first), StubPhoto(data: nil), StubPhoto(fails: true),
+            StubPhoto(data: Data("kein Bild".utf8)), StubPhoto(data: last),
         ])
+        #expect(controller.cleanup?.images.count == 3, "the bytes handed over")
+        #expect(controller.cleanup?.pages.map(\.image) == [0, 2], "a page for each image")
+        let report = await controller.saveCleanup()
 
-        #expect(importer.imageImports.first?.items == [Data("eins".utf8), Data("vier".utf8)])
-        #expect(report.entries.map(\.leftOut) == [3])
+        #expect(importer.editedImports.first?.items.map(\.data) == [first, last])
+        #expect(report.entries.map(\.leftOut) == [4])
         let notice = try #require(controller.notices.shown)
-        #expect(notice.message == String(localized: "\(3) photos could not be read and were left out."))
+        #expect(notice.message == String(localized: "\(4) photos could not be read and were left out."))
     }
 
-    @Test func noPhotoHandedOverIsOneFailureAndImportsNothing() async throws {
+    /// Review 5867292360, finding 3: a Save whose sheet never reported its dismissal is imported when the next pick
+    /// opens, before that pick's cleanup, and never by the next sheet's dismissal (here after its Cancel).
+    @Test func aSaveWhoseSheetDidNotReportItsDismissalIsImportedBeforeTheNextPick() async throws {
+        let id = UUID()
+        let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id)))
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([Self.row(id)])),
+            detector: StubPageDetector())
+        let (first, second) = (CleanupPhotos.photo("eins"), CleanupPhotos.photo("zwei"))
+
+        await controller.importPhotos([StubPhoto(data: first)])
+        controller.closeCleanupForSave()
+        #expect(importer.editedImports.isEmpty, "no dismissal reported yet")
+
+        await controller.importPhotos([StubPhoto(data: second)])
+        #expect(importer.editedImports.map { $0.items.map(\.data) } == [[first]], "the first Save, before the new pick")
+        #expect(controller.cleanup?.images == [second])
+
+        controller.cancelCleanup()
+        await controller.importSavedCleanup()
+        #expect(importer.editedImports.count == 1, "the second sheet's Cancel imports nothing")
+    }
+
+    @Test func noPhotoHandedOverIsOneFailureAndOpensNoCleanup() async throws {
         let importer = StubImporter()
         let controller = ImportController(
             importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([])),
-            now: { Self.date })
+            detector: StubPageDetector(), now: { Self.date })
 
         let report = await controller.importPhotos([StubPhoto(data: nil), StubPhoto(fails: true)])
 
-        #expect(importer.imageImports.isEmpty)
+        #expect(controller.cleanup == nil)
+        #expect(importer.imageImports.isEmpty && importer.editedImports.isEmpty)
         #expect(report.entries.map(\.outcome) == [.failed(.couldNotRead)])
         #expect(report.entries.map(\.fileName) == [ImportController.photoTitle(at: Self.date)])
         #expect(controller.notices.shown != nil)
         #expect(await controller.importPhotos([]).entries.isEmpty, "an empty pick is no batch")
+    }
+
+    /// Photos handed over that are no images: one failure, no cleanup.
+    @Test func noReadablePhotoIsOneFailureAndOpensNoCleanup() async throws {
+        let controller = ImportController(
+            importer: StubImporter(), reader: StubReader(), library: LibraryModel(source: SnapshotSource([])),
+            detector: StubPageDetector(), now: { Self.date })
+
+        let report = await controller.importPhotos([StubPhoto(data: Data("kein Bild".utf8))])
+
+        #expect(controller.cleanup == nil)
+        #expect(report.entries.map(\.outcome) == [.failed(.unreadableImage)])
+        #expect(controller.notices.shown != nil)
     }
 
     /// The files picker, ⌘O and a drop accept images as well as PDFs (part 3).
