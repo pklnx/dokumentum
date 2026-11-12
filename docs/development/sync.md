@@ -156,8 +156,9 @@ Sections:
 
 ## Run 1 (merge gate of #31 part 2; about 3 hours, in two or three sittings)
 
-Order: **0, S1–S3, U1, Q** (DW1), then **C, T, K, L, R** (DW2), then **U2, U3**. If #8 part 2 (the classifier, #150)
-is merged into the build used, M1/M2 of run 2 join here (P5 of #31).
+Order: **0, S1–S3, U1, Q** (DW1), then **C, T, K, L, R** (DW2), then **M1, M2**, then **U2, U3**. The classifier
+(#8 parts 1 and 2, #146 and #150) is in this build, so the cases of run 2 join run 1 (P5 of #31); they are described
+under "Run 2" below and belong to #8's Done-when, not to DW2.
 
 **R0 first, before anything else on a fresh launch:** open the Sync lab on both devices and write down "Re-queue
 flag" (set or not set) for each. Then let both apps run once with the store loaded.
@@ -264,11 +265,15 @@ same answer and the index state).
      second Apple Account that is not the maintainer's own; without one, step 3 is recorded as not run.
   4. Record what happened to the local documents after each step (kept, removed, re-downloaded).
 
-## Run 2 (after #8 part 2; about 30 minutes)
+## Run 2 (M1, M2; about 30 minutes, run within run 1 on this build)
 
-Classification against an edit on the other device (#8 M3, its review N1, Done-when item 3). It needs a build in which
-the processing queue classifies, which is #8 part 2 (#150); with #8 part 1 alone no document is ever classified.
-Run it before the first TestFlight build. No takeover, so no launch argument.
+Classification against an edit on the other device (#8 M3, its review N1, Done-when item 3). It needs a build in
+which the processing queue classifies, which is #8 part 2 (#150); with #8 part 1 alone no document is ever
+classified. Both are on `main` and in the part-2 PR head, so M1 and M2 run within run 1, after R and before U2/U3 (P5
+of #31); if they are skipped there, they run before the first TestFlight build. No takeover, so no launch argument.
+That A classified shows in A's Sync lab: "Last run" reads `classified 1` right after that run, and the document's row
+gains the suggested correspondent or type. If the row stays without suggestions (the on-device model unavailable on
+A), record that and stop the case.
 
 - **M1:** A turns on the hold and creates a *text document* (its first page reads like a letter: "Stadtwerke
   Musterstadt", a date, an amount). Once B shows it, B goes offline and changes the title. A turns the hold off; A
