@@ -4,8 +4,10 @@ import SwiftUI
 /// The app's settings (#8, part 3): the Mac's Settings window (⌘,) and, on the iPhone, a sheet from the sidebar's
 /// toolbar (`SettingsButton`). One section so far, "Suggestions".
 ///
-/// The availability note and the footer are primary text in callout medium: secondary text in a grouped form's footer
-/// is below 4.5:1 in light mode on the Mac (the same measurement as the sidebar footer, #74), and the Mac audit fails
+/// Below the switch and its availability note come what suggestions do, the privacy statement and the per-device
+/// consequence (`about`): on the Mac in the section's footer, on the iPhone in a row without a background below the
+/// section. The note and these texts are primary text in callout medium: secondary text in a grouped form's footer is
+/// below 4.5:1 in light mode on the Mac (the same measurement as the sidebar footer, #74), and the Mac audit fails
 /// smaller text whatever its contrast.
 struct SettingsView: View {
     let model: SuggestionSettings

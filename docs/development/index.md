@@ -605,7 +605,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     model unavailable there is never classified, also not by the other device, and a switch turned on later does not
     reach documents already `done`. Turning the switch off finishes documents waiting in `classify` on this device in
     `done` without suggestions at the next run (the settings request one); a request already running finishes and
-    writes its answer. The settings say so in their footer.
+    writes its answer. The settings say so below the switch (a row below the section on the iPhone, the section's
+    footer on the Mac).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 
@@ -651,15 +652,20 @@ the state (`documentDetail.processing.pending|running|classify|failed`, `documen
 scene) and, on the iPhone, a sheet from the sidebar's toolbar (gear, `settings.open`, "Done" `settings.done`) show
 `SettingsView` with one section, "Suggestions": the switch (`settings.suggestions.switch`), under it a note on the
 model's availability (`settings.suggestions.availability`: getting ready, or "Not available:" with the reason: the
-device is not eligible, Apple Intelligence is off with where to turn it on, or another reason), and a footer with what
-suggestions do, the privacy statement (`settings.suggestions.privacy`) and the per-device consequence (N8). The app's
+device is not eligible, Apple Intelligence is off with where to turn it on, or another reason), and below it what
+suggestions do, the privacy statement (`settings.suggestions.privacy`) and the per-device consequence (N8): on the
+Mac in the section's footer, on the iPhone in a row without a background below the section (in the footer the iPhone
+audit reported "Dynamic Type font sizes are partially unsupported" on them, #139). The app's
 one `SuggestionSettings` holds the switch (`ClassificationSettings`, the key the queue reads; a change requests a
 queue run) and the classifier's availability, the same value the queue decides on; a settings view follows its changes
 while it is shown and reads it again when it appears. While the model is unavailable the switch is disabled and keeps
-its stored value; while it is getting ready the switch works. The note and the footer are primary text, medium weight
-(the audit fails regular-weight and secondary text in light on the Mac). An in-memory launch (tests, UI tests) keeps
-the switch in a suite of its own (`DokumentumApp.inMemorySettingsSuite`) that each such launch empties, so a UI test
-never changes the device's real setting. `-UITestClassifierAvailability <case>` (Debug builds: `available`, `notReady`,
+its stored value; while it is getting ready the switch works. The note and the texts below are primary text, medium weight
+(the audit fails regular-weight and secondary text in light on the Mac). The suite is `DokumentumApp.settingsSuite`:
+a store on disk keeps the switch in the queue's suite (the device's real setting; `SuggestionSettingsTests` pins it),
+an in-memory launch (unit tests, `-UITestSeed`, `-UITestEmptyStore`) in a suite of its own
+(`DokumentumApp.inMemorySettingsSuite`) that each such launch empties, so an in-memory launch never changes the
+device's real setting. A `-UITestLocalStore` launch is on disk and uses the real setting; no UI test turns the switch
+there. `-UITestClassifierAvailability <case>` (Debug builds: `available`, `notReady`,
 `deviceNotEligible`, `appleIntelligenceNotEnabled`, `other`) fixes the classifier's availability for the queue and the
 settings; `LibrarySmokeTests` uses it for the disabled switch with its reason and for the working switch. On the
 Mac it opens a document first: the audit covers the library window behind the Settings window too, and its "No
