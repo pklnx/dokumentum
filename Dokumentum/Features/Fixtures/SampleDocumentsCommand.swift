@@ -97,6 +97,7 @@
     /// The Mac's Debug menu.
     struct DebugCommands: Commands {
         @FocusedValue(\.addSampleDocuments) private var addSampleDocuments
+        @FocusedValue(\.runSearchBenchmark) private var runSearchBenchmark
 
         var body: some Commands {
             CommandMenu(Text(verbatim: "Debug")) {
@@ -106,6 +107,13 @@
                     Text(verbatim: "Add Sample Documents")
                 }
                 .disabled(addSampleDocuments == nil)
+                // The search benchmark (#7, part 2) on its own in-memory store, never the window's.
+                Button {
+                    runSearchBenchmark?()
+                } label: {
+                    Text(verbatim: "Run Search Benchmark")
+                }
+                .disabled(runSearchBenchmark == nil)
             }
         }
     }

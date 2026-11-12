@@ -58,6 +58,22 @@ struct SearchIndexTests {
         #expect(numbers(index.search("rechnungen")) == [])
     }
 
+    /// The threshold counts characters, not UTF-8 bytes (review of #125, N1): `θην` is 3 characters and 6 bytes.
+    @Test func theInfixThresholdCountsCharactersOfMultiByteTerms() {
+        let index = Self.index(texts: [1: "Αθήνα"])
+        #expect(numbers(index.search("θην")) == [])
+        #expect(numbers(index.search("θηνα")) == [1])
+        #expect(numbers(index.search("αθην")) == [1])
+    }
+
+    /// The threshold applies to the word as typed, for every alternative (review of #125, N2): "Mül" (3) also
+    /// tries `muel` (4), which must not infix-match "Schmueller", just as `mul` does not infix-match "Schmüller".
+    @Test func theInfixThresholdReadsTheTypedLengthForEveryAlternative() {
+        let index = Self.index(texts: [1: "Schmueller", 2: "Schmüller", 3: "Müller", 4: "Mueller"])
+        #expect(numbers(index.search("Mül")) == [3, 4])
+        #expect(numbers(index.search("Müll")) == [1, 2, 3, 4])
+    }
+
     @Test func numbersAndCodesAreFoundByTheirParts() {
         let index = Self.index(texts: [1: "Datum 12.03.2024, Kunde ABC-123456", 2: "Datum 13.03.2023"])
         #expect(numbers(index.search("12.03.2024")) == [1])
