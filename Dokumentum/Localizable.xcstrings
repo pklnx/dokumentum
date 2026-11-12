@@ -262,7 +262,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nach der Texterkennung schlägt Apple Intelligence Titel, Korrespondent, Dokumenttyp, Tags und Datum vor. Vorschläge füllen nur leere Felder und ändern nichts, was eingegeben wurde."
+            "value" : "Nach der Texterkennung schlägt Apple Intelligence Titel, Korrespondent, Dokumenttyp, Tags und Datum vor. Vorschläge füllen nur leere Felder und ändern nichts, was du eingegeben hast."
           }
         }
       }
@@ -1063,7 +1063,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Es lässt sich in den Einstellungen unter „Apple Intelligence & Siri“ einschalten."
+            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Schalte es in den Einstellungen unter „Apple Intelligence & Siri“ ein."
           }
         }
       }
@@ -1074,7 +1074,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Es lässt sich in den Systemeinstellungen unter „Apple Intelligence & Siri“ einschalten."
+            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Schalte es in den Systemeinstellungen unter „Apple Intelligence & Siri“ ein."
           }
         }
       }

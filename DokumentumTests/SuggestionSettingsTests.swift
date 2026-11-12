@@ -174,7 +174,7 @@ struct SuggestionSettingsTests {
             (
                 .unavailable(.appleIntelligenceNotEnabled),
                 "Not available: Apple Intelligence is turned off. Turn it on in \(settings.0) > Apple Intelligence & Siri.",
-                "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Es lässt sich in den \(settings.1) unter „Apple Intelligence & Siri“ einschalten."
+                "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Schalte es in den \(settings.1) unter „Apple Intelligence & Siri“ ein."
             ),
             (
                 .unavailable(.other), "Not available: Apple Intelligence cannot be used on \(device.0) right now.",
@@ -206,7 +206,7 @@ struct SuggestionSettingsTests {
             (
                 SuggestionSettingsText.explanation,
                 "After text recognition, Apple Intelligence suggests a title, correspondent, document type, tags and date. Suggestions only fill empty fields and never change what you entered.",
-                "Nach der Texterkennung schlägt Apple Intelligence Titel, Korrespondent, Dokumenttyp, Tags und Datum vor. Vorschläge füllen nur leere Felder und ändern nichts, was eingegeben wurde."
+                "Nach der Texterkennung schlägt Apple Intelligence Titel, Korrespondent, Dokumenttyp, Tags und Datum vor. Vorschläge füllen nur leere Felder und ändern nichts, was du eingegeben hast."
             ),
             (
                 SuggestionSettingsText.privacy,
