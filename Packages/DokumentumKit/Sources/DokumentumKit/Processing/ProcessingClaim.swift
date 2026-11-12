@@ -94,12 +94,13 @@ public enum ProcessingDecision: Equatable, Sendable {
 /// | `done` | any | skip |
 /// | `failed` | any | skip, unless this device's own failure counter is below the limit (3): then process (claim) |
 /// | `unknown` | any | skip, never written |
-/// | `pending`, `processing` | none, or this device | process (keep a fresh own claim, else claim) |
-/// | `pending`, `processing` | another device, not expired | wait until it expires |
-/// | `pending`, `processing` | another device, expired | take over |
+/// | `pending`, `processing`, `classify` | none, or this device | process (keep a fresh own claim, else claim) |
+/// | `pending`, `processing`, `classify` | another device, not expired | wait until it expires |
+/// | `pending`, `processing`, `classify` | another device, expired | take over |
 ///
 /// Before the table: `unknown` is skipped first (even in the trash), then `done`, a trashed document, and a
-/// document without its file or its text record (it waits; processing never creates them). After it, every
+/// document without its file or its text record (it waits; processing never creates them). `classify` (#8, the
+/// classification step after the text) needs only the text record, not the file: its stage reads the text. After it, every
 /// "process" waits while this device's backoff runs (`retryNotBefore`, T9): `wait(.retryAfter(date))`.
 ///
 /// **Another device's claim expires** (T8) when its **age** (this device's clock minus `claimedAt`, which the
@@ -134,11 +135,11 @@ public enum ProcessingClaimRules {
         switch input.state {
         case .unknown: return .skip(.unknownState)
         case .done: return .skip(.done)
-        case .failed, .pending, .processing: break
+        case .failed, .pending, .processing, .classify: break
         }
         if input.isTrashed { return .skip(.trashed) }
         if input.state == .failed && failures >= failureLimit { return .skip(.failedOnThisDevice) }
-        if !input.hasFile { return .wait(.noFile) }
+        if input.state != .classify && !input.hasFile { return .wait(.noFile) }
         if !input.hasText { return .wait(.noText) }
         let claim: ProcessingDecision.ClaimWrite
         if input.state == .failed {

@@ -153,7 +153,8 @@ struct ProcessingRetryTests {
         defer { UserDefaults().removePersistentDomain(forName: store.defaultsSuite ?? "") }
         let document = UUID()
         let tracker = StageTracker()
-        let id = tracker.begin(attempt: store.begin(document, at: processingStart), outcome: FirstOutcome())
+        let id = tracker.begin(
+            attempt: store.begin(document, at: processingStart), counter: store, outcome: FirstOutcome())
         #expect(tracker.isRunning(document: document))
         #expect(!tracker.isRunning(document: UUID()))
 

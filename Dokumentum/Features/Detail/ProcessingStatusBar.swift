@@ -22,7 +22,8 @@ struct ProcessingStatusBar: View {
             case .pending: self = .pending
             case .processing: self = .processing
             case .failed: self = .failed
-            case .done, .unknown: return nil
+            // `classify` gets its own line in part 3 of #8 (#139); until then it shows none, like a processed one.
+            case .done, .classify, .unknown: return nil
             }
         }
 
