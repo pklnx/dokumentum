@@ -1151,7 +1151,8 @@ requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app
 (`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
 (`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
 iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
-is set. A failed run uploads its `.xcresult` bundles as an artifact. The workflow needs no secrets and only
+is set. The tests run serially (`-parallel-testing-enabled NO`) and with test timeouts (300 s a test, 600 s at most):
+in parallel the hosted app tests stalled on these runners, in both jobs, with no test failing. A failed or cancelled run uploads its `.xcresult` bundles as an artifact. The workflow needs no secrets and only
 `contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.
 
 ### Xcode Cloud
