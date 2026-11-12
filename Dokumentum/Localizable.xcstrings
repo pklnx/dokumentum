@@ -1598,7 +1598,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Der Titel konnte nicht gesichert werden."
+            "value" : "Der Titel konnte nicht gespeichert werden."
           }
         }
       }
@@ -1962,7 +1962,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%@“ konnte nicht im Archiv gesichert werden."
+            "value" : "„%@“ konnte nicht im Archiv gespeichert werden."
           }
         },
         "en" : {
