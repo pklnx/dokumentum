@@ -661,7 +661,9 @@ its stored value; while it is getting ready the switch works. The note and the f
 the switch in a suite of its own (`DokumentumApp.inMemorySettingsSuite`) that each such launch empties, so a UI test
 never changes the device's real setting. `-UITestClassifierAvailability <case>` (Debug builds: `available`, `notReady`,
 `deviceNotEligible`, `appleIntelligenceNotEnabled`, `other`) fixes the classifier's availability for the queue and the
-settings; `LibrarySmokeTests` uses it for the disabled switch with its reason and for the working switch.
+settings; `LibrarySmokeTests` uses it for the disabled switch with its reason and for the working switch. On the
+Mac it opens a document first: the audit covers the library window behind the Settings window too, and its "No
+document selected" placeholder is the audit's known false positive in light.
 
 **Fixtures.** `Dokumentum/Features/Fixtures/` is `#if DEBUG` only, so a Release build contains no sample data
 (checked with `strings` on its binary). `FixtureCatalog` has the sample documents, with fixed `id`s and

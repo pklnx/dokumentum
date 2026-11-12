@@ -183,6 +183,12 @@ final class LibrarySmokeTests: XCTestCase {
             goBack(ui)
             ui.activate("settings.open", file: file, line: line)
         #else
+            // The audit covers the library window behind the Settings window too: a PDF there, not "No document
+            // selected", whose text the audit fails in light whatever its contrast (a known false positive, #89).
+            ui.activate(Self.documentRow(Self.electricityBill), file: file, line: line)
+            XCTAssertTrue(
+                ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear", file: file,
+                line: line)
             ui.app.typeKey(",", modifierFlags: .command)
         #endif
         let toggle = ui.element("settings.suggestions.switch")
