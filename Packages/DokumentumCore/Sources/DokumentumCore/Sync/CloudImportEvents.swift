@@ -14,28 +14,24 @@ public struct CloudImportEvent: Sendable, Equatable {
 /// The ended imports of the CloudKit mirroring, from `NSPersistentCloudKitContainer.eventChangedNotification`
 /// (as the predecessor's `TagCycleRepair` observed them). A thin mapping: an `NSPersistentCloudKitContainer.Event`
 /// cannot be constructed in a test, so `RepairScheduler` takes the mapped stream and its tests inject their own.
-/// Whether SwiftData on 27 posts the notification is unverified until #2's part 4.
+/// Whether SwiftData on 27 posts the notification is unverified until #2's part 4 (#31, run 1, step 0).
 public enum CloudImportEvents {
     public static func stream(center: NotificationCenter = .default) -> AsyncStream<CloudImportEvent> {
-        let (stream, continuation) = AsyncStream<CloudImportEvent>.makeStream()
-        let token = center.addObserver(
-            forName: NSPersistentCloudKitContainer.eventChangedNotification, object: nil, queue: nil
-        ) { notification in
-            if let event = importEnd(of: notification) { continuation.yield(event) }
+        NotificationStream.make(name: NSPersistentCloudKitContainer.eventChangedNotification, center: center) {
+            importEnd(of: $0)
         }
-        let observer = Observer(token: token, center: center)
-        continuation.onTermination = { _ in observer.remove() }
-        return stream
     }
 
     /// The import end a notification reports; `nil` for setup and export events, a running import, or a
-    /// notification without an event.
+    /// notification without an event. Through the plain-value mapping the sync status shares (`CloudSyncEvents`).
     public static func importEnd(of notification: Notification) -> CloudImportEvent? {
-        guard
-            let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
-                as? NSPersistentCloudKitContainer.Event
-        else { return nil }
-        return importEnd(type: event.type, endDate: event.endDate, succeeded: event.succeeded)
+        CloudSyncEvents.event(of: notification).flatMap(importEnd(of:))
+    }
+
+    /// The filter over a mapped event.
+    public static func importEnd(of event: CloudSyncEvent) -> CloudImportEvent? {
+        guard event.kind == .importing, event.ended != nil else { return nil }
+        return CloudImportEvent(succeeded: event.succeeded)
     }
 
     /// The filter itself, over the event's plain values: only an import that has ended counts. A setup or an
@@ -44,27 +40,9 @@ public enum CloudImportEvents {
     public static func importEnd(
         type: NSPersistentCloudKitContainer.EventType, endDate: Date?, succeeded: Bool
     ) -> CloudImportEvent? {
-        guard type == .import, endDate != nil else { return nil }
-        return CloudImportEvent(succeeded: succeeded)
-    }
-
-    private final class Observer: @unchecked Sendable {
-        // Read and cleared under `lock`.
-        private var token: (any NSObjectProtocol)?
-        private let center: NotificationCenter
-        private let lock = NSLock()
-
-        init(token: any NSObjectProtocol, center: NotificationCenter) {
-            self.token = token
-            self.center = center
-        }
-
-        func remove() {
-            let token = lock.withLock {
-                defer { self.token = nil }
-                return self.token
-            }
-            if let token { center.removeObserver(token) }
-        }
+        importEnd(
+            of: CloudSyncEvent(
+                kind: CloudSyncEvents.kind(of: type), started: endDate ?? .distantPast, ended: endDate,
+                succeeded: succeeded))
     }
 }

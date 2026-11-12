@@ -121,9 +121,10 @@ extension imports neither store nor model (see 3.4).
 - **Schema versions from day one** (`VersionedSchema`, `SchemaMigrationPlan`),
   with a rule: a CloudKit schema change is additive, and deploying to
   Production is a maintainer step (it cannot be undone).
-- **Sync status** is shown: last import/export event, iCloud account
-  state, account change or sign-out, "iCloud storage full". The app works
-  fully offline.
+- **Sync status** is shown: one line in the sidebar footer (last
+  import/export event, iCloud account state, account change or sign-out,
+  "iCloud storage full"), and an "iCloud Sync" detail opened from it. The
+  app works fully offline.
 - **Frozen enums.** Values that sync (`processingState`, `textSource`,
   `source`) are stored as raw `String`s and mapped to a fallback when a
   value is unknown, so an older TestFlight build on the other device never

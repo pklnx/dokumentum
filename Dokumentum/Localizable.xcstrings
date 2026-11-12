@@ -234,6 +234,17 @@
         }
       }
     },
+    "Account" : {
+      "comment" : "Sync status detail: label of the iCloud account's state.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account"
+          }
+        }
+      }
+    },
     "Add" : {
       "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
       "localizations" : {
@@ -273,6 +284,17 @@
         }
       }
     },
+    "Available" : {
+      "comment" : "Sync status detail, Account: signed in and available.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verfügbar"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
       "localizations" : {
@@ -280,6 +302,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Abbrechen"
+          }
+        }
+      }
+    },
+    "Checking iCloud…" : {
+      "comment" : "Sidebar footer (sync status): CloudKit has not answered yet after the launch.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud wird geprüft …"
+          }
+        }
+      }
+    },
+    "Checking…" : {
+      "comment" : "Sync status detail, Account: CloudKit has not answered yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird geprüft …"
           }
         }
       }
@@ -335,6 +379,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Korrespondenten"
+          }
+        }
+      }
+    },
+    "Could not be checked" : {
+      "comment" : "Sync status detail, Account: the status could not be determined.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konnte nicht geprüft werden"
           }
         }
       }
@@ -639,6 +694,28 @@
         }
       }
     },
+    "Last download" : {
+      "comment" : "Sync status detail: when the last CloudKit import ended.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Letzter Download"
+          }
+        }
+      }
+    },
+    "Last upload" : {
+      "comment" : "Sync status detail: when the last CloudKit export ended.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Letzter Upload"
+          }
+        }
+      }
+    },
     "Library" : {
       "comment" : "Sidebar section with Inbox and All Documents.",
       "localizations" : {
@@ -679,6 +756,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Name"
+          }
+        }
+      }
+    },
+    "Never" : {
+      "comment" : "Sync status detail: no download or upload yet in this session.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch nie"
           }
         }
       }
@@ -760,6 +848,17 @@
         }
       }
     },
+    "No account" : {
+      "comment" : "Sync status detail, Account: no iCloud account.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Account"
+          }
+        }
+      }
+    },
     "No document selected" : {
       "comment" : "The detail column without an open document.",
       "localizations" : {
@@ -778,6 +877,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keine Dokumente"
+          }
+        }
+      }
+    },
+    "No iCloud account: documents stay on this device" : {
+      "comment" : "Sidebar footer (sync status): no iCloud account is signed in.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein iCloud-Account: Dokumente bleiben auf diesem Gerät"
           }
         }
       }
@@ -806,6 +916,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OK"
+          }
+        }
+      }
+    },
+    "Offline: changes sync when the connection is back" : {
+      "comment" : "Sidebar footer (sync status): the last sync failed because there is no network.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline: Änderungen werden synchronisiert, sobald eine Verbindung besteht"
           }
         }
       }
@@ -952,6 +1073,17 @@
         }
       }
     },
+    "Restricted" : {
+      "comment" : "Sync status detail, Account: iCloud is restricted.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eingeschränkt"
+          }
+        }
+      }
+    },
     "Saving scan…" : {
       "comment" : "Shown at the bottom of the window while a finished scan is turned into a document.",
       "localizations" : {
@@ -1082,6 +1214,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tags"
+          }
+        }
+      }
+    },
+    "Temporarily unavailable" : {
+      "comment" : "Sync status detail, Account: temporarily unavailable.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorübergehend nicht verfügbar"
           }
         }
       }
@@ -1268,6 +1411,116 @@
         }
       }
     },
+    "iCloud Sync" : {
+      "comment" : "Title of the sync status detail, opened from the sidebar footer.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Sync"
+          }
+        }
+      }
+    },
+    "iCloud account changed" : {
+      "comment" : "Sidebar footer (sync status): another iCloud account signed in while the app was running.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Account gewechselt"
+          }
+        }
+      }
+    },
+    "iCloud data was reset: documents on this device are uploaded again" : {
+      "comment" : "Sidebar footer (sync status): the app's iCloud data was deleted or reset.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Daten wurden zurückgesetzt: Dokumente auf diesem Gerät werden neu hochgeladen"
+          }
+        }
+      }
+    },
+    "iCloud is restricted on this device" : {
+      "comment" : "Reason in “Sync off: %@”: iCloud is restricted (Screen Time, device management).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud ist auf diesem Gerät eingeschränkt"
+          }
+        }
+      }
+    },
+    "iCloud is temporarily unavailable; check your Apple Account in Settings" : {
+      "comment" : "Reason in “Sync off: %@” (iPhone): the account needs attention in the Settings app.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud ist vorübergehend nicht verfügbar; prüfe deinen Apple Account in den Einstellungen"
+          }
+        }
+      }
+    },
+    "iCloud is temporarily unavailable; check your Apple Account in System Settings" : {
+      "comment" : "Reason in “Sync off: %@” (Mac): the account needs attention in System Settings.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud ist vorübergehend nicht verfügbar; prüfe deinen Apple Account in den Systemeinstellungen"
+          }
+        }
+      }
+    },
+    "iCloud storage is full: new documents are not uploaded" : {
+      "comment" : "Sidebar footer (sync status, #31): CloudKit reported that the iCloud storage is full.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Speicher ist voll: neue Dokumente werden nicht hochgeladen"
+          }
+        }
+      }
+    },
+    "iCloud sync on · last synced %@" : {
+      "comment" : "Sidebar footer (sync status): sync is on; the argument is a relative time, e.g. “5 minutes ago”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Sync an · zuletzt synchronisiert %@"
+          }
+        }
+      }
+    },
+    "iCloud sync on · not synced yet" : {
+      "comment" : "Sidebar footer (sync status): sync is on, nothing was downloaded or uploaded yet in this session.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud-Sync an · noch nicht synchronisiert"
+          }
+        }
+      }
+    },
+    "iCloud sync problem: retrying automatically" : {
+      "comment" : "Sidebar footer (sync status): another sync error; the system retries.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Problem beim iCloud-Sync: wird automatisch wiederholt"
+          }
+        }
+      }
+    },
     "in inbox" : {
       "comment" : "Last part of a list row's VoiceOver label, e.g. “Water bill, 9 May 2026, in inbox”.",
       "localizations" : {
@@ -1308,6 +1561,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "das Archiv konnte nicht geöffnet werden"
+          }
+        }
+      }
+    },
+    "the iCloud account could not be checked" : {
+      "comment" : "Reason in “Sync off: %@”: CloudKit could not determine the account status.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "der iCloud-Account konnte nicht geprüft werden"
           }
         }
       }

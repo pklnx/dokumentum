@@ -59,8 +59,15 @@ enum AccessibilityID {
     /// The iPhone sheet's "Done".
     static let infoDone = "documentInfo.done"
 
-    /// The sidebar footer's "Sync off" line.
+    /// The sidebar footer's "Sync off" line of a store that does not sync.
     static let syncOffLine = "sidebar.syncOff"
+    /// The sidebar footer's line of a CloudKit store (#31), and its "iCloud Sync" detail: the view, its line, the
+    /// CloudKit code of a problem, and the iPhone sheet's "Done".
+    static let syncStatusLine = "sidebar.syncStatus"
+    static let syncStatusDetail = "syncStatus.detail"
+    static let syncStatusDetailLine = "syncStatus.detail.line"
+    static let syncStatusDetailCode = "syncStatus.detail.code"
+    static let syncStatusDone = "syncStatus.detail.done"
 
     /// The list toolbar's "+" menu, its "Scan…" (#5, part 2), "Files…" and "Photos…" items, and the import
     /// notice's OK button (#4, parts 2 and 3).

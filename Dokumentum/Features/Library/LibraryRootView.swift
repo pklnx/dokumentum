@@ -14,28 +14,33 @@ struct LibraryRootView: View {
     @State private var trash: LibraryTrash
     /// The window's imports (#4, part 2), on the app's one importer.
     @State private var importController: ImportController
-    /// The footer's reason and the debug command's confirmation come from it.
+    /// The debug command's confirmation comes from it.
     let launchStore: LaunchStore
+    /// The sidebar footer's sync line (#31).
+    let syncStatus: SyncStatusSource?
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
     /// - Parameters:
     ///   - searcher: the app's one search index (#7, part 2); every window's model follows its updates.
     ///   - retrier: "Try again" for a failed document (#6, P2).
+    ///   - syncStatus: the footer's sync line (#31); without one, the store's own (`SyncStatusSource.forLaunch`).
     init(
         source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting,
-        searcher: (any DocumentSearching)? = nil, retrier: (any ProcessingRetrying)? = nil
+        searcher: (any DocumentSearching)? = nil, retrier: (any ProcessingRetrying)? = nil,
+        syncStatus: SyncStatusSource? = nil
     ) {
         let model = LibraryModel(source: source, searcher: searcher, retrier: retrier, loadNow: false)
         _model = State(initialValue: model)
         _trash = State(initialValue: LibraryTrash(model: model))
         _importController = State(initialValue: ImportController(importer: importer, library: model))
         self.launchStore = launchStore
+        self.syncStatus = syncStatus ?? SyncStatusSource.forLaunch(launchStore, monitor: nil)
     }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(model: model, syncOff: launchStore.syncOffReason)
+            SidebarView(model: model, syncStatus: syncStatus)
         } content: {
             DocumentListView(model: model)
         } detail: {

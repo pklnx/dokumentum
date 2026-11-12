@@ -2,8 +2,8 @@ import Foundation
 
 /// Why the sidebar's footer says "Sync off" (plan of #3, part 2; the "Sync off: <reason>" text is #2's P1).
 /// It is derived from the store the app opened, never from a guess about the iCloud account: a CloudKit store
-/// shows no line here, and #31's sync status replaces this later. Kit's `SyncOffReason` is the other half: the
-/// account's state behind a CloudKit store, which #31 shows.
+/// has no reason here and shows #31's sync status instead (`CloudSyncMonitor`). Kit's `SyncOffReason` is the other
+/// half: the account's state behind a CloudKit store.
 public enum StoreSyncOffReason: String, Sendable, CaseIterable {
     /// A build without the CloudKit entitlement (the unsigned Mac build): a local store.
     case noICloudAccess

@@ -32,6 +32,11 @@ struct DokumentumApp: App {
     /// The one search index of the app (plan of #7, part 2, T9), for every store, in-memory ones included; every
     /// window's library follows it. Built at launch off the main actor, then updated from saves and store changes.
     let search: SearchIndexer
+    /// The sync status of a CloudKit store (#31): events and the account; `nil` for every other store, which shows
+    /// its own "Sync off" line. The footer of every window reads it through `syncStatus`.
+    let syncMonitor: CloudSyncMonitor?
+    /// Where the sidebar footer's line comes from.
+    let syncStatus: SyncStatusSource?
     #if os(iOS)
         /// The processing queue's background tasks (plan of #6, part 5): continued processing after a user's import,
         /// the processing task when the app goes to the background. `nil` where `processing` is.
@@ -70,6 +75,16 @@ struct DokumentumApp: App {
             container = ArchiveStore.openAtLaunch(choice)
         #endif
         launchStore = LaunchStore(choice: choice, opened: ArchiveStore.opened ?? .inMemory)
+        // Only a CloudKit store creates the CloudKit container (T3): without the entitlement it traps.
+        let syncMonitor = CloudSyncMonitor.forStore(launchStore.opened, makeProvider: { CloudKitAccountStatus() })
+        self.syncMonitor = syncMonitor
+        #if DEBUG
+            syncStatus = SyncStatusSource.forLaunch(
+                launchStore, monitor: syncMonitor,
+                injected: UITestSyncStatus.status(arguments: ProcessInfo.processInfo.arguments))
+        #else
+            syncStatus = SyncStatusSource.forLaunch(launchStore, monitor: syncMonitor)
+        #endif
         // The repair (#2, part 3) for the stores on disk only: in-memory stores of tests and UI tests never start
         // it. A launch run now, then after store changes and CloudKit imports.
         let storeChanges = choice.isOnDisk ? StoreChangeObserver(container: container) : nil
@@ -150,7 +165,8 @@ struct DokumentumApp: App {
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
                 source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
-                launchStore: launchStore, importer: importer, searcher: search, retrier: retrier
+                launchStore: launchStore, importer: importer, searcher: search, retrier: retrier,
+                syncStatus: syncStatus
             )
             #if os(iOS)
                 .environment(shareQueue)
@@ -159,6 +175,8 @@ struct DokumentumApp: App {
         // A launch is an activation too; the share queue and the processing queue each run one at a time and
         // queue one more run. The background pauses processing on iOS (`ProcessingLifecycle`).
         .onChange(of: scenePhase) { _, phase in
+            // The account may have changed while the app was in the background (#31, T4).
+            if phase == .active { syncMonitor?.sceneBecameActive() }
             #if os(iOS)
                 if phase == .active { shareQueue?.requestRun() }
             #endif
