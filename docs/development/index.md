@@ -515,7 +515,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   `ProcessingScheduler.start`. Tests use a stub (`StubClassifier`); the model never runs in the queue's tests.
   - **The state** `classify` (frozen enum, raw `"classify"`; no schema change). The text result write sets it instead of
     `done` when the classifier is not `unavailable` on this device, the switch is on (`ClassificationSettings`,
-    per-device key `classification.enabled`, default on, read at each decision; its UI is part 3) and the document is
+    per-device key `classification.enabled`, default on, read at each decision; its UI is the settings' "Suggestions"
+    section, see "Settings" under "Library UI") and the document is
     not older than the **cut-off** (P9): `classification.since`, written once, when this device's queue is first set
     up with a classifier (`ProcessingQueue.init`; the app creates it at launch before the share queue or a drop
     imports anything, so a document of that first launch is classified, review A N-c of #146); a document whose
@@ -602,6 +603,13 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     so each test first asks the model one trivial question and is cancelled with the reason when that fails. On the
     development Mac they ran in the macOS
     plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
+  - **The switch's consequences** (#8 part 3; P3, P4, plan review N8): the text result write on the device that
+    recognised the text decides whether a document gets `classify`, so a document added while the switch is off or the
+    model unavailable there is never classified, also not by the other device, and a switch turned on later does not
+    reach documents already `done`. Turning the switch off finishes documents waiting in `classify` on this device in
+    `done` without suggestions at the next run (the settings request one); a request already running finishes and
+    writes its answer. The settings say so below the switch (a row below the section on the iPhone, the section's
+    footer on the Mac).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 
@@ -635,16 +643,42 @@ store on disk every save, a local one too, posts `NSPersistentStoreRemoteChange`
 be forgotten at nearly every read anyway (review N3 of #135). The fixed size keeps the Mac's row
 heights (#81): the hidden measuring copy shows the placeholder and loads nothing, and measures the same height. The
 processing state is shown only in the detail (`ProcessingStatusBar`, above the PDF or its placeholder): "Text
-recognition pending", "Recognising text…" or "Text recognition failed", and for a failed document "Try again"
+recognition pending", "Recognising text…", "Suggesting metadata…" (`classify`, #8 part 3: the text is there and the
+classification step will suggest metadata, on this device or the other) or "Text recognition failed", and for a failed
+document "Try again"
 (`LibraryModel.retryProcessing`, which reads the library again at once); not for a trashed document, which is not
 processed until it is restored. Nothing for a processed document; the rows
 show no state. The line's text is primary on the window's background, not on a material, and its identifier names
-the state (`documentDetail.processing.pending|running|failed`, `documentDetail.processing.retry`).
+the state (`documentDetail.processing.pending|running|classify|failed`, `documentDetail.processing.retry`).
+
+**Settings** (#8, part 3; maintainer decisions P3–P6, plan review N8). The Mac's Settings window (⌘,, the `Settings`
+scene) and, on the iPhone, a sheet from the sidebar's toolbar (gear, `settings.open`, "Done" `settings.done`) show
+`SettingsView` with one section, "Suggestions": the switch (`settings.suggestions.switch`), under it a note on the
+model's availability (`settings.suggestions.availability`: getting ready, or "Not available:" with the reason: the
+device is not eligible, Apple Intelligence is off with where to turn it on, or another reason), and below it what
+suggestions do, the privacy statement (`settings.suggestions.privacy`) and the per-device consequence (N8): on the
+Mac in the section's footer, on the iPhone in a row without a background below the section (in the footer the iPhone
+audit reported "Dynamic Type font sizes are partially unsupported" on them, #139). The app's
+one `SuggestionSettings` holds the switch (`ClassificationSettings`, the key the queue reads; a change requests a
+queue run) and the classifier's availability, the same value the queue decides on; a settings view follows its changes
+while it is shown and reads it again when it appears. While the model is unavailable the switch is disabled and keeps
+its stored value; while it is getting ready the switch works. The note and the texts below are primary text, medium weight
+(the audit fails regular-weight and secondary text in light on the Mac). The suite is `DokumentumApp.settingsSuite`:
+a store on disk keeps the switch in the queue's suite (the device's real setting; `SuggestionSettingsTests` pins it),
+an in-memory launch (unit tests, `-UITestSeed`, `-UITestEmptyStore`) in a suite of its own
+(`DokumentumApp.inMemorySettingsSuite`) that each such launch empties, so an in-memory launch never changes the
+device's real setting. A `-UITestLocalStore` launch is on disk and uses the real setting; no UI test turns the switch
+there. `-UITestClassifierAvailability <case>` (Debug builds: `available`, `notReady`,
+`deviceNotEligible`, `appleIntelligenceNotEnabled`, `other`) fixes the classifier's availability for the queue and the
+settings; `LibrarySmokeTests` uses it for the disabled switch with its reason and for the working switch. On the
+Mac it opens a document first: the audit covers the library window behind the Settings window too, and its "No
+document selected" placeholder is the audit's known false positive in light.
 
 **Fixtures.** `Dokumentum/Features/Fixtures/` is `#if DEBUG` only, so a Release build contains no sample data
 (checked with `strings` on its binary). `FixtureCatalog` has the sample documents, with fixed `id`s and
 `instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read. Each PDF sample gets its
-thumbnail as the importer makes it; the samples are processed except "Medical invoice" (pending), the annual
+thumbnail as the importer makes it; the samples are processed except "Medical invoice" (pending), the letter without
+a title (`classify`, for "Suggesting metadata…"), the annual
 statement with the long title and "Scanned receipt" (failed; the receipt is not a PDF), for the detail's status
 line. `LibrarySmokeTests` audits the failed line over the annual statement's PDF, not over a placeholder, whose
 description is a known false positive of the audit in light.
@@ -708,7 +742,11 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac three issues are accepted, on the iPhone eight, all on the cleanup sheet
+attachment of the run. On the Mac four issues are accepted, on the iPhone eleven: eight on the cleanup sheet, the
+settings sheet's "Done" (`settings.done`, the same system toolbar button as the cleanup sheet's Cancel and Save, for
+Dynamic Type and contrast; `LibrarySmokeTests` measures its contrast, #139) and "Text clipped" on the settings'
+availability note (`settings.suggestions.availability`: it wraps in full at AccessibilityXXXL, checked on
+screenshots; the audit reports the same on the app's wrapping texts without an identifier, #139)
 (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
@@ -727,6 +765,10 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
   `ScanSmokeTests` asserts both. The visible title gives that name already; the menu's `.accessibilityLabel`
   keeps it when the label is only a symbol, whose own name is read otherwise ("Bearbeiten" for
   `slider.horizontal.3`, measured on both devices, #136).
+- `settings.suggestions.availability`, contrast, "Contrast failed": the settings' availability note (#139),
+  primary text in callout medium on the grouped form, its symbol hidden from VoiceOver. In light the audit fails it
+  for "getting ready" and passes the same element for "turned off"; measured 14.13:1 in light (#262626 on #f7f7f7)
+  and 10.14:1 in dark on its own screenshot. `LibrarySmokeTests` measures it in every run (`assertTextContrast`).
 
 On the iPhone (#136):
 - `cleanup.cancel` and `cleanup.save`, contrast, "Contrast failed": the sheet's system toolbar buttons, a glass

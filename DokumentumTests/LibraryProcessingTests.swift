@@ -37,6 +37,10 @@ struct LibraryProcessingTests {
         #expect(
             FixtureCatalog.samples.first { $0.document.processingState == .pending }?.document.title
                 == "Medical invoice")
+        // The letter without a title waits for its suggestions (#8, part 3), for the detail's line.
+        #expect(
+            FixtureCatalog.samples.filter { $0.document.processingState == .classify }.map(\.document.instanceID)
+                == [FixtureCatalog.documentID(5)])
     }
 
     @Test func theStoresRowsCarryTheStateAndTheSourceLoadsTheirThumbnails() async throws {
@@ -91,12 +95,24 @@ struct LibraryProcessingTests {
         #expect(await model.retryProcessing(of: FixtureCatalog.documentID(9)) == nil)
     }
 
-    /// The status line's states: a line for pending, processing and failed; none for done and a newer build's state.
+    /// The status line's states: a line for pending, processing, classify (#8, part 3) and failed; none for done and
+    /// a newer build's state.
     @Test func theStatusLineShowsOnlyTheOpenStates() {
         #expect(ProcessingStatusBar.Status(.pending) == .pending)
         #expect(ProcessingStatusBar.Status(.processing) == .processing)
+        #expect(ProcessingStatusBar.Status(.classify) == .classify)
         #expect(ProcessingStatusBar.Status(.failed) == .failed)
         #expect(ProcessingStatusBar.Status(.done) == nil)
         #expect(ProcessingStatusBar.Status(.unknown) == nil)
+    }
+
+    /// The classify line's words, in English and German, and its identifier.
+    @Test func theClassifyLineSaysThatMetadataIsSuggested() {
+        var text = ProcessingStatusBar.Status.classify.text
+        text.locale = Locale(identifier: "en")
+        #expect(String(localized: text) == "Suggesting metadata…")
+        text.locale = Locale(identifier: "de")
+        #expect(String(localized: text) == "Metadaten werden vorgeschlagen …")
+        #expect(ProcessingStatusBar.Status.classify.identifier == "documentDetail.processing.classify")
     }
 }
