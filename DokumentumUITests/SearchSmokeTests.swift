@@ -55,6 +55,10 @@ final class SearchSmokeTests: XCTestCase {
         XCTAssertFalse(ui.element(Self.documentRow(Self.golfInspection)).exists)
         XCTAssertFalse(ui.element(Self.documentRow(Self.electricityBill)).exists)
         XCTAssertTrue(ui.element("search.indexing").exists, "no “Indexing texts…” line")
+        #if os(macOS)
+            // The line's own pixels reach 4.5:1 (the audit is not stable on text contrast in light, #89).
+            ui.assertTextContrast("search.indexing", in: self)
+        #endif
         ui.attachWindowScreenshot("search-1-no-results", to: self)
 
         // The scope All Documents finds it, and only it.

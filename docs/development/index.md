@@ -823,8 +823,10 @@ Part 3 (#123), in `DocumentListView` and `LibraryModel`:
 - **Empty result:** "No Results for “x”" (or "No Results" for chips alone), `search.empty`; the Mac's
   `PlaceholderView`, the iPhone's `ContentUnavailableView`.
 - **Indexing line:** "Indexing texts… 12 of 40" (`search.indexing`) over the results while the index is
-  `.building` and a search is active (P5). In the primary colour on the list's background; the Mac uses the body
-  font, because the audit failed the line at 10 pt in dark mode ("not high enough unless font size is larger").
+  `.building` and a search is active (P5). In the primary colour on the list's background; the Mac uses 15 pt
+  semibold (`.title3`), because the audit failed the line at 10 pt medium in dark mode ("not high enough unless font
+  size is larger") and at 13 pt medium and semibold in light mode, although its pixels measure 14.94:1.
+  `SearchSmokeTests` also measures its contrast from its pixels (`assertTextContrast`).
 - **Sidebar (P7):** the search stays when another list is chosen on the Mac. On the iPhone it ends when the
   stack goes back to the sidebar (`selection` becomes `nil`).
 - **`-UITestHoldSearchIndex YES`** (Debug, in-memory stores only): the index stops after its first text batch and

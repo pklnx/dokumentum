@@ -222,11 +222,12 @@ struct DocumentListView: View {
         }
     }
 
-    /// Large enough for the audit's contrast check in dark mode: on the Mac it failed the line at 10 pt medium ("not
-    /// high enough unless font size is larger", #123).
+    /// Large and heavy enough for the audit's contrast check: on the Mac it failed the line at 10 pt medium in dark mode
+    /// ("not high enough unless font size is larger"), and at 13 pt medium and 13 pt semibold in light mode although the
+    /// line's pixels measure 14.94:1 (#123); 15 pt semibold passes, as for the placeholders (#89).
     private var indexingLineFont: Font {
         #if os(macOS)
-            .body.weight(.medium)
+            .title3.weight(.semibold)
         #else
             .subheadline.weight(.semibold)
         #endif
