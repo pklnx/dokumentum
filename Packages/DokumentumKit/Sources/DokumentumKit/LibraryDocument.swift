@@ -29,6 +29,8 @@ public struct LibraryDocument: Sendable, Hashable, Identifiable {
     public var documentType: Reference?
     public var tagIDs: Set<UUID>
     public var fileState: FileState
+    /// The processing queue's state, for the detail's status line (#6, P2); the list rows do not show it.
+    public var processingState: ProcessingState
 
     public var id: UUID { instanceID }
 
@@ -38,7 +40,7 @@ public struct LibraryDocument: Sendable, Hashable, Identifiable {
     public init(
         instanceID: UUID, title: String, documentDate: Date, createdAt: Date, isInbox: Bool,
         deletedAt: Date? = nil, correspondent: Reference? = nil, documentType: Reference? = nil,
-        tagIDs: Set<UUID> = [], fileState: FileState = .unknown
+        tagIDs: Set<UUID> = [], fileState: FileState = .unknown, processingState: ProcessingState = .done
     ) {
         self.instanceID = instanceID
         self.title = title
@@ -50,6 +52,7 @@ public struct LibraryDocument: Sendable, Hashable, Identifiable {
         self.documentType = documentType
         self.tagIDs = tagIDs
         self.fileState = fileState
+        self.processingState = processingState
     }
 }
 

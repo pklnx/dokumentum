@@ -9,10 +9,14 @@ public struct ProcessingResult: Equatable, Sendable {
     /// The document's text and its source; `nil` leaves the text record and `textSource` as they are (a test's
     /// stage that only counts pages).
     public var text: ExtractedText?
+    /// The thumbnail to insert when the document has none (`Thumbnail`): set by the queue, only for a document the
+    /// re-queue pass recorded for the backfill (#6, part 4, N3); `nil` otherwise.
+    public var thumbnail: Data?
 
-    public init(pageCount: Int, text: ExtractedText? = nil) {
+    public init(pageCount: Int, text: ExtractedText? = nil, thumbnail: Data? = nil) {
         self.pageCount = pageCount
         self.text = text
+        self.thumbnail = thumbnail
     }
 }
 

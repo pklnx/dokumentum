@@ -143,6 +143,14 @@ final class StageTracker: Sendable {
         state.withLock { $0.abandoned.values.count(where: { $0 == .timedOut }) }
     }
 
+    /// Whether the stage the queue waits for is one of `document`'s and has not ended.
+    func isRunning(document: UUID) -> Bool {
+        state.withLock { state in
+            guard let current = state.current else { return false }
+            return current.attempt.document == document && !current.ended
+        }
+    }
+
     /// The stages let go (interrupted or timed out) that are still alive. For tests.
     var abandonedAlive: Int {
         state.withLock { $0.abandoned.count }

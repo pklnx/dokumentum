@@ -19,11 +19,13 @@ import SwiftData
 ///
 /// It also records the documents it re-queued that have no thumbnail (`thumbnailBackfillKey`): step 5's thumbnail
 /// backfill (#6, part 4) renders one only for those, so a document imported by a newer build is never backfilled
-/// (N3). The link is read from the document row, without loading a blob.
+/// (N3). The link is read from the document row, without loading a blob. The queue prunes the record
+/// (`forgetThumbnailBackfill`) when a document's result write saved, or when it sees the document `done` or gone;
+/// the queue is its only writer, so it needs no lock.
 public struct ProcessingRequeue: Sendable {
     /// Set once this device's pass completed.
     public static let flagKey = "processingRequeue.textV1"
-    /// The `instanceID`s of re-queued documents without a thumbnail, for part 4's backfill.
+    /// The `instanceID`s of re-queued documents without a thumbnail, for part 4's backfill (`ProcessingQueue`).
     public static let thumbnailBackfillKey = "processingRequeue.thumbnailBackfill"
 
     /// What one pass did.
@@ -65,6 +67,18 @@ public struct ProcessingRequeue: Sendable {
         guard !documents.isEmpty else { return }
         let all = thumbnailBackfill.union(documents)
         defaults.set(all.map(\.uuidString).sorted(), forKey: Self.thumbnailBackfillKey)
+    }
+
+    /// Removes `documents` from the backfill record; the key goes with the last one.
+    public func forgetThumbnailBackfill(_ documents: Set<UUID>) {
+        let recorded = thumbnailBackfill
+        guard !recorded.isDisjoint(with: documents) else { return }
+        let rest = recorded.subtracting(documents)
+        if rest.isEmpty {
+            defaults.removeObject(forKey: Self.thumbnailBackfillKey)
+        } else {
+            defaults.set(rest.map(\.uuidString).sorted(), forKey: Self.thumbnailBackfillKey)
+        }
     }
 
     /// One pass, unless the flag is set. Synchronous: each write runs without a suspension.

@@ -1,3 +1,4 @@
+import CoreGraphics
 import DokumentumKit
 import Foundation
 import SwiftData
@@ -5,7 +6,7 @@ import SwiftData
 /// The library on the store (plan of #3, part 2): the app's `LibrarySource` from part 2 on. It reads the
 /// documents only through `DocumentListQuery` (no text, no PDF, no thumbnail) and the metadata through light
 /// fetches, and maps them with `LibraryMapping`. The PDF of the open document comes from `DocumentFileLoader`,
-/// off the main actor.
+/// a row's thumbnail from `ThumbnailLoader` (#6, part 4), both off the main actor.
 ///
 /// **Changes:** `changes` fires at once after any context of this container saves (`ModelContext.didSave`), so a
 /// local edit, trash move or import shows without delay. It also fires for every element of `storeChanges`: the
@@ -18,6 +19,7 @@ public final class StoreLibrarySource: Sendable {
     /// Fires after a save or a store change; a burst leaves one pending event.
     public let changes: AsyncStream<Void>
     private let loader: DocumentFileLoader
+    private let thumbnails: ThumbnailLoader
     private let observation: SaveObservation
     /// Forwards `storeChanges` into `changes`; cancelled when `changes` ends or the source goes away.
     private let forwarding: Task<Void, Never>?
@@ -27,6 +29,7 @@ public final class StoreLibrarySource: Sendable {
     public init(container: ModelContainer, storeChanges: AsyncStream<Void>? = nil) {
         self.container = container
         loader = DocumentFileLoader(container: container)
+        thumbnails = ThumbnailLoader(container: container)
         let (changes, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
         self.changes = changes
         let observation = SaveObservation(container: container) { continuation.yield() }
@@ -59,6 +62,11 @@ public final class StoreLibrarySource: Sendable {
     /// The PDF of one document, off the main actor.
     public func loadPDF(instanceID: UUID) async -> PDFLoadState {
         await loader.load(instanceID: instanceID)
+    }
+
+    /// The thumbnail of one document's list row, off the main actor; `nil` while it has none.
+    public func loadThumbnail(instanceID: UUID) async -> CGImage? {
+        await thumbnails.image(for: instanceID)
     }
 
     /// The library in `context`: the list query's rows (trashed ones included) and every tag, correspondent

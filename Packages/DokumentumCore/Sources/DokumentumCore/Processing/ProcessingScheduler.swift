@@ -132,6 +132,15 @@ public final class ProcessingScheduler {
         runner.interruptNow()
     }
 
+    /// "Try again" (#6, P2) through the runner (`ProcessingQueue.retry(_:)`), then a run, which processes the document
+    /// at once. `.failed` when the runner cannot retry (a test's stub).
+    public func retry(_ instanceID: UUID) async -> ProcessingRetryOutcome {
+        guard let retrying = runner as? any ProcessingRetrying else { return .failed }
+        let outcome = await retrying.retry(instanceID)
+        if outcome == .queued { requestRun() }
+        return outcome
+    }
+
     /// Ends a pause and starts a run. Without a pause, it requests a run like any trigger.
     public func resume() {
         isPaused = false
@@ -197,6 +206,9 @@ public final class ProcessingScheduler {
         return inserted.contains { $0.entityName == Schema.entityName(for: Document.self) }
     }
 }
+
+/// The app's "Try again" goes through the scheduler, so a run follows the write.
+extension ProcessingScheduler: ProcessingRetrying {}
 
 /// Holds a notification observer for the stream's termination handler.
 private final class ObserverToken: @unchecked Sendable {
