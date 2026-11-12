@@ -658,7 +658,7 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac two issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
+attachment of the run. On the Mac three issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
@@ -668,6 +668,9 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
   stays (#74, maintainer decision 4).
 - `import.menu`, action, "Action is missing": the AppKit toolbar menu button that a SwiftUI `Menu` becomes.
   None of the 13 SwiftUI variants tried passes (#82). VoiceOver opening the menu: not verified, #3 Done-when.
+- `cleanup.filter`, action, "Action is missing": the cleanup sheet's Filter menu, also a SwiftUI `Menu`; a
+  pop-up `Picker` in its place is reported the same (#112). `ScanSmokeTests` audits the sheet; its corner
+  handles are steppers and its page an image for VoiceOver, so they have known roles.
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show
@@ -763,8 +766,8 @@ the group's queue folder and closes, and the app imports the items at launch and
 
 ## Page cleanup engine
 
-Step 4 (#5, part 1, #110) adds the engine in `DokumentumCore/Cleanup`; the cleanup sheet (part 3) and the
-scanner (part 2) build on it.
+Step 4 (#5, part 1, #110) adds the engine in `DokumentumCore/Cleanup`; the cleanup sheet (part 3, #112) builds
+on it (see "Scan and cleanup").
 
 - **An edit** (`PageEdit`) is applied in the photo's displayed orientation (EXIF applied when decoding), in
   this order: the perspective crop to four corners (`PageQuad`, normalised 0…1 from the top left,
@@ -782,8 +785,14 @@ scanner (part 2) build on it.
 - **The edited import** (`DocumentImporter.importEditedImages`): an `EditedImage` is one picked image with
   the pages it keeps (`EditedPage`: frame and edit; a multi-page TIFF can keep a page per frame). Pages are
   decoded, cleaned and drawn one at a time. A photo is decoded at `min(original, 2400 / longer side of the
-  corners' bounding box)`, so a cropped page keeps up to 2400 px on its longer side, then scaled to at most
-  2400 px. **The duplicate hash is the photo import's:** the original bytes of each image that keeps a page,
+  straightened page)`, so a cropped page keeps up to 2400 px on its longer side, then scaled to at most
+  2400 px. The straightened page's size is the longer of the corners' opposite edges, not their bounding box,
+  which is larger for a tilted page (#112, N2). ImageIO decodes a JPEG or HEIC at its full
+  size, a half, a quarter or an eighth and scales from there, so a decode just above half a photo costs a full
+  decode. A photo above 25 MP is therefore decoded at most at the largest of these fractions with at most 25 MP
+  (a 48 MP photo at half, 4000 × 3000 px), and its small crops have fewer than 2400 px (#112, N1). Peak footprint
+  of one page from a small crop of a 48 MP photo, measured on the Mac mini: JPEG 139 MiB, HEIC 169 MiB (decoding
+  in full: 551 MiB for the JPEG); a 24 MP iPhone photo is decoded in full (JPEG 282 MiB, HEIC 106 MiB). **The duplicate hash is the photo import's:** the original bytes of each image that keeps a page,
   once per image, in order; the edits do not enter it. So the same photos are a duplicate whatever the edits,
   and a TIFF split into frames hashes like `importImages` of the file. An image whose pages were all removed
   leaves the hash.
@@ -791,6 +800,53 @@ scanner (part 2) build on it.
   top left, a red band at the top right and grey text bars, optionally on tinted paper with a shadow gradient,
   and `TestPage.photographed`, the page warped onto a dark desk at known corners (optionally with EXIF
   orientation 6). `TestPixels.rgb` samples a `CGImage`.
+
+## Scan and cleanup
+
+Step 4 (#5): the document scanner on the iPhone (part 2, #111) and the photo cleanup on both devices (part 3,
+#112), both on the engine above and the one `DocumentImporter`.
+
+- **Scanner (iPhone).** "+" → **Scan…** opens VisionKit's `VNDocumentCameraViewController` full screen; it is
+  in the menu only where `VNDocumentCameraViewController.isSupported` (`ScanAvailability`; never the simulator
+  or the Mac). VisionKit does its own edges, filters, retake and page delete, so a scan has no cleanup of ours.
+  `DocumentScannerView` only forwards the camera's three ends; `CameraScan` wraps the scan behind the
+  `ScannedPages` seam; `ScanEncoder` encodes the pages (JPEG 0.9, at most 2400 px) one at a time off the main
+  actor; `ImportController.importScan` imports them as one `.scan` document, "Scan <date, time>", which opens.
+  The camera text is `NSCameraUsageDescription` in `Config/Info-iOS.plist`, German in
+  `Dokumentum/InfoPlist.xcstrings` (`check-project.py` requires it there and refuses it as a build setting).
+- **Cleanup (iPhone and Mac).** Photos picked with "+" → **Photos…** open the cleanup sheet
+  (`PhotoCleanupView`, `PhotoCleanupModel`) instead of importing at once; files, drops, the share extension and
+  scans have none (maintainer decision P2). A page per photo, a page per frame of a multi-page TIFF. Each page
+  starts with the full photo and the **Enhanced** filter; the detected edges replace the full photo when they
+  arrive, unless the user set the corners first (P3). Rotate turns clockwise only; there is no reordering.
+  *Save* imports the kept pages through `importEditedImages` ("Photo <date, time>", opened; duplicates by the
+  original bytes, P7); *Cancel* imports nothing. Only these two buttons close the sheet.
+- **One detection at a time.** One task decodes a page at 1600 px, makes its 240 px thumbnail, detects
+  (`VisionPageCornerDetector`) and lets the image go, the selected page first, then the others in order. Save
+  and Cancel cancel it; a page still waiting for its detection is saved with the edit it has then (the full
+  page), so Save never waits for Vision. Previews (1600 px) are kept only for the selected page and its
+  neighbours, plus the selected one with its filter.
+- **Geometry.** The large page shows the whole photo **turned by the edit's quarter turns**, as Save gives it,
+  with the outline and four handles (44 pt hit areas; VoiceOver: "Top left corner" and so on, named by where
+  they show, with an adjustable action that moves the corner by 2 % outwards or inwards). The corners stay in
+  the unturned photo's normalised coordinates; `QuadGeometry` maps a view point through the aspect fit and the
+  turns. A corner move goes through `PageQuad`'s `init` (clamped to the photo) and is refused when the page
+  would not be convex.
+- **Launch arguments** (Debug builds, in-memory store only): `-UITestScanSynthetic YES` puts **Scan…** in the
+  menu also in the simulator and imports two rendered pages instead of opening the camera;
+  `-UITestCleanupSynthetic YES` makes **Photos…** open the cleanup with two rendered photographed pages
+  (`SyntheticPhotographedPage`) instead of the Photos picker.
+- **What the tests cover.** `PhotoCleanupModelTests` (stub detector, rendered pages: one detection at a time,
+  selected first, Save with a pending detection, Cancel, user corners kept, previews), `QuadGeometryTests`
+  (fit, letterbox, quarter turns, clamping, convexity), `ImportControllerTests` (photos open the cleanup; Save
+  imports; left-out counting), `ScanImportTests` (the scanner behind its seam), and the UI test
+  `ScanSmokeTests.testScanAndCleanupLandInInbox`: on the iPhone "+" → Scan… → Inbox, then on both devices
+  "+" → Photos… → the sheet with two pages and handles, rotate page 1, remove page 2, Save → one "Photo …"
+  document. `ImportSmokeTests` on the iPhone picks two simulator sample photos and saves them through the
+  sheet.
+- **Only the device check covers** (#5, M2): the real camera, its permission prompt and denied access, a real
+  multi-page scan; the cleanup on a real photo of a letter (detection with glare, folds, a white table),
+  dragging the handles with a finger and with the Mac's pointer, and VoiceOver on the handles.
 
 ## Search
 
@@ -981,7 +1037,7 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 | Check | Where | What it does |
 |---|---|---|
 | `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
-| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` and of the share extension's `DokumentumShare/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
+| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
 | Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |

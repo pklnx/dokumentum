@@ -111,6 +111,7 @@ struct UITestApp {
     /// The prefixes of the app's own accessibility identifiers (`AccessibilityID`, `DokumentumApp.rootIdentifier`).
     static let appIdentifierPrefixes = [
         "sidebar", "documentList", "documentDetail", "documentInfo", "import.", "trash.", "debug.", "dokumentum.",
+        "cleanup",
         "search.",
     ]
 
@@ -147,6 +148,12 @@ struct UITestApp {
                 reason:
                     "the AppKit toolbar menu button of a SwiftUI Menu; none of the 13 SwiftUI variants tried passes "
                     + "(#82). VoiceOver opening the menu: not verified, #3 Done-when."),
+            AcceptedAuditIssue(
+                identifier: "cleanup.filter", auditType: .action, description: "Action is missing",
+                reason:
+                    "the cleanup sheet's Filter menu, a SwiftUI Menu like import.menu; a pop-up Picker in its place is "
+                    + "reported the same (#112, fix round 1). It has its label \"Filter\". VoiceOver opening it: "
+                    + "not verified, device check M2."),
         ]
     #else
         static let acceptedAuditIssues: [AcceptedAuditIssue] = []
