@@ -1,22 +1,26 @@
 import Foundation
 
-/// One word of a query: the document must have a word that starts with one of `forms`, or, when the word typed
-/// has `SearchIndex.infixMinimumLength` or more characters, contains one of them (plan of #7, Approach 4).
+/// One word of a query: the document must have a word that starts with one of `forms`, or, for a form whose
+/// `allowsInfix` is set, contains it (plan of #7, Approach 4).
 public struct SearchTerm: Sendable, Hashable {
     /// The normalised word first, then its alternatives: the *a/o/u* form of *ae/oe/ue*, and the transcription of
     /// a word typed with ä, ö or ü.
     public let forms: [String]
-    /// Whether the forms also match inside a word. Decided once per term by the length of what was typed, so
-    /// every alternative follows the same rule: "Mül" (3) does not infix-match through its 4-letter
-    /// transcription `muel` (review of #125, N2).
-    public let allowsInfix: Bool
+    /// Whether each form (same order as `forms`) also matches inside a word. Every form needs the word as typed
+    /// to have `SearchIndex.infixMinimumLength` or more characters, so "Mül" (3) does not infix-match through its
+    /// 4-letter transcription `muel` (review of #125, N2). An alternative also needs that many characters of its
+    /// own, so "muel" (4) does not infix-match "Formular" through its 3-letter form `mul` (#132, N-a). The first
+    /// form keeps the typed-length rule alone.
+    public let allowsInfix: [Bool]
 
     /// - Parameter typedLength: the characters of the word as typed; by default those of the first form.
     public init(forms: [String], typedLength: Int? = nil) {
         var unique: [String] = []
         for form in forms where !form.isEmpty && !unique.contains(form) { unique.append(form) }
         self.forms = unique
-        allowsInfix = (typedLength ?? unique.first?.count ?? 0) >= SearchIndex.infixMinimumLength
+        let minimum = SearchIndex.infixMinimumLength
+        let typedAllows = (typedLength ?? unique.first?.count ?? 0) >= minimum
+        allowsInfix = unique.indices.map { index in typedAllows && (index == 0 || unique[index].count >= minimum) }
     }
 }
 
@@ -26,8 +30,9 @@ public struct SearchTerm: Sendable, Hashable {
 /// punctuation, hyphen, U+2011, slash, apostrophe, the form feed between pages). Numbers split at their
 /// punctuation: "12.03.2024" is `12`, `03`, `2024`. A hyphen at the end of a line followed by a lowercase letter
 /// joins the two parts ("Steuer-\nbescheid" is `steuerbescheid`); before anything else it separates ("Kfz-\nSteuer"
-/// stays two words). A soft hyphen (U+00AD) inside a word is removed ("Steuer\u{AD}bescheid" is `steuerbescheid`;
-/// review of #125, N3); at a line end it joins like a hyphen.
+/// stays two words). The line end is one line break, one form feed (a page end), or one of each in either order
+/// (#132, N-e); two line breaks or two form feeds separate. A soft hyphen (U+00AD) inside a word is removed
+/// ("Steuer\u{AD}bescheid" is `steuerbescheid`; review of #125, N3); at a line end it joins like a hyphen.
 ///
 /// Plain ASCII words are only lowercased (the fast path); other words are normalised once per distinct raw form
 /// through `SearchNormalizer.Cache`.
@@ -141,8 +146,9 @@ public enum SearchTokenizer {
         case softHyphen
         /// A joining hyphen right after a word, maybe followed by spaces.
         case hyphen
-        /// … then one line break (`\n`, `\r` or `\r\n`), maybe followed by spaces.
-        case lineBreak(afterCR: Bool)
+        /// … then a line end, maybe followed by spaces: at most one line break (`\n`, `\r` or `\r\n`) and at most
+        /// one form feed, in either order. `afterCR` is set right after a `\r`.
+        case lineBreak(afterCR: Bool, newline: Bool, formFeed: Bool)
     }
 
     /// Calls `body` with the UTF-8 bytes of each raw word and whether they are all ASCII.
@@ -185,15 +191,27 @@ public enum SearchTokenizer {
             case .hyphen:
                 if isHorizontalSpace(scalar) { continue }
                 if scalar == "\n" || scalar == "\r" {
-                    pending = .lineBreak(afterCR: scalar == "\r")
+                    pending = .lineBreak(afterCR: scalar == "\r", newline: true, formFeed: false)
+                    continue
+                }
+                if scalar == "\u{000C}" {
+                    pending = .lineBreak(afterCR: false, newline: false, formFeed: true)
                     continue
                 }
                 pending = .none
                 flush()
-            case .lineBreak(let afterCR):
+            case .lineBreak(let afterCR, let newline, let formFeed):
                 if isHorizontalSpace(scalar) { continue }
                 if afterCR && scalar == "\n" {
-                    pending = .lineBreak(afterCR: false)
+                    pending = .lineBreak(afterCR: false, newline: newline, formFeed: formFeed)
+                    continue
+                }
+                if !newline && (scalar == "\n" || scalar == "\r") {
+                    pending = .lineBreak(afterCR: scalar == "\r", newline: true, formFeed: formFeed)
+                    continue
+                }
+                if !formFeed && scalar == "\u{000C}" {
+                    pending = .lineBreak(afterCR: false, newline: newline, formFeed: true)
                     continue
                 }
                 pending = .none

@@ -682,13 +682,18 @@ benchmark (`DokumentumCore/Search`); the search field (part 3) follows.
 - **Words** (`SearchTokenizer`): maximal runs of letters, digits and combining marks; everything else
   separates (hyphen, U+2011, slash, apostrophe, the form feed between pages). "12.03.2024" is three words. A
   hyphen (`-`, U+2010 or a soft hyphen) at a line end joins the word only before a lowercase letter
-  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). A soft hyphen inside a word is
-  removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
+  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). The line end may also be a form feed (a
+  page end), alone or with one line break before or after it ("Steuer-\fbescheid", "Steuer-\n\fbescheid" and
+  "Steuer-\f\nbescheid" → `steuerbescheid`); two line breaks or two form feeds separate. A soft hyphen inside a
+  word is removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
   other words are normalised once per distinct form (`SearchNormalizer.Cache`, kept until `mergeOverflow`).
 - **Matching** (P1): every term of a query must match, each in any field. A term matches a word that starts
   with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. The 4 counts
   the characters of the word as typed (not bytes: `θην` does not find "Αθήνα"), and it holds for every
-  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. Transcriptions: the
+  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. An
+  alternative also needs 4 characters of its own, so "muel" does not infix-match "Formular" through `mul`
+  (#132). The trade-off: "muel" also no longer finds "Schmüller" (indexed `schmuller`) by infix; it still finds
+  "Schmueller", "Mueller", "Müller" and "Müll", and "Müll"/"muell" infix-match "Schmüller". Transcriptions: the
   index also stores the *a/o/u* form of every word with *ae/oe/ue* (`mueller` → also `muller`; a side effect is
   `steuer` → also `steur`); a query term also tries its *a/o/u* form and, typed with ä/ö/ü, its *ae/oe/ue*
   form. So "Müller", "Mueller" and "muller" find each other in every direction.
