@@ -163,7 +163,7 @@ target can import:
 
 | Tool | For | Instead of |
 |---|---|---|
-| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
+| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook on a thread of its own, see below), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
 | `ManualDebounce` | Code that sleeps through an injected function: the test sees each event start the quiet period (`waitForStarts`) and ends it with `fire()` | A short debounce and sleeping "twice the debounce" |
 | `TestSignal` | Any event: the hook calls `fire()`, the test awaits `wait(for:)`; `TestSignal.counting(stream)` counts the elements of a stream | Polling a counter |
 | `TestSupport.waitForCancellation` | A body that must keep running until its test stops it | Sleeping for a long time |
@@ -186,6 +186,20 @@ when nobody releases it; `WaitingTests` shows the pattern.
 
 **Tests never block the main actor** with synchronous work that can take long: they call the
 `@concurrent` API instead.
+
+**Tests never block a thread of the cooperative pool (#164).** Every task of a test process runs on one
+pool, as wide as the CPU count: 3 threads on the CI runners. A thread that blocks until the test acts (a
+semaphore, a lock held by a paused hook, `DispatchQueue.main.sync`) is gone for every task: the test's own,
+every safety net and Swift Testing's time limits included. Three such threads froze the whole
+`DokumentumCoreTests` process in parallel mode, with no output and no failure. Work that blocks runs on a
+thread of its own: `TestSupport.onOwnThread { … }`, or an actor on a queue of its own (`BusyActor` in
+`WaitingTests`). `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking. The one
+exception is a synchronous hook that the code under test calls on the pool itself, such as the search
+indexer's history read (`BlockingHistory`): it uses `passBlockingOnPool()` and holds one thread, for one
+test at a time. Both give up with an issue after their timeout, so a missing `release()` fails the test
+instead of hanging it. `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns
+such a block into a certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows
+it on any Mac.
 
 **The safety net waits with the waiter's actor.** A `TestSignal` wait (and `Checkpoint.reached`,
 `ManualDebounce.waitForStarts`) passes its caller's isolation (`#isolation`) to
