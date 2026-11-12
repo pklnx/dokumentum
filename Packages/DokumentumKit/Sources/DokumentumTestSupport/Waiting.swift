@@ -151,9 +151,23 @@ extension TestSupport {
     }
 
     /// Whether the calling thread is one of the cooperative pool's (`onOwnThread`): the pool's
-    /// threads run the root queues `com.apple.root.<QoS>.cooperative`.
+    /// threads run the root queues `com.apple.root.<QoS>.cooperative`. Always `false` where the
+    /// label cannot be read (`detectsCooperativePool`: Linux, where only the Kit tests run).
     public static var isOnCooperativePool: Bool {
-        String(cString: __dispatch_queue_get_label(nil)).hasSuffix(".cooperative")
+        #if canImport(Darwin)
+            String(cString: __dispatch_queue_get_label(nil)).hasSuffix(".cooperative")
+        #else
+            false
+        #endif
+    }
+
+    /// Whether `isOnCooperativePool` can tell: on Apple platforms.
+    public static var detectsCooperativePool: Bool {
+        #if canImport(Darwin)
+            true
+        #else
+            false
+        #endif
     }
 
     /// Suspends until the task is cancelled; for a body that must keep running until its test

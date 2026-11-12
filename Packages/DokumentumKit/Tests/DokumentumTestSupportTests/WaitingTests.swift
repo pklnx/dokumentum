@@ -151,7 +151,8 @@ struct WaitingTests {
     /// On a thread of the cooperative pool, `passBlocking()` does not block (#164): it records its issue
     /// and goes on at once. Without that guard, it blocks until its net (100 ms, scaled) runs out, and
     /// the issue it records then is not the one expected here.
-    @Test func aBlockingCheckpointOnThePoolIsAnIssue() async {
+    @Test(.enabled(if: TestSupport.detectsCooperativePool))
+    func aBlockingCheckpointOnThePoolIsAnIssue() async {
         let checkpoint = Checkpoint()
         defer { checkpoint.release() }
         #expect(TestSupport.isOnCooperativePool, "a nonisolated test runs on the pool")
@@ -181,7 +182,9 @@ struct WaitingTests {
 
     /// `onOwnThread` runs its body off the cooperative pool and hands back its result or its error.
     @Test func onOwnThreadRunsOffThePool() async {
-        #expect(await Task.detached { TestSupport.isOnCooperativePool }.value, "a detached task runs on the pool")
+        if TestSupport.detectsCooperativePool {
+            #expect(await Task.detached { TestSupport.isOnCooperativePool }.value, "a detached task runs on the pool")
+        }
         #expect(await TestSupport.onOwnThread { TestSupport.isOnCooperativePool } == false)
         struct Failed: Error {}
         await #expect(throws: Failed.self) {
@@ -193,7 +196,10 @@ struct WaitingTests {
     @Test func anOwnThreadExecutorRunsOffThePool() async {
         let executor = TestSupport.OwnThreadExecutor(name: "WaitingTests")
         #expect(await Task(executorPreference: executor) { TestSupport.isOnCooperativePool }.value == false)
-        #expect(await Task(executorPreference: nil) { TestSupport.isOnCooperativePool }.value, "without it: the pool")
+        if TestSupport.detectsCooperativePool {
+            let onPool = await Task(executorPreference: nil) { TestSupport.isOnCooperativePool }.value
+            #expect(onPool, "without it: the pool")
+        }
     }
 
     /// Suspends until cancelled, built on `Checkpoint`.
