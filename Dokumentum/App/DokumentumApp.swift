@@ -72,7 +72,13 @@ struct DokumentumApp: App {
         } else {
             repair = nil
         }
-        search = SearchIndexer(container: container)
+        #if DEBUG
+            search = SearchIndexer(
+                container: container,
+                hooks: UITestHoldSearchIndex.hooks(for: container, arguments: ProcessInfo.processInfo.arguments))
+        #else
+            search = SearchIndexer(container: container)
+        #endif
         search.start(storeChanges: storeChanges?.changes())
         let deviceID = DeviceIdentity.processingDeviceID()
         importer = DocumentImporter(container: container, deviceID: deviceID)
