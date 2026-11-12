@@ -295,7 +295,8 @@ struct PhotoCleanupModelTests {
         #expect(!model.pages[0].cornersSetByUser)
     }
 
-    /// At most three previews: the selected page and its neighbours; the selected one is shown with its filter.
+    /// At most three previews: the selected page and its neighbours, also after another page is selected; the
+    /// selected one is shown with its filter.
     @Test func onlyTheSelectedPageAndItsNeighboursHavePreviews() async {
         let (model, probe) = await Self.model(
             ["1", "2", "3", "4", "5"].map(CleanupPhotos.photo), detector: StubPageDetector())
@@ -313,6 +314,12 @@ struct PhotoCleanupModelTests {
         model.setFilter(.grayscale)
         await probe.previews.wait(for: 2)
         #expect(model.filteredPreview?.filter == .grayscale)
+
+        // Another page selected: the previews that are no longer its neighbours go.
+        model.select(0)
+        await probe.previews.wait(for: 3)
+        #expect(model.filteredPreview?.pageID == 0)
+        #expect(Set(model.previews.keys).isSubset(of: [0, 1]), "\(model.previews.keys.sorted())")
         model.stop()
         #expect(model.previews.isEmpty && model.thumbnails.isEmpty && model.filteredPreview == nil)
     }
