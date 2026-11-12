@@ -238,11 +238,12 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   iPhone simulator for the app target, a UI smoke suite (iPhone and Mac) of
   at most 10 tests. No real documents, no network, no real iCloud in tests
   (in-memory store).
-- CI (decided 2026-10-28, section 6, question 1): Xcode Cloud runs build and
-  tests, GitHub Actions on Linux runners (`ubuntu-24.04`) run the rest.
+- CI (decided 2026-10-28, section 6, question 1; changed 2026-11-12: build and
+  tests moved from Xcode Cloud to GitHub Actions macOS runners, `app.yml`, jobs
+  `app-ios` and `app-macos`): GitHub Actions on Linux runners (`ubuntu-24.04`) run the rest.
   | Where | Check | Content |
   |---|---|---|
-  | Xcode Cloud, workflow `PR` (and `Main` on pushes to `main`) | one Test action per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The check names are in section 2 |
+  | GitHub Actions `app.yml` (formerly Xcode Cloud `PR` and `Main`) | `app-ios`, `app-macos`: one job per platform: iOS (one iPhone simulator) and macOS, test plan `Default` (app tests plus the tests of both packages) | build and tests; the UI smoke suite follows as a separate action once its compute cost is known. The check names are in section 2 |
   | GitHub Actions `checks.yml` | `lint` | Python check scripts and their self-tests (labels file, project invariants; more scripts arrive with the steps that need them) |
   | GitHub Actions `checks.yml` | `localization` | the String Catalog check |
   | GitHub Actions `checks.yml` | `kit-linux` | `swift format lint` and the `DokumentumKit` tests with the pinned Swift for Linux toolchain |
@@ -338,6 +339,11 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
    Actions on Linux runners for lint, the localisation check, the
    `DokumentumKit` tests and the secret scan. Section 4 lists the checks.
    The repository is public since 2026-11-12; the split stays as decided.
+   **Changed 2026-11-12:** the Xcode Cloud quota was used up and it cancelled
+   every build, and as the repository is public, GitHub Actions macOS runners
+   cost nothing. Build and app tests now run there (`app.yml`, jobs `app-ios`
+   and `app-macos`, the PR check); Xcode Cloud is kept for the TestFlight
+   uploads.
 
 To settle inside the steps: the minimum OS against the CI runners' Xcode (step 0), what
 `pklnx/design-system` offers for a native app (step 8; it may only have web

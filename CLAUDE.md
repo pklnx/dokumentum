@@ -28,7 +28,7 @@ Commands per operation: `.claude/github-operations.md`, read before the first Gi
 - CloudKit schema changes are additive only; every model change comes with a schema version and a migration test. Synced enums are stored as raw strings with a fallback for unknown values.
 - The share extension never opens the store; it hands files to the app through the app-group queue.
 - Locally run only the tests of what changed; CI runs everything. Agents never watch CI.
-- Builds and app tests run on the maintainer's Mac mini (local sessions, unsigned builds); Xcode Cloud is the PR check; cloud sessions verify only what runs on Linux.
+- Builds and app tests run on the maintainer's Mac mini (local sessions, unsigned builds); GitHub Actions macOS (`app.yml`: `app-ios`, `app-macos`) is the PR check since 2026-11-12, Xcode Cloud is kept for TestFlight; cloud sessions verify only what runs on Linux.
 - Ask instead of guessing on product decisions (AskUserQuestion, recommendation first).
 
 ## Session handover
