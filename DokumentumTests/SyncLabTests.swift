@@ -199,6 +199,13 @@ struct SyncLabTests {
         settings.setEnabled(true)
         _ = await lab.refreshThisDevice()
         #expect(lab.isClassificationEnabled, "the lab's line does not follow the app's settings")
+
+        // Off in the app's settings, while the lab's own suite still reads the default "on": only a lab that reads the
+        // app's suite shows "off" (review B, N1 of 5883167391: "on" alone cannot tell the suites apart).
+        settings.setEnabled(false)
+        _ = await lab.refreshThisDevice()
+        #expect(!lab.isClassificationEnabled, "the lab reads its own suite, not the app's")
+        #expect(ClassificationSettings(defaultsSuite: suite).isEnabled, "the lab's own suite changed")
     }
 
     /// A change of the classification switch outside the lab (later #8 part 3's settings switch) shows at the "This
