@@ -10,7 +10,8 @@ import SwiftUI
 /// running attempt back at once (`ProcessingScheduler.pause()`, synchronous), so it never counts as a failure:
 /// - **iOS:** the scene going to the background pauses, before the system suspends the app; a later kill of the
 ///   suspended app (swiping it away) then leaves nothing counted. Becoming active resumes and runs the queue.
-///   (From part 5, a background task that holds the work keeps it going instead.)
+///   With `BackgroundProcessing` (iOS, plan of #6, part 5), a background task that holds the work keeps it going
+///   instead, and the processing task is asked for what is left.
 /// - **macOS:** the app keeps processing while it runs, in the background too; quitting
 ///   (`NSApplication.willTerminateNotification`) pauses. Becoming active resumes like any trigger.
 ///
@@ -18,7 +19,13 @@ import SwiftUI
 @MainActor
 enum ProcessingLifecycle {
     /// What a change of the app's scene phase does to the processing queue.
-    static func scenePhaseChanged(to phase: ScenePhase, scheduler: ProcessingScheduler?) {
+    static func scenePhaseChanged(
+        to phase: ScenePhase, scheduler: ProcessingScheduler?, background: BackgroundProcessing? = nil
+    ) {
+        if let background {
+            background.scenePhaseChanged(to: phase)
+            return
+        }
         switch phase {
         case .active:
             scheduler?.resume()

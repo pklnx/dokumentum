@@ -56,6 +56,10 @@ public final class ProcessingScheduler {
     /// Called on the main actor at each `requestRun()`, whatever its trigger. For tests, which wait for a trigger
     /// to be handled instead of polling.
     public var didRequestRun: (@MainActor () -> Void)?
+    /// Called on the main actor when the runs end and none follows: no run queued and not paused (a run ended by
+    /// `pause()` is not drained). The app's background tasks (`BackgroundProcessing`, plan of #6, part 5) complete
+    /// on it; a timer for the next claim expiry or backoff end may still be set.
+    public var didDrain: (@MainActor () -> Void)?
 
     public init(
         runner: any ProcessingRunning, observer: StoreChangeObserver, insertions: AsyncStream<Void>,
@@ -165,7 +169,11 @@ public final class ProcessingScheduler {
         } while isQueued && !Task.isCancelled
         running = nil
         // A `resume()` while a paused run was ending queued this one.
-        if isQueued { requestRun() }
+        if isQueued {
+            requestRun()
+        } else if !isPaused {
+            didDrain?()
+        }
     }
 
     /// One timer for the earliest claim expiry or backoff end the last run waited for; each run replaces it.
