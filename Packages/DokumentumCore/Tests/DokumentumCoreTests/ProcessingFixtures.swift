@@ -142,6 +142,19 @@ final class ProcessingStore: Sendable {
         return (document.textSource, document.text?.extractedText)
     }
 
+    /// The data of the document's linked file.
+    func pdfData(of id: UUID) throws -> Data? {
+        try Self.fetch(id, in: ModelContext(container))?.file?.pdfData
+    }
+
+    func fileSize(of id: UUID) throws -> Int? {
+        try Self.fetch(id, in: ModelContext(container))?.fileSize
+    }
+
+    func contentHash(of id: UUID) throws -> String? {
+        try Self.fetch(id, in: ModelContext(container))?.contentHash
+    }
+
     /// The identifier of the document's linked file row.
     func fileIdentifier(of id: UUID) throws -> PersistentIdentifier? {
         try Self.fetch(id, in: ModelContext(container))?.file?.persistentModelID
@@ -203,12 +216,32 @@ struct ClosureStage: ProcessingStage {
 /// at its `pass()` before it answers.
 final class StubRecognizer: TextRecognizing {
     private let calls = Mutex<[CGSize]>([])
-    private let lines: @Sendable (Int) -> [String]
+    private let lines: @Sendable (Int) -> [RecognizedLine]
     let checkpoint: Checkpoint?
 
+    /// Lines without a box (`.zero`): the text layer cannot place them, so they never rewrite the file.
     init(checkpoint: Checkpoint? = nil, lines: @escaping @Sendable (Int) -> [String] = { ["Recognised \($0)"] }) {
         self.checkpoint = checkpoint
-        self.lines = lines
+        self.lines = { call in lines(call).map { RecognizedLine(text: $0) } }
+    }
+
+    /// Lines with their boxes, as Vision gives them: the text layer draws them. Private, so the trailing closure of
+    /// `init(checkpoint:lines:)` stays unambiguous; `boxed` makes one.
+    private init(recognized: @escaping @Sendable (Int) -> [RecognizedLine], checkpoint: Checkpoint?) {
+        self.checkpoint = checkpoint
+        self.lines = recognized
+    }
+
+    /// `texts` on every page, one below the other from the top left, each in a box of half the page's width.
+    static func boxed(_ texts: [String], checkpoint: Checkpoint? = nil) -> StubRecognizer {
+        StubRecognizer(recognized: { _ in boxedLines(texts) }, checkpoint: checkpoint)
+    }
+
+    static func boxedLines(_ texts: [String]) -> [RecognizedLine] {
+        texts.enumerated().map { index, text in
+            RecognizedLine(
+                text: text, boundingBox: CGRect(x: 0.1, y: 0.86 - CGFloat(index) * 0.04, width: 0.5, height: 0.03))
+        }
     }
 
     var count: Int { calls.withLock { $0.count } }
@@ -220,6 +253,6 @@ final class StubRecognizer: TextRecognizing {
             return $0.count
         }
         if let checkpoint { await checkpoint.pass() }
-        return lines(call).map { RecognizedLine(text: $0) }
+        return lines(call)
     }
 }

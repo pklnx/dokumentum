@@ -91,8 +91,9 @@ enum RowState: Equatable, Sendable {
 
     /// What a row state leaves out, per entity, and why: to-many relationships are inverses whose other side is
     /// captured (`Document.correspondent`, `Document.tags`, `Tag.parent`), and the external-storage data is not
-    /// compared (the repair only links an unlinked blob, whose data nothing writes; a stale write of it remains a
-    /// residual). A blob link is captured on both sides: another save that links a blob the pass never read
+    /// compared (the repair only links an unlinked blob, whose data nothing writes; the processing queue's result
+    /// write is the only writer of a linked file's data, under an exact claim, T16 of #6; a stale write of it remains
+    /// a residual). A blob link is captured on both sides: another save that links a blob the pass never read
     /// changes only the document's row as far as the pass can see.
     static let excluded: [String: Set<String>] = [
         "Document": [],
@@ -193,6 +194,15 @@ enum RowState: Equatable, Sendable {
     /// the record is gone.
     static func readText(_ id: PersistentIdentifier, in container: ModelContainer) throws -> RowState? {
         var descriptor = FetchDescriptor<DocumentText>(predicate: #Predicate { $0.persistentModelID == id })
+        descriptor.fetchLimit = 1
+        return try ModelContext(container).fetch(descriptor).first.map { capture($0) }
+    }
+
+    /// The current state of one file record, linked or not, read by its key through a new context: the check of
+    /// the processing queue's result write when it stores a text layer (#6, part 3), the only background writer of
+    /// a linked file's data. `pdfData` is not compared (`excluded`). `nil` when the record is gone.
+    static func readFile(_ id: PersistentIdentifier, in container: ModelContainer) throws -> RowState? {
+        var descriptor = FetchDescriptor<DocumentFile>(predicate: #Predicate { $0.persistentModelID == id })
         descriptor.fetchLimit = 1
         return try ModelContext(container).fetch(descriptor).first.map { capture($0) }
     }

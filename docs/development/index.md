@@ -378,6 +378,39 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   form feeds are exactly the page boundaries. `textSource` is `.pdfText` when every page was a text page, else `.vision`, also for
   a blank document, so `.none` means "never extracted". The stage checks for cancellation before each page and reports
   progress after it (and once before the first), one page image alive at a time.
+- **The text layer** (#6, part 3, T4, B1, N5, R1-N1; `TextLayer`): when pages were recognised, the stage draws their
+  lines invisibly into a copy of the PDF, which then **replaces the stored file; no original is kept** (the
+  maintainer's P4). Data integrity comes first, so the stored bytes stay exactly as they are unless all of these hold:
+  at least one recognised line with a box to draw; not encrypted (an owner password too); no `DokumentumTextLayer` key
+  in the Info dictionary (a layered PDF is never layered again, also when a short page is recognised again); a catalog
+  with only `/Type` and `/Pages`; page dictionaries with only `/Type /Parent /Contents /Resources /MediaBox /CropBox
+  /Rotate`; and no font without an embedded program (`/FontFile`, `/FontFile2`, `/FontFile3`; checked in each page's
+  resources, inherited ones included, form XObjects, tiling patterns and Type 3 fonts). So e-invoices with embedded
+  files, page labels, XMP metadata (PDF/A), tags, bookmarks, forms, links and other annotations, extra page boxes and
+  most born-digital PDFs keep their bytes and are searchable in the app only; scans and imported images (written by a
+  `CGContext`) get the layer. A source written by PDFKit (a PDF rotated in Preview) may carry further catalog keys and
+  then keeps its bytes too (R1-N2). The rewrite redraws every page with `drawPDFPage` into a `CGContext` page with the
+  source's media and crop box, draws each line in Helvetica, invisible, into its box (font size the box height, scaled
+  to its width; the box is placed on the page as shown and mapped back through the page's rotation), then a PDFKit
+  pass sets each page's rotation, and an incremental update replaces the Info dictionary with the source's entries,
+  each with its CoreGraphics type and exact value (strings and names as their bytes), plus the marker. PDFKit's own
+  Info would change values (Keywords to an array, which Spotlight no longer reads; dates to this device's time zone;
+  booleans to integers; PR #134's B1), and an Info entry that cannot be carried exactly (a stream) means no rewrite. **The guard** keeps the original
+  unless the new PDF opens unencrypted with the same page count, catalog and pages within the allow-lists, the same
+  media box, crop box and rotation per page, the same Info attributes (PDFKit) and every Info entry with its type and
+  exact value (CoreGraphics; a date compared as its original text) plus the marker, each source page's
+  own text lines and every drawn line in the page's text (whitespace ignored), and every page pixel-identical to the
+  source at 300 px (RGB, crop box, rotation). The 300 px compare alone misses a substituted font (measured: a page in
+  Helvetica without its program, redrawn, differs at 300 px on macOS at 48 pt but not on the iOS simulator, and at
+  16 pt on neither), which is why the font check comes first. Why a file was kept is logged as a fixed code. The
+  redraw and the guard report progress per page, for the watchdog, and stop between pages when the stage is
+  cancelled. During the layer the stage holds the original, the rewrite and the renders: about twice the file in
+  memory. A rewrite **keeps** every page's look, size, boxes, rotation, order and count, the page's own text, and
+  every Info entry with its type and exact value; it **drops** the original bytes (the file is re-encoded;
+  `contentHash` stays the hash of the imported bytes, so importing them again is still a duplicate), the trailer's
+  `/ID` of the original and its earlier incremental revisions; bilevel images (CCITT, JBIG2) may be re-encoded
+  losslessly as Flate, so such a file can grow; and it gains the invisible text. A layered file that is exported or
+  shared and imported again is **not** a duplicate of its document, because `contentHash` is the original's.
 - **Re-queue of step 3's documents** (#6, part 2, T6, N7): `ProcessingRequeue`, run by the queue at the start of each
   run until one pass completed, then never again on this device (the flag `processingRequeue.textV1` in the per-device
   defaults). Every `Document` that is `done` with `textSource == .none` (trashed ones too) goes back to `pending` **with
@@ -390,11 +423,13 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
 - **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
-  (`pageCount` and `textSource` when they differ, the text record's `extractedText`, `done` or `failed`). The text is
+  (`pageCount` and `textSource` when they differ, the text record's `extractedText`, with a text layer the file
+  record's `pdfData` and the document's `fileSize`, `done` or `failed`). The text is
   capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page with text
   alone is over it, at its last whole character, after one form feed per blank page before it; the report counts it (`textsCapped`) and it is logged. The result write's check
-  also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), so a save
-  to the text in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
+  also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), and with
+  a layer the file row (`RowState.readFile`, without comparing `pdfData`; the only writer of a linked file's data, under
+  the exact claim, T16), so a save to either in the window makes it back off too. Each is one synchronous call with no `await`: a fresh context
   fetches the document, re-checks what the decision was based on (state, claim device and time, not trashed, the same
   file, a text record) and writes nothing if one differs; it sets only the changed fields, reads the row again in a
   second fresh context (`RowState.read`) and saves only if every field still equals what it fetched. Otherwise it rolls
