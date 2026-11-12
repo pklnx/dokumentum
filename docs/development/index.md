@@ -197,7 +197,9 @@ stands still with it instead of running out. A wait from a nonisolated test coun
 **The timeout scale.** Every wait multiplies its timeout by `DOKUMENTUM_TEST_TIMEOUT_SCALE` (1 when it
 is missing or not a positive number), for a run that is slowed down on purpose. `swift test` passes the
 variable on as it is. For `xcodebuild`, set `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`: it strips
-the prefix and passes the variable on to the test host.
+the prefix and passes the variable on to the test host. The UI tests read it too (`UITestApp.timeoutScale`, the same
+rule; the UI test target does not link `DokumentumTestSupport`): a wait that goes through `UITestApp.timeout(_:)`
+is scaled, today the cleanup's turn check in `ScanSmokeTests` (#136).
 
 **The seam.** `ProcessingEnvironment` (`DokumentumCore`) holds what the pipeline reads from outside. A
 test runs its body in `ProcessingEnvironment.$current.withValue(…) { … }`, so tests running in parallel
@@ -729,7 +731,8 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac three issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
+attachment of the run. On the Mac three issues are accepted, on the iPhone eight, all on the cleanup sheet
+(`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
@@ -740,8 +743,23 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
 - `import.menu`, action, "Action is missing": the AppKit toolbar menu button that a SwiftUI `Menu` becomes.
   None of the 13 SwiftUI variants tried passes (#82). VoiceOver opening the menu: not verified, #3 Done-when.
 - `cleanup.filter`, action, "Action is missing": the cleanup sheet's Filter menu, also a SwiftUI `Menu`; a
-  pop-up `Picker` in its place is reported the same (#112). `ScanSmokeTests` audits the sheet; its corner
-  handles are steppers and its page an image for VoiceOver, so they have known roles.
+  pop-up `Picker` in its place is reported the same (#112). `ScanSmokeTests` audits the sheet on both devices;
+  its corner handles are steppers and its page an image for VoiceOver, so they have known roles. The menu's
+  VoiceOver name is its label's title, "Filter": the iPhone's element has it as its label, the Mac's AppKit menu
+  button as its title (its label is empty, which is why the audit lists the issue with an empty label);
+  `ScanSmokeTests` asserts both. The visible title gives that name already; the menu's `.accessibilityLabel`
+  keeps it when the label is only a symbol, whose own name is read otherwise ("Bearbeiten" for
+  `slider.horizontal.3`, measured on both devices, #136).
+
+On the iPhone (#136):
+- `cleanup.cancel` and `cleanup.save`, contrast, "Contrast failed": the sheet's system toolbar buttons, a glass
+  capsule with no tint, font or background of ours. Measured on the element's screenshot: 20.65:1 in light
+  (#000000 on #fdfdfd) and 11.18:1 in dark (#ffffff on #3b3b3d). `ScanSmokeTests` measures both buttons in every
+  run (`assertTextContrast`), so a real loss of contrast still fails.
+- `cleanup.cancel` and `cleanup.save`, Dynamic Type, "Dynamic Type font sizes are partially unsupported": the same
+  system buttons; navigation bar buttons cap their text size and offer the large content viewer instead.
+- `cleanup.corner.*` (four), contrast, "Contrast nearly passed": the corner handles, an accent dot with a white
+  ring over the photo and no text; what lies behind them depends on the photo.
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show
