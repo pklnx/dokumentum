@@ -103,6 +103,29 @@ struct SyncLabGeneratorTests {
         #expect(unique.dropFirst(5).allSatisfy { $0.isLowercase && $0.isLetter })
     }
 
+    /// Only with `letter` does page 1 read like a letter (M1/M2); by default no page names a sender, a date or an
+    /// amount the classifier could fill in, so the other cases measure sync, not classification (review A, B3 of
+    /// PR #155).
+    @Test func onlyTheLetterOptionGivesALetterPage() throws {
+        let word = SyncLabGenerator.uniqueWord()
+        let letterWords = ["Stadtwerke", "Rechnung", "2026", "EUR"]
+        for page in 0..<3 {
+            let plain = SyncLabGenerator.lines(word: word, page: page).joined(separator: "\n")
+            #expect(plain.contains(word))
+            for letterWord in letterWords {
+                #expect(!plain.contains(letterWord), "page \(page + 1) without the option has \(letterWord)")
+            }
+        }
+        let letter = SyncLabGenerator.lines(word: word, page: 0, letter: true).joined(separator: "\n")
+        #expect(letter.contains(word))
+        for letterWord in letterWords { #expect(letter.contains(letterWord)) }
+
+        let plainPDF = try #require(PDFDocument(data: SyncLabGenerator.textPDF(word: word, pages: 2)))
+        #expect(plainPDF.string?.contains("Stadtwerke") == false)
+        let letterPDF = try #require(PDFDocument(data: SyncLabGenerator.textPDF(word: word, pages: 2, letter: true)))
+        #expect(letterPDF.string?.contains("Stadtwerke Musterstadt") == true)
+    }
+
     /// The scan-like document comes through the importer's image path with the source `.scan`, one page per image.
     @Test func aScanLikeDocumentImportsAsAScan() async throws {
         let container = try makeInMemoryContainer()

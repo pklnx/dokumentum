@@ -45,27 +45,32 @@
             return "syncw" + String((0..<6).map { _ in letters.randomElement() ?? "a" })
         }
 
-        /// The lines of page `index` (from 0) of a lab document with `word`: page 1 reads like a letter (the
-        /// classification cases of run 2 need one), every page has the word and a random line.
-        static func lines(word: String, page index: Int) -> [String] {
+        /// The lines of page `index` (from 0) of a lab document with `word`: every page has the word and a random
+        /// line. With `letter`, page 1 reads like a letter (sender, date, amount) for the classification cases M1/M2;
+        /// without it, no page gives the classifier a correspondent, a type or a date to suggest (review A, B3 of
+        /// PR #155).
+        static func lines(word: String, page index: Int, letter: Bool = false) -> [String] {
             let random = "Zufall \(UUID().uuidString)"
-            if index == 0 {
+            if index == 0, letter {
                 return [
                     "SyncLab \(word)", "Stadtwerke Musterstadt", "Rechnung vom 14.01.2026",
                     "Abschlag Strom November, Betrag 62,00 EUR", "Suchwort \(word)", random,
                 ]
             }
+            if index == 0 {
+                return ["SyncLab \(word)", "Seite 1", "Suchwort \(word)", random]
+            }
             return ["Seite \(index + 1)", "Suchwort \(word) auf Seite \(index + 1)", random]
         }
 
-        /// A text PDF of `pages` pages.
-        static func textPDF(word: String, pages: Int) -> Data {
-            SyntheticPDF.make(pages: (0..<max(1, pages)).map { lines(word: word, page: $0) })
+        /// A text PDF of `pages` pages; with `letter`, page 1 is the letter page.
+        static func textPDF(word: String, pages: Int, letter: Bool = false) -> Data {
+            SyntheticPDF.make(pages: (0..<max(1, pages)).map { lines(word: word, page: $0, letter: letter) })
         }
 
         /// The pages of a scan-like document, rendered as `SyntheticScanPages` draws them.
-        static func scanPages(word: String, pages: Int) -> SyntheticScanPages {
-            SyntheticScanPages(pages: (0..<max(1, pages)).map { lines(word: word, page: $0) })
+        static func scanPages(word: String, pages: Int, letter: Bool = false) -> SyntheticScanPages {
+            SyntheticScanPages(pages: (0..<max(1, pages)).map { lines(word: word, page: $0, letter: letter) })
         }
 
         /// A PDF of at least `bytes` bytes: pages of seeded noise images (RGB, 8 bit), which do not compress. A new
@@ -122,16 +127,20 @@
         }
 
         /// Imports a text document through `importer`.
-        static func importText(word: String, pages: Int, importer: any DocumentImporting) async -> ImportOutcome {
-            let pdf = await Task.detached { textPDF(word: word, pages: pages) }.value
+        static func importText(
+            word: String, pages: Int, letter: Bool = false, importer: any DocumentImporting
+        ) async -> ImportOutcome {
+            let pdf = await Task.detached { textPDF(word: word, pages: pages, letter: letter) }.value
             return await importer.importFile(
                 data: pdf, fileName: fileName(.text, word: word), contentType: .pdf, source: .file)
         }
 
         /// Imports a scan-like document through `importer`: the pages encoded as a scan is (`ScanEncoder`), as one
         /// document with the source `.scan`.
-        static func importScan(word: String, pages: Int, importer: any DocumentImporting) async -> ImportOutcome {
-            let encoded = await ScanEncoder.jpegPages(scanPages(word: word, pages: pages))
+        static func importScan(
+            word: String, pages: Int, letter: Bool = false, importer: any DocumentImporting
+        ) async -> ImportOutcome {
+            let encoded = await ScanEncoder.jpegPages(scanPages(word: word, pages: pages, letter: letter))
             guard !encoded.pages.isEmpty else { return .failed(.unreadableImage) }
             return await importer.importImages(
                 encoded.pages, fileName: fileName(.scan, word: word), title: "SyncLab scan \(word)", source: .scan

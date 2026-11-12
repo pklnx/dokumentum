@@ -1,6 +1,7 @@
 #if DEBUG
     import DokumentumCore
     import DokumentumKit
+    import SwiftData
     import SwiftUI
 
     #if os(macOS)
@@ -115,6 +116,7 @@
                         line("Store", "\(lab.launchStore.opened.rawValue)")
                         line("Takeover interval", "\(Int(lab.takeoverInterval)) s")
                         line("Re-queue flag", lab.isRequeueDone ? "set (pass completed)" : "not set")
+                        line("Classification", lab.isClassificationEnabled ? "on" : "off")
                         line("Processing", lab.processingState)
                         line("Last run", lab.lastProcessingReport)
                         line("Repair", lab.lastRepairCounts)
@@ -128,12 +130,19 @@
                     Text(verbatim: "Hold processing on this device")
                 }
                 .disabled(lab.processing == nil)
+                Toggle(
+                    isOn: Binding(get: { lab.isClassificationEnabled }, set: { lab.setClassification($0) })
+                ) {
+                    Text(verbatim: "Classify on this device (#8; off for run 1 except M1/M2)")
+                }
+                .disabled(!lab.canChangeDeviceSettings)
                 HStack {
                     Button {
                         lab.resetRequeueFlag()
                     } label: {
                         Text(verbatim: "Reset re-queue flag")
                     }
+                    .disabled(!lab.canChangeDeviceSettings)
                     Button {
                         lab.runRepair()
                     } label: {
@@ -185,6 +194,7 @@
         @State private var kind = SyncLabGenerator.Kind.text
         @State private var pages = 3
         @State private var names = SyncLab.Names()
+        @State private var letter = false
 
         var body: some View {
             Section {
@@ -200,13 +210,16 @@
                         Text(verbatim: "Pages: \(pages)")
                     }
                 }
+                if kind == .text || kind == .scan {
+                    Toggle(isOn: $letter) { Text(verbatim: "Letter page (M1/M2 only)") }
+                }
                 if kind == .text {
                     TextField(text: $names.tags) { Text(verbatim: "Tags (comma-separated)") }
                     TextField(text: $names.correspondent) { Text(verbatim: "Correspondent") }
                     TextField(text: $names.documentType) { Text(verbatim: "Type") }
                 }
                 Button {
-                    lab.create(kind, pages: pages, names: names)
+                    lab.create(kind, pages: pages, names: names, letter: letter && kind != .large && kind != .legacy)
                 } label: {
                     Text(verbatim: lab.isBusy ? "Working…" : "Create")
                 }
@@ -234,7 +247,7 @@
 
     private struct DocumentsSection: View {
         let lab: SyncLab
-        @State private var selected: UUID?
+        @State private var selected: PersistentIdentifier?
 
         var body: some View {
             Section {
@@ -248,13 +261,13 @@
                     Button(role: .destructive) {
                         lab.emptyTrash()
                     } label: {
-                        Text(verbatim: "Empty trash")
+                        Text(verbatim: "Empty lab trash")
                     }
                 }
                 ForEach(lab.rows ?? []) { row in
                     VStack(alignment: .leading, spacing: 4) {
                         Button {
-                            selected = selected == row.instanceID ? nil : row.instanceID
+                            selected = selected == row.id ? nil : row.id
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(
@@ -269,7 +282,7 @@
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if selected == row.instanceID {
+                        if selected == row.id {
                             DocumentPanel(lab: lab, row: row)
                         }
                     }
@@ -503,11 +516,18 @@
 
     private struct ExportSection: View {
         let lab: SyncLab
+        @State private var dates = SyncLabExport.DateRounding.nearest
 
         var body: some View {
             Section {
+                Picker(selection: $dates) {
+                    Text(verbatim: "round to nearest ms").tag(SyncLabExport.DateRounding.nearest)
+                    Text(verbatim: "truncate to ms").tag(SyncLabExport.DateRounding.towardZero)
+                } label: {
+                    Text(verbatim: "Dates")
+                }
                 Button {
-                    Task { await lab.export() }
+                    Task { await lab.export(dates: dates) }
                 } label: {
                     Text(verbatim: lab.isBusy ? "Working…" : "Export state")
                 }

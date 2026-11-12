@@ -39,22 +39,47 @@
 
         /// The dump of `container`, built off the main actor; local values from `defaultsSuite` (`nil`: the app's).
         @concurrent
-        static func build(container: ModelContainer, defaultsSuite: String? = nil) async throws -> Dump {
-            try make(container: container, defaultsSuite: defaultsSuite)
+        static func build(
+            container: ModelContainer, defaultsSuite: String? = nil, dates: DateRounding = .nearest
+        ) async throws -> Dump {
+            try make(container: container, defaultsSuite: defaultsSuite, dates: dates)
+        }
+
+        /// How dates become whole milliseconds. `nearest` (the default) rounds half away from zero; `towardZero`
+        /// truncates, for the case that CloudKit truncates and the two devices' dumps differ by 1 ms (review B, N6 of
+        /// PR #155; `sync.md`, step 0). Both devices must use the same; the first line names it.
+        enum DateRounding: String, CaseIterable, Sendable {
+            case nearest
+            case towardZero
+
+            func string(_ date: Date?) -> String {
+                guard let date else { return "nil" }
+                let rule: FloatingPointRoundingRule = self == .nearest ? .toNearestOrAwayFromZero : .towardZero
+                return String(Int64((date.timeIntervalSince1970 * 1000).rounded(rule)))
+            }
         }
 
         /// The dump of `container`, in a fresh context. Synchronous: callers off the main actor only (`build`).
-        static func make(container: ModelContainer, defaultsSuite: String? = nil) throws -> Dump {
+        static func make(
+            container: ModelContainer, defaultsSuite: String? = nil, dates: DateRounding = .nearest
+        ) throws -> Dump {
             let context = ModelContext(container)
             var sections: [(name: String, records: Int, text: String)] = []
-            sections.append(section("Document", try context.fetch(FetchDescriptor<Document>()).map(lines)))
-            sections.append(section("DocumentFile", try context.fetch(FetchDescriptor<DocumentFile>()).map(lines)))
             sections.append(
-                section("DocumentThumbnail", try context.fetch(FetchDescriptor<DocumentThumbnail>()).map(lines)))
-            sections.append(section("DocumentText", try context.fetch(FetchDescriptor<DocumentText>()).map(lines)))
-            sections.append(section("Tag", try context.fetch(FetchDescriptor<Tag>()).map(lines)))
-            sections.append(section("Correspondent", try context.fetch(FetchDescriptor<Correspondent>()).map(lines)))
-            sections.append(section("DocumentType", try context.fetch(FetchDescriptor<DocumentType>()).map(lines)))
+                section("Document", try context.fetch(FetchDescriptor<Document>()).map { lines($0, dates) }))
+            sections.append(
+                section("DocumentFile", try context.fetch(FetchDescriptor<DocumentFile>()).map { lines($0, dates) }))
+            sections.append(
+                section(
+                    "DocumentThumbnail",
+                    try context.fetch(FetchDescriptor<DocumentThumbnail>()).map { lines($0, dates) }))
+            sections.append(
+                section("DocumentText", try context.fetch(FetchDescriptor<DocumentText>()).map { lines($0, dates) }))
+            sections.append(section("Tag", try context.fetch(FetchDescriptor<Tag>()).map { lines($0, dates) }))
+            sections.append(
+                section("Correspondent", try context.fetch(FetchDescriptor<Correspondent>()).map { lines($0, dates) }))
+            sections.append(
+                section("DocumentType", try context.fetch(FetchDescriptor<DocumentType>()).map { lines($0, dates) }))
 
             var entityHashes: [String: String] = [:]
             var hasher = SHA256()
@@ -66,7 +91,7 @@
                 header.append("entity \(section.name) records=\(section.records) sha256=\(hash)")
             }
             let hash = hex(hasher.finalize())
-            var text = "dump sha256=\(hash)\n" + header.joined(separator: "\n") + "\n\n"
+            var text = "dump sha256=\(hash) dates=\(dates.rawValue)\n" + header.joined(separator: "\n") + "\n\n"
             for section in sections { text += section.text }
             text += "== Device-local values (not hashed)\n" + localLines(defaultsSuite: defaultsSuite).joined() + "\n"
             return Dump(text: text, hash: hash, entityHashes: entityHashes)
@@ -93,7 +118,7 @@
             return (name, records.count, text)
         }
 
-        private static func lines(_ document: Document) -> Record {
+        private static func lines(_ document: Document, _ ms: DateRounding) -> Record {
             let e = "Document"
             return Record(
                 instanceID: document.instanceID.uuidString,
@@ -101,20 +126,20 @@
                     "\(e).id=\(document.id.uuidString)",
                     "\(e).instanceID=\(document.instanceID.uuidString)",
                     "\(e).title=\(quoted(document.title))",
-                    "\(e).createdAt=\(milliseconds(document.createdAt))",
-                    "\(e).modifiedAt=\(milliseconds(document.modifiedAt))",
-                    "\(e).documentDate=\(milliseconds(document.documentDate))",
+                    "\(e).createdAt=\(ms.string(document.createdAt))",
+                    "\(e).modifiedAt=\(ms.string(document.modifiedAt))",
+                    "\(e).documentDate=\(ms.string(document.documentDate))",
                     "\(e).isInbox=\(document.isInbox)",
                     "\(e).pageCount=\(document.pageCount)",
                     "\(e).fileSize=\(document.fileSize)",
                     "\(e).textSourceRaw=\(quoted(document.textSourceRaw))",
                     "\(e).processingStateRaw=\(quoted(document.processingStateRaw))",
                     "\(e).processingDeviceID=\(quoted(document.processingDeviceID))",
-                    "\(e).processingClaimedAt=\(milliseconds(document.processingClaimedAt))",
+                    "\(e).processingClaimedAt=\(ms.string(document.processingClaimedAt))",
                     "\(e).contentHash=\(quoted(document.contentHash))",
                     "\(e).originalFileName=\(quoted(document.originalFileName))",
                     "\(e).sourceRaw=\(quoted(document.sourceRaw))",
-                    "\(e).deletedAt=\(milliseconds(document.deletedAt))",
+                    "\(e).deletedAt=\(ms.string(document.deletedAt))",
                     "\(e).correspondent=\(reference(document.correspondent?.instanceID))",
                     "\(e).documentType=\(reference(document.documentType?.instanceID))",
                     "\(e).tags=\(references(document.tags?.map(\.instanceID)))",
@@ -124,35 +149,35 @@
                 ])
         }
 
-        private static func lines(_ file: DocumentFile) -> Record {
+        private static func lines(_ file: DocumentFile, _ ms: DateRounding) -> Record {
             let e = "DocumentFile"
             return Record(
                 instanceID: file.instanceID.uuidString,
                 lines: [
                     "\(e).id=\(file.id.uuidString)",
                     "\(e).instanceID=\(file.instanceID.uuidString)",
-                    "\(e).createdAt=\(milliseconds(file.createdAt))",
+                    "\(e).createdAt=\(ms.string(file.createdAt))",
                     "\(e).documentID=\(reference(file.documentID))",
                     "\(e).pdfData=\(blob(file.pdfData, marker: true))",
                     "\(e).document=\(reference(file.document?.instanceID))",
                 ])
         }
 
-        private static func lines(_ thumbnail: DocumentThumbnail) -> Record {
+        private static func lines(_ thumbnail: DocumentThumbnail, _ ms: DateRounding) -> Record {
             let e = "DocumentThumbnail"
             return Record(
                 instanceID: thumbnail.instanceID.uuidString,
                 lines: [
                     "\(e).id=\(thumbnail.id.uuidString)",
                     "\(e).instanceID=\(thumbnail.instanceID.uuidString)",
-                    "\(e).createdAt=\(milliseconds(thumbnail.createdAt))",
+                    "\(e).createdAt=\(ms.string(thumbnail.createdAt))",
                     "\(e).documentID=\(reference(thumbnail.documentID))",
                     "\(e).imageData=\(blob(thumbnail.imageData, marker: false))",
                     "\(e).document=\(reference(thumbnail.document?.instanceID))",
                 ])
         }
 
-        private static func lines(_ text: DocumentText) -> Record {
+        private static func lines(_ text: DocumentText, _ ms: DateRounding) -> Record {
             let e = "DocumentText"
             let value = Data(text.extractedText.utf8)
             return Record(
@@ -160,14 +185,14 @@
                 lines: [
                     "\(e).id=\(text.id.uuidString)",
                     "\(e).instanceID=\(text.instanceID.uuidString)",
-                    "\(e).createdAt=\(milliseconds(text.createdAt))",
+                    "\(e).createdAt=\(ms.string(text.createdAt))",
                     "\(e).documentID=\(reference(text.documentID))",
                     "\(e).extractedText=bytes=\(value.count) sha256=\(sha256(value))",
                     "\(e).document=\(reference(text.document?.instanceID))",
                 ])
         }
 
-        private static func lines(_ tag: Tag) -> Record {
+        private static func lines(_ tag: Tag, _ ms: DateRounding) -> Record {
             let e = "Tag"
             return Record(
                 instanceID: tag.instanceID.uuidString,
@@ -176,16 +201,16 @@
                     "\(e).instanceID=\(tag.instanceID.uuidString)",
                     "\(e).name=\(quoted(tag.name))",
                     "\(e).colorHex=\(quoted(tag.colorHex))",
-                    "\(e).createdAt=\(milliseconds(tag.createdAt))",
+                    "\(e).createdAt=\(ms.string(tag.createdAt))",
                     "\(e).mergedIntoID=\(reference(tag.mergedIntoID))",
-                    "\(e).mergedAt=\(milliseconds(tag.mergedAt))",
+                    "\(e).mergedAt=\(ms.string(tag.mergedAt))",
                     "\(e).parent=\(reference(tag.parent?.instanceID))",
                     "\(e).children=\(references(tag.children?.map(\.instanceID)))",
                     "\(e).documents=\(references(tag.documents?.map(\.instanceID)))",
                 ])
         }
 
-        private static func lines(_ correspondent: Correspondent) -> Record {
+        private static func lines(_ correspondent: Correspondent, _ ms: DateRounding) -> Record {
             let e = "Correspondent"
             return Record(
                 instanceID: correspondent.instanceID.uuidString,
@@ -193,14 +218,14 @@
                     "\(e).id=\(correspondent.id.uuidString)",
                     "\(e).instanceID=\(correspondent.instanceID.uuidString)",
                     "\(e).name=\(quoted(correspondent.name))",
-                    "\(e).createdAt=\(milliseconds(correspondent.createdAt))",
+                    "\(e).createdAt=\(ms.string(correspondent.createdAt))",
                     "\(e).mergedIntoID=\(reference(correspondent.mergedIntoID))",
-                    "\(e).mergedAt=\(milliseconds(correspondent.mergedAt))",
+                    "\(e).mergedAt=\(ms.string(correspondent.mergedAt))",
                     "\(e).documents=\(references(correspondent.documents?.map(\.instanceID)))",
                 ])
         }
 
-        private static func lines(_ type: DocumentType) -> Record {
+        private static func lines(_ type: DocumentType, _ ms: DateRounding) -> Record {
             let e = "DocumentType"
             return Record(
                 instanceID: type.instanceID.uuidString,
@@ -208,9 +233,9 @@
                     "\(e).id=\(type.id.uuidString)",
                     "\(e).instanceID=\(type.instanceID.uuidString)",
                     "\(e).name=\(quoted(type.name))",
-                    "\(e).createdAt=\(milliseconds(type.createdAt))",
+                    "\(e).createdAt=\(ms.string(type.createdAt))",
                     "\(e).mergedIntoID=\(reference(type.mergedIntoID))",
-                    "\(e).mergedAt=\(milliseconds(type.mergedAt))",
+                    "\(e).mergedAt=\(ms.string(type.mergedAt))",
                     "\(e).documents=\(references(type.documents?.map(\.instanceID)))",
                 ])
         }
@@ -219,9 +244,7 @@
 
         /// Whole milliseconds since 1970, rounded half away from zero; `nil` for none.
         static func milliseconds(_ date: Date?) -> String {
-            guard let date else { return "nil" }
-            let value = (date.timeIntervalSince1970 * 1000).rounded(.toNearestOrAwayFromZero)
-            return String(Int64(value))
+            DateRounding.nearest.string(date)
         }
 
         static func quoted(_ string: String) -> String {

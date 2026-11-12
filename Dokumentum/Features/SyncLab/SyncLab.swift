@@ -45,6 +45,9 @@
         var isConfirmingWrite = false
         @ObservationIgnored private var pendingWrite: (@MainActor () async -> Void)?
         private var hasConfirmedWrites = false
+        /// Called on the main actor after each write that ran (confirmed or without a question). For tests, which
+        /// wait for it instead of polling.
+        @ObservationIgnored var didFinishWrite: (@MainActor () -> Void)?
 
         init(
             container: ModelContainer, launchStore: LaunchStore, deviceID: String, importer: any DocumentImporting,
@@ -77,7 +80,7 @@
                 isConfirmingWrite = true
                 return
             }
-            Task { await write() }
+            run(write)
         }
 
         func confirmWrites() {
@@ -85,8 +88,20 @@
             isConfirmingWrite = false
             let write = pendingWrite
             pendingWrite = nil
-            if let write { Task { await write() } }
+            if let write { run(write) }
         }
+
+        private func run(_ write: @escaping @MainActor () async -> Void) {
+            Task {
+                await write()
+                didFinishWrite?()
+            }
+        }
+
+        /// Whether the lab may change this device's settings (the re-queue flag, the classification switch): only
+        /// with a store on disk. An in-memory store (UI tests, screenshots) runs with the app's own defaults, so a
+        /// change there would reach the next real launch of this Mac or simulator without a question.
+        var canChangeDeviceSettings: Bool { asksBeforeWriting }
 
         func cancelWrite() {
             isConfirmingWrite = false
@@ -114,7 +129,9 @@
             var documentType = ""
         }
 
-        func create(_ kind: SyncLabGenerator.Kind, pages: Int, names: Names) {
+        /// Creates a lab document of `kind`; with `letter` (text and scan-like only), page 1 reads like a letter, for
+        /// the classification cases M1/M2.
+        func create(_ kind: SyncLabGenerator.Kind, pages: Int, names: Names, letter: Bool = false) {
             perform { [self] in
                 isBusy = true
                 defer { isBusy = false }
@@ -122,9 +139,11 @@
                 let outcome: ImportOutcome
                 switch kind {
                 case .text:
-                    outcome = await SyncLabGenerator.importText(word: word, pages: pages, importer: importer)
+                    outcome = await SyncLabGenerator.importText(
+                        word: word, pages: pages, letter: letter, importer: importer)
                 case .scan:
-                    outcome = await SyncLabGenerator.importScan(word: word, pages: pages, importer: importer)
+                    outcome = await SyncLabGenerator.importScan(
+                        word: word, pages: pages, letter: letter, importer: importer)
                 case .large:
                     outcome = await SyncLabGenerator.importLarge(
                         word: word, bytes: SyncLabGenerator.largeFileBytes, importer: importer)
@@ -249,13 +268,23 @@
             }
         }
 
-        /// Empties the trash of the documents the list shows as trashed, as the app's Empty Trash does.
+        /// The trashed lab documents of `rows`: what the lab's "Empty trash" deletes. Trashed documents the lab did
+        /// not create stay; only the app's own Empty Trash (with its count confirmation) deletes them.
+        static func labTrash(of rows: [SyncLabDocuments.Row]) -> Set<UUID> {
+            Set(rows.filter { $0.isTrashed && $0.isLabDocument }.map(\.instanceID))
+        }
+
+        /// Empties the trash of the **lab** documents the list shows as trashed, through `DocumentTrash` as the app's
+        /// Empty Trash does. Other trashed documents stay (review A, B1 of PR #155).
         func emptyTrash() {
             perform { [self] in
-                let trashed = Set((rows ?? []).filter(\.isTrashed).map(\.instanceID))
+                await refresh()
+                let rows = rows ?? []
+                let trashed = Self.labTrash(of: rows)
+                let kept = Set(rows.filter(\.isTrashed).map(\.instanceID)).subtracting(trashed).count
                 do {
                     let deleted = try DocumentTrash(context: container.mainContext).emptyTrash(confirmed: trashed)
-                    report("Trash emptied: \(deleted.count)")
+                    report("Lab trash emptied: \(deleted.count); other trashed documents kept: \(kept)")
                 } catch {
                     report(error, "Empty trash")
                 }
@@ -331,11 +360,36 @@
         /// Whether this device's re-queue pass completed (`processingRequeue.textV1`).
         var isRequeueDone: Bool { ProcessingRequeue(defaultsSuite: defaultsSuite).isDone }
 
-        /// Direct write 4 (R): clears this device's re-queue flag; the queue's next run makes the pass again.
+        /// Direct write 4 (R): clears this device's re-queue flag; the queue's next run makes the pass again. Only
+        /// with a store on disk, after the question (`canChangeDeviceSettings`).
         func resetRequeueFlag() {
+            guard canChangeDeviceSettings else {
+                report("Reset re-queue flag: only with a store on disk")
+                return
+            }
             perform { [self] in
                 SyncLabActions.resetRequeueFlag(defaultsSuite: defaultsSuite)
                 report("Re-queue flag reset; relaunch (or the next run makes the pass)")
+            }
+        }
+
+        /// Whether this device classifies (#8's per-device switch `classification.enabled`, on unless set; never
+        /// synced). The protocol turns it off on both devices before run 1, so only M1/M2 classify (review A, B3 of
+        /// PR #155).
+        var isClassificationEnabled: Bool { ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled }
+
+        /// Sets the classification switch (a device setting, not a data write; read at each decision, so the next
+        /// run follows it). Only with a store on disk, after the question.
+        func setClassification(_ enabled: Bool) {
+            guard canChangeDeviceSettings else {
+                report("Classification switch: only with a store on disk")
+                return
+            }
+            perform { [self] in
+                ClassificationSettings(defaultsSuite: defaultsSuite).isEnabled = enabled
+                Log.processing.notice("Sync lab: classification \(enabled ? "on" : "off", privacy: .public)")
+                report("Classification on this device: \(enabled ? "on" : "off")")
+                processing?.requestRun()
             }
         }
 
@@ -416,11 +470,11 @@
 
         // MARK: Export state
 
-        func export() async {
+        func export(dates: SyncLabExport.DateRounding = .nearest) async {
             isBusy = true
             defer { isBusy = false }
             do {
-                dump = try await SyncLabExport.build(container: container, defaultsSuite: defaultsSuite)
+                dump = try await SyncLabExport.build(container: container, defaultsSuite: defaultsSuite, dates: dates)
                 report("Exported: \(dump?.hash.prefix(16) ?? "")")
             } catch {
                 report(error, "Export state")

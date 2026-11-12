@@ -103,7 +103,7 @@ struct SyncLabExportTests {
             let other = try dump(seed: UInt64(seed))
             #expect(other.text == first.text, "order \(seed) gave another dump")
         }
-        #expect(first.text.hasPrefix("dump sha256=\(first.hash)\n"))
+        #expect(first.text.hasPrefix("dump sha256=\(first.hash) dates=nearest\n"))
         for name in SyncLabExport.entityNames {
             let hash = try #require(first.entityHashes[name])
             #expect(first.text.contains("entity \(name) records="), "\(name) has no header line")
@@ -134,6 +134,137 @@ struct SyncLabExportTests {
         }
     }
 
+    /// The seed's records, fetched in one context, for the per-field test.
+    private struct Records {
+        let context: ModelContext
+        let document: Document
+        let file: DocumentFile
+        let thumbnail: DocumentThumbnail
+        let text: DocumentText
+        let orphan: DocumentText
+        let parent: DokumentumCore.Tag
+        let child: DokumentumCore.Tag
+        let correspondent: Correspondent
+        let type: DocumentType
+
+        init(_ container: ModelContainer) throws {
+            context = ModelContext(container)
+            func one<T: PersistentModel>(_ type: T.Type, _ match: (T) -> Bool) throws -> T {
+                try #require(try context.fetch(FetchDescriptor<T>()).first(where: match))
+            }
+            func id(_ n: Int) -> UUID { UUID(uuidString: String(format: "00000000-0000-0000-0000-%012ld", n))! }
+            document = try one(Document.self) { $0.instanceID == id(101) }
+            file = try one(DocumentFile.self) { $0.instanceID == id(103) }
+            thumbnail = try one(DocumentThumbnail.self) { $0.instanceID == id(104) }
+            text = try one(DocumentText.self) { $0.instanceID == id(105) }
+            orphan = try one(DocumentText.self) { $0.instanceID == id(106) }
+            parent = try one(DokumentumCore.Tag.self) { $0.instanceID == id(107) }
+            child = try one(DokumentumCore.Tag.self) { $0.instanceID == id(108) }
+            correspondent = try one(Correspondent.self) { $0.instanceID == id(109) }
+            type = try one(DocumentType.self) { $0.instanceID == id(111) }
+        }
+    }
+
+    /// One change per attribute and relationship of the schema, each on a record of the seed.
+    private static let fieldChanges: [String: (Records) -> Void] = {
+        let later = Seed.base.addingTimeInterval(1_000)
+        let other = UUID(uuidString: "00000000-0000-0000-0000-000000000999")!
+        let data = Data([7, 7, 7, 7])
+        return [
+            "Document.id": { $0.document.id = other },
+            "Document.instanceID": { $0.document.instanceID = other },
+            "Document.title": { $0.document.title = "Anders" },
+            "Document.createdAt": { $0.document.createdAt = later },
+            "Document.modifiedAt": { $0.document.modifiedAt = later },
+            "Document.documentDate": { $0.document.documentDate = later },
+            "Document.isInbox": { $0.document.isInbox.toggle() },
+            "Document.pageCount": { $0.document.pageCount += 1 },
+            "Document.fileSize": { $0.document.fileSize += 1 },
+            "Document.textSourceRaw": { $0.document.textSourceRaw = "pdf" },
+            "Document.processingStateRaw": { $0.document.processingStateRaw = "failed" },
+            "Document.processingDeviceID": { $0.document.processingDeviceID = "DEVICE-B" },
+            "Document.processingClaimedAt": { $0.document.processingClaimedAt = later },
+            "Document.contentHash": { $0.document.contentHash = "def" },
+            "Document.originalFileName": { $0.document.originalFileName = "SyncLab-other.pdf" },
+            "Document.sourceRaw": { $0.document.sourceRaw = "file" },
+            "Document.deletedAt": { $0.document.deletedAt = later },
+            "Document.correspondent": { $0.document.correspondent = nil },
+            "Document.documentType": { $0.document.documentType = nil },
+            "Document.tags": { $0.document.tags = [$0.parent] },
+            "Document.file": { $0.document.file = nil },
+            "Document.thumbnail": { $0.document.thumbnail = nil },
+            "Document.text": { $0.document.text = $0.orphan },
+            "DocumentFile.id": { $0.file.id = other },
+            "DocumentFile.instanceID": { $0.file.instanceID = other },
+            "DocumentFile.createdAt": { $0.file.createdAt = later },
+            "DocumentFile.documentID": { $0.file.documentID = other },
+            "DocumentFile.pdfData": { $0.file.pdfData = data },
+            "DocumentFile.document": { $0.file.document = nil },
+            "DocumentThumbnail.id": { $0.thumbnail.id = other },
+            "DocumentThumbnail.instanceID": { $0.thumbnail.instanceID = other },
+            "DocumentThumbnail.createdAt": { $0.thumbnail.createdAt = later },
+            "DocumentThumbnail.documentID": { $0.thumbnail.documentID = other },
+            "DocumentThumbnail.imageData": { $0.thumbnail.imageData = data },
+            "DocumentThumbnail.document": { $0.thumbnail.document = nil },
+            "DocumentText.id": { $0.text.id = other },
+            "DocumentText.instanceID": { $0.text.instanceID = other },
+            "DocumentText.createdAt": { $0.text.createdAt = later },
+            "DocumentText.documentID": { $0.text.documentID = other },
+            "DocumentText.extractedText": { $0.text.extractedText = "anders" },
+            "DocumentText.document": { $0.text.document = nil },
+            "Tag.id": { $0.child.id = other },
+            "Tag.instanceID": { $0.child.instanceID = other },
+            "Tag.name": { $0.child.name = "SyncLab-Z" },
+            "Tag.colorHex": { $0.child.colorHex = "#000000" },
+            "Tag.createdAt": { $0.child.createdAt = later },
+            "Tag.mergedIntoID": { $0.child.mergedIntoID = other },
+            "Tag.mergedAt": { $0.child.mergedAt = later },
+            "Tag.parent": { $0.child.parent = nil },
+            "Tag.children": { $0.parent.children = [] },
+            "Tag.documents": { $0.child.documents = [] },
+            "Correspondent.id": { $0.correspondent.id = other },
+            "Correspondent.instanceID": { $0.correspondent.instanceID = other },
+            "Correspondent.name": { $0.correspondent.name = "Anders" },
+            "Correspondent.createdAt": { $0.correspondent.createdAt = later },
+            "Correspondent.mergedIntoID": { $0.correspondent.mergedIntoID = other },
+            "Correspondent.mergedAt": { $0.correspondent.mergedAt = later },
+            "Correspondent.documents": { $0.correspondent.documents = [] },
+            "DocumentType.id": { $0.type.id = other },
+            "DocumentType.instanceID": { $0.type.instanceID = other },
+            "DocumentType.name": { $0.type.name = "Anders" },
+            "DocumentType.createdAt": { $0.type.createdAt = later },
+            "DocumentType.mergedIntoID": { $0.type.mergedIntoID = other },
+            "DocumentType.mergedAt": { $0.type.mergedAt = later },
+            "DocumentType.documents": { $0.type.documents = [] },
+        ]
+    }()
+
+    /// Each attribute and relationship of the schema, changed alone on the seed, changes its entity's hash: the dump
+    /// writes each field's value, not only its key (review B, N1 of PR #155). The table must name every field of the
+    /// schema, so a field added later needs a change here too.
+    @Test func eachFieldChangedAloneChangesItsEntityHash() throws {
+        let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
+        var schemaFields: Set<String> = []
+        for entity in model.entities {
+            let name = try #require(entity.name)
+            for property in entity.propertiesByName.keys { schemaFields.insert("\(name).\(property)") }
+        }
+        #expect(Set(Self.fieldChanges.keys) == schemaFields, "the table does not name exactly the schema's fields")
+
+        let base = try dump(seed: 9)
+        for (field, change) in Self.fieldChanges.sorted(by: { $0.key < $1.key }) {
+            let container = try makeInMemoryContainer()
+            var generator = SplitMix64(seed: 9)
+            try Seed.insert(into: container, order: &generator)
+            let records = try Records(container)
+            change(records)
+            try records.context.save()
+            let after = try SyncLabExport.make(container: container, defaultsSuite: suite)
+            let entity = String(field.prefix { $0 != "." })
+            #expect(after.entityHashes[entity] != base.entityHashes[entity], "\(field) did not change \(entity)'s hash")
+        }
+    }
+
     /// Large values appear only as length and SHA-256 (the file also with its layer marker): never the text, the file
     /// or the thumbnail itself. The thumbnail's data is in the dump (B2).
     @Test func largeValuesAppearAsLengthAndHashOnly() throws {
@@ -158,6 +289,23 @@ struct SyncLabExportTests {
         #expect(SyncLabExport.milliseconds(Date(timeIntervalSince1970: 2)) == "2000")
         #expect(SyncLabExport.milliseconds(Date(timeIntervalSince1970: -2.0004)) == "-2000")
         #expect(SyncLabExport.milliseconds(nil) == "nil")
+    }
+
+    /// Truncating instead (for a CloudKit that truncates, review B N6 of PR #155): 0.6 ms below the next millisecond
+    /// gives the same dump as the whole millisecond, and the first line names the mode.
+    @Test func truncatedDatesDropTheSubMillisecondPart() throws {
+        func make(_ offset: TimeInterval) throws -> SyncLabExport.Dump {
+            let container = try makeInMemoryContainer()
+            var generator = SplitMix64(seed: 4)
+            try Seed.insert(into: container, order: &generator, dateOffset: offset)
+            return try SyncLabExport.make(container: container, defaultsSuite: suite, dates: .towardZero)
+        }
+        let exact = try make(0)
+        #expect(try make(0.0006).text == exact.text)
+        #expect(try make(0.0011).hash != exact.hash)
+        #expect(exact.text.hasPrefix("dump sha256=\(exact.hash) dates=towardZero\n"))
+        #expect(SyncLabExport.DateRounding.towardZero.string(Date(timeIntervalSince1970: 2.0009)) == "2000")
+        #expect(SyncLabExport.DateRounding.nearest.string(Date(timeIntervalSince1970: 2.0009)) == "2001")
     }
 
     /// Every attribute and relationship of every entity of `DokumentumSchemaV1.models`, read from the model as

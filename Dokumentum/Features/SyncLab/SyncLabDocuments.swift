@@ -10,6 +10,9 @@
     enum SyncLabDocuments {
         /// One document as the list shows it.
         struct Row: Identifiable, Hashable, Sendable {
+            /// The record itself: unique also when copies share an `instanceID` (review A, N3 of PR #155), so the
+            /// list's `ForEach` never sees one ID twice.
+            let recordID: PersistentIdentifier
             let instanceID: UUID
             let title: String
             let originalFileName: String
@@ -27,7 +30,7 @@
             let documentType: String?
             let tags: [String]
 
-            var id: UUID { instanceID }
+            var id: PersistentIdentifier { recordID }
 
             var isLabDocument: Bool { SyncLabActions.isLabDocument(originalFileName: originalFileName) }
 
@@ -52,7 +55,7 @@
             let documents = try context.fetch(FetchDescriptor<Document>())
             return documents.map { document in
                 Row(
-                    instanceID: document.instanceID, title: document.title,
+                    recordID: document.persistentModelID, instanceID: document.instanceID, title: document.title,
                     originalFileName: document.originalFileName, state: document.processingStateRaw,
                     claimDevice: document.processingDeviceID, claimedAt: document.processingClaimedAt,
                     textSource: document.textSourceRaw.isEmpty ? "none" : document.textSourceRaw,
