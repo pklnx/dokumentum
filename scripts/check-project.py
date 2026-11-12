@@ -32,6 +32,10 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   PrivateCloudCompute (the framework's server model, which would send the text off the device; plan.md, section 1:
   no external services), anywhere, also in comments; and only MODEL_IMPORT_FILES import FoundationModels, in any
   form of import (an attribute, an access level, a kind). The same plain search as for the extension.
+- Every .swift file under the Debug-only folders (DEBUG_ONLY_FOLDERS: the Sync lab of #31, part 2) is one
+  `#if DEBUG` block: its first line that is neither blank nor a `//` comment is `#if DEBUG`, its last non-blank
+  line is `#endif`, and no other line starts with `#` at column 0 (a top-level `#else` or `#endif` would let code
+  out into Release builds). Release builds then do not contain the lab; the Release `strings` check of #31 shows it.
 - Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, SIGNING_OVERRIDES
   are not set in the project or a target, and Config/Unsigned.xcconfig holds exactly its three
   macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig, which is never committed, and
@@ -161,6 +165,8 @@ SHARE_TARGET = "DokumentumShare"
 SHARE_FOLDER = "DokumentumShare"
 # The store and the model stay out of the extension (CLAUDE.md, plan.md section 3.4).
 SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
+# Folders whose Swift files are compiled only in Debug builds (#31, part 2: the Sync lab writes past the app's paths).
+DEBUG_ONLY_FOLDERS = ["Dokumentum/Features/SyncLab"]
 # The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
 SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
 # The only Swift files that may import FoundationModels: the classifier, and its tests, which construct the
@@ -629,6 +635,28 @@ def check_model_sources(root):
     return problems
 
 
+def check_debug_only_sources(root):
+    """Each Swift file of DEBUG_ONLY_FOLDERS is one top-level `#if DEBUG` … `#endif` block (see the docstring)."""
+    problems = []
+    for folder in DEBUG_ONLY_FOLDERS:
+        for path in sorted((root / folder).rglob("*.swift")):
+            name = path.relative_to(root)
+            lines = path.read_bytes().decode("utf-8", errors="replace").splitlines()
+            code = [(number, line) for number, line in enumerate(lines, start=1)
+                    if line.strip() and not line.strip().startswith("//")]
+            if not code or code[0][1].rstrip() != "#if DEBUG":
+                problems.append(f"{name}: must start with #if DEBUG (Debug builds only, {folder})")
+                continue
+            if code[-1][1].rstrip() != "#endif":
+                problems.append(f"{name}: must end with the #endif of its #if DEBUG ({folder})")
+                continue
+            for number, line in code[1:-1]:
+                if line.startswith("#"):
+                    problems.append(f"{name}:{number}: a top-level {line.split()[0]} inside the #if DEBUG block; "
+                                    "only nested, indented conditions are allowed")
+    return problems
+
+
 def check_unsigned_xcconfig(root):
     path = root / UNSIGNED_XCCONFIG
     if not path.is_file():
@@ -797,6 +825,7 @@ def check(root):
     problems += check_share_extension(objects, project)
     problems += check_share_sources(root)
     problems += check_model_sources(root)
+    problems += check_debug_only_sources(root)
     problems += check_local_xcconfig(root)
     problems += check_entitlements(root)
     problems += check_info_plists(root)
@@ -1412,6 +1441,19 @@ def self_test():
          "Dokumentum/App/Model.swift:1: contains PrivateCloudCompute"),
         ("build output is not searched", write_deep("build/Gen/A.swift", "import FoundationModels\n"), None),
         ("hidden folders are not searched", write_deep(".build/checkouts/A.swift", "import FoundationModels\n"), None),
+        ("a Debug-only file", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "#if DEBUG\n    import SwiftUI\n    #if os(iOS)\n    #endif\n#endif\n"), None),
+        ("a Debug-only file after comments", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "// Lab\n\n#if DEBUG\n    let x = 1\n#endif\n\n"), None),
+        ("a Debug-only file without the guard", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "import SwiftUI\n"), "must start with #if DEBUG"),
+        ("a Debug-only file under another condition", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "#if DEBUG || RELEASE\n#endif\n"),
+         "must start with #if DEBUG"),
+        ("a Debug-only file with code after the block", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "#if DEBUG\n#endif\nlet x = 1\n"),
+         "must end with the #endif"),
+        ("a Debug-only file with a top-level #else", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "#if DEBUG\n    let x = 1\n#else\n    let x = 2\n#endif\n"),
+         "Lab.swift:3: a top-level #else"),
+        ("a Debug-only file with two blocks", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift", "#if DEBUG\n#endif\nlet x = 1\n#if DEBUG\n#endif\n"),
+         "Lab.swift:2: a top-level #endif"),
+        ("a Debug-only file in a subfolder", write_deep(f"{DEBUG_ONLY_FOLDERS[0]}/Lab.swift".replace("Lab.swift", "Sub/Lab.swift"), "let x = 1\n"),
+         "Sub/Lab.swift: must start with #if DEBUG"),
         # Xcode reads a space inside the bracket as part of the pattern, so these conditions match no SDK.
         ("a space in a condition", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx *] = Config/x.plist"),
          "[sdk=macosx *] uses a condition"),

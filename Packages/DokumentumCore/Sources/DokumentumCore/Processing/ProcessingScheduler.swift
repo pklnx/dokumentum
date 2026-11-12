@@ -25,6 +25,12 @@ import SwiftData
 /// The app pauses when the scene goes to the background on iOS and when the Mac app quits, and resumes on
 /// `scenePhase == .active` (`ProcessingLifecycle`).
 ///
+/// **The hold (#31, T14; the Sync lab's "Hold processing on this device", Debug builds).** A flag of its own, apart
+/// from the pause: a run starts only when neither is set. `hold()` interrupts a running run as `pause()` does;
+/// `releaseHold()` clears only the hold and `resume()` only the pause, so a scene activation or a background task
+/// (which call `resume()`) never ends a hold, and a background pause during a hold is neither lost nor kept too long.
+/// The hold writes nothing and lives in memory: it ends with the process.
+///
 /// **App Nap (#130).** Each drain (a run and the runs queued during it) holds one activity (`ProcessingActivityHolding`,
 /// `SystemProcessingActivity` on the Mac), from its start until it ends, also when `pause()` ended it. The wake timer
 /// between runs holds none.
@@ -48,6 +54,10 @@ public final class ProcessingScheduler {
     public private(set) var isQueued = false
     /// Whether `pause()` holds the runs until `resume()`.
     public private(set) var isPaused = false
+    /// Whether `hold()` holds the runs until `releaseHold()` (the Sync lab, #31 T14). Apart from `isPaused`.
+    public private(set) var isHeld = false
+    /// The report of the last run that ended, if any (the Sync lab shows it).
+    public private(set) var lastReport: ProcessingReport?
     /// Whether a run is going on. For tests.
     public var isRunning: Bool { running != nil }
     /// How many runs ended. For tests.
@@ -59,8 +69,8 @@ public final class ProcessingScheduler {
     /// Called on the main actor at each `requestRun()`, whatever its trigger. For tests, which wait for a trigger
     /// to be handled instead of polling.
     public var didRequestRun: (@MainActor () -> Void)?
-    /// Called on the main actor when the runs end and none follows: no run queued and not paused (a run ended by
-    /// `pause()` is not drained). The app's background tasks (`BackgroundProcessing`, plan of #6, part 5) complete
+    /// Called on the main actor when the runs end and none follows: no run queued, not paused and not held (a run
+    /// ended by `pause()` or `hold()` is not drained). The app's background tasks (`BackgroundProcessing`, plan of #6, part 5) complete
     /// on it; a timer for the next claim expiry or backoff end may still be set.
     public var didDrain: (@MainActor () -> Void)?
 
@@ -144,10 +154,11 @@ public final class ProcessingScheduler {
         scheduledWake = nil
     }
 
-    /// Runs the queue now, or once more after the run that is going on. Nothing while paused: `resume()` runs.
+    /// Runs the queue now, or once more after the run that is going on. Nothing while paused or held: `resume()`
+    /// and `releaseHold()` run, once neither is set.
     public func requestRun() {
         didRequestRun?()
-        guard !isPaused else { return }
+        guard !isPaused, !isHeld else { return }
         guard running == nil else {
             isQueued = true
             return
@@ -166,6 +177,21 @@ public final class ProcessingScheduler {
         runner.interruptNow()
     }
 
+    /// Holds processing on this device (#31, T14): interrupts the running run as `pause()` does (the attempt is given
+    /// back) and starts no run until `releaseHold()`, whatever `resume()` says. Writes nothing.
+    public func hold() {
+        isHeld = true
+        isQueued = false
+        running?.cancel()
+        runner.interruptNow()
+    }
+
+    /// Ends the hold and runs the queue, unless `pause()` still holds it (then `resume()` runs).
+    public func releaseHold() {
+        isHeld = false
+        requestRun()
+    }
+
     /// "Try again" (#6, P2) through the runner (`ProcessingQueue.retry(_:)`), then a run, which processes the document
     /// at once. `.failed` when the runner cannot retry (a test's stub).
     public func retry(_ instanceID: UUID) async -> ProcessingRetryOutcome {
@@ -175,7 +201,8 @@ public final class ProcessingScheduler {
         return outcome
     }
 
-    /// Ends a pause and starts a run. Without a pause, it requests a run like any trigger.
+    /// Ends a pause and starts a run. Without a pause, it requests a run like any trigger. It never ends a hold: a
+    /// held scheduler stays held, and runs after `releaseHold()`.
     public func resume() {
         isPaused = false
         requestRun()
@@ -190,6 +217,7 @@ public final class ProcessingScheduler {
             // The queue is an actor of its own: the run leaves the main actor.
             let report = await runner.run()
             completedRuns += 1
+            lastReport = report
             scheduleWake(report.nextWake)
             didFinishRun?(report)
         } while isQueued && !Task.isCancelled
@@ -197,7 +225,7 @@ public final class ProcessingScheduler {
         // A `resume()` while a paused run was ending queued this one.
         if isQueued {
             requestRun()
-        } else if !isPaused {
+        } else if !isPaused, !isHeld {
             didDrain?()
         }
     }

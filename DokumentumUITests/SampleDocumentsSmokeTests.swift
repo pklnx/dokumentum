@@ -83,5 +83,22 @@ final class SampleDocumentsSmokeTests: XCTestCase {
         XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)).count, Self.inboxSamples)
         XCTAssertFalse(ui.element("documentList.empty").exists, "the list still says it is empty")
         ui.attachWindowScreenshot("2-samples-added", to: self)
+
+        // The Sync lab (#31, part 2) opens from the same debug menu: a window on the Mac, a sheet on the iPhone.
+        #if os(macOS)
+            ui.app.activate()
+            XCTAssertTrue(menu.waitForExistence(timeout: 10), "no Debug menu")
+            menu.click()
+            let lab = ui.app.menuBars.menuItems["Sync Lab…"]
+            XCTAssertTrue(lab.waitForExistence(timeout: 10), "no “Sync Lab…” item")
+            lab.click()
+        #else
+            // Back from the Inbox to the sidebar, whose toolbar has the menu.
+            ui.app.navigationBars.buttons.element(boundBy: 0).tap()
+            ui.activate("debug.menu")
+            ui.activate("debug.syncLab")
+        #endif
+        XCTAssertTrue(ui.element("syncLab.root").waitForExistence(timeout: 20), "the Sync lab did not open")
+        ui.attachWindowScreenshot("3-sync-lab", to: self)
     }
 }

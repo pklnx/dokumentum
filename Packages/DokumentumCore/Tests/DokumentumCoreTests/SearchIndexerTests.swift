@@ -262,9 +262,12 @@ struct SearchIndexerTests {
             recorder.cancel()
             indexer.stop()
         }
+        #expect(await indexer.lastHistoryErrorCode == nil)
         indexer.start()
         await recorder.ready.wait()
         #expect(await indexer.builds == 1)
+        // The build's step 4 read the history and failed: the Sync lab shows its code (T11 of #31).
+        #expect(await indexer.lastHistoryErrorCode == "SearchIndexerTests 7")
 
         for round in 1...3 {
             try SearchStore.edit(document, in: container) { $0.title = "Vertrag \(round)" }

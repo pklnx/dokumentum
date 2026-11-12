@@ -28,6 +28,9 @@ public final class RepairScheduler {
     public private(set) var isQueued = false
     /// How many runs ended. For tests.
     public private(set) var completedRuns = 0
+    /// The report of the last run that ended (`nil` before the first, or when it failed). The Sync lab shows its
+    /// counts.
+    public private(set) var lastReport: RepairReport?
     /// Called on the main actor after each run, with its report (`nil` if it failed). For tests, which wait for
     /// it instead of polling.
     public var didFinishRun: (@MainActor (RepairReport?) -> Void)?
@@ -98,6 +101,7 @@ public final class RepairScheduler {
             let (runner, flag) = (runner, hasCompletedImport)
             let report = await Task.detached { await runner.run(hasCompletedImport: flag) }.value
             completedRuns += 1
+            lastReport = report
             didFinishRun?(report)
         } while isQueued
         running = nil

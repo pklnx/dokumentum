@@ -257,13 +257,8 @@ setting once per process, at its first store: `SQLLog.enable()` comes before any
 helpers call it).
 
 **The trash.** `DocumentTrash` (DokumentumCore) is the only code outside DEBUG tools that deletes a `Document`
-(#3, part 4). Moving to the trash and restoring set or clear `deletedAt` and `touch()` the document; nothing else
-changes, so a restored document keeps its inbox state and metadata. Empty Trash deletes only the documents its
-confirmation counted, after reading them again in a context of its own: one restored or trashed meanwhile stays.
-A document's linked PDF, thumbnail and text go with it by the model's cascade; tags, correspondents and types
-stay. **A PDF or its text that is not linked to its document at that moment is not deleted** (it can still be
-arriving by sync, or arrive after the delete): it stays as a hidden orphan that the repair counts, until #32
-decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.md` once that file exists.
+(#3, part 4); what it does and what it leaves (orphans until #32), also across devices, is in [sync.md](./sync.md),
+"Known behaviour".
 
 **Adding schema version N** (only with a real model change: identical versions have the same checksum):
 1. Copy the models into `DokumentumSchemaV<N>` (version `N.0.0`) and change them additively: new attributes
@@ -283,8 +278,11 @@ Environment" in the CloudKit Console, a maintainer step). The PR that records st
 changes. Deploying the schema to Production is the maintainer's.
 
 **Development schema.** CloudKit creates record types when records are first saved, or all at once through
-`DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
+`DebugSchemaInitializer.run()` (DEBUG, from the Sync lab, on a temporary store; never at launch and never
 from tests or an unsigned build).
+
+**Across devices** (#31, part 2): the Debug **Sync lab**, "Export state", the two-device protocol (runs 1 and 2), its
+results and the known behaviour between the iPhone and the Mac are in [sync.md](./sync.md).
 
 **The sync status** (#31, part 1). The sidebar footer shows one line for every store, on the iPhone and the Mac,
 and activating it opens "iCloud Sync" (a popover on the Mac, a sheet on the iPhone: the line, the account, the
@@ -599,6 +597,12 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
+- **The hold** (#31, T14): `ProcessingScheduler.hold()` and `releaseHold()`, a flag of its own beside the pause. A run
+  starts only when neither is set; `hold()` interrupts a running run as `pause()` does; `releaseHold()` clears only
+  the hold and `resume()` only the pause, so a scene activation or a background task never ends a hold. While held,
+  an import asks for no continued processing and a processing task that starts completes at once
+  (`BackgroundProcessing`). Only the Sync lab's "Hold processing on this device" (Debug) calls it; it writes nothing
+  and ends with the process.
 
 ## Library UI
 

@@ -508,6 +508,48 @@ struct BackgroundProcessingTests {
         #expect(setup.submits.count == 0)
     }
 
+    // MARK: - The Sync lab's hold (#31, T14)
+
+    /// While the scheduler is held, a user's import asks for no continued processing (its progress could not move);
+    /// after the hold ends, the next import asks again.
+    @Test func anImportWhileHeldAsksForNoContinuedTask() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        defer { setup.scheduler.stop() }
+        setup.scheduler.hold()
+
+        setup.background.userImported([UUID()])
+        #expect(!setup.background.isContinuedRequested, "an import while held asked for continued processing")
+        #expect(setup.background.tracked.isEmpty)
+
+        setup.scheduler.releaseHold()
+        await setup.runs.wait(for: 1)
+        let id = UUID()
+        setup.background.userImported([id])
+        await setup.submits.wait(for: 1, "no continued request after the hold ended")
+        #expect(setup.tasks.continuedRequests.count == 1)
+        #expect(setup.background.tracked == [id])
+    }
+
+    /// A processing task that starts while the scheduler is held completes at once instead of waiting for a drain
+    /// that cannot come; it runs nothing and leaves the scheduler paused in the background.
+    @Test func aProcessingTaskWhileHeldCompletesAtOnce() async throws {
+        let runner = StubRunner()
+        let setup = try makeSetup(runner: runner)
+        defer { setup.scheduler.stop() }
+        setup.open.all = 1
+        setup.open.applicationInForeground = false
+        setup.scheduler.hold()
+        setup.background.scenePhaseChanged(to: .background)
+        await setup.submits.wait(for: 1, "the processing task was not asked for")
+
+        let task = setup.tasks.launch(BackgroundTaskIdentifier.processing)
+        #expect(task.completions == [false], "the task did not complete at once")
+        #expect(!setup.background.holdsWork)
+        #expect(setup.scheduler.isPaused)
+        #expect(setup.scheduler.isHeld)
+        #expect(runner.started.count == 0)
+    }
+
     /// `ProcessingLifecycle` hands the scene's phases to the background work when there is one.
     @Test func theLifecycleHandsThePhaseToTheBackgroundWork() async throws {
         let runner = StubRunner()
