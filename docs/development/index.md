@@ -368,6 +368,11 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
   suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
   power loss during a stage still counts.
+- **App Nap** (#130): on the Mac each drain of the scheduler (a run and the runs queued during it) holds one
+  `ProcessInfo` activity with `.userInitiatedAllowingIdleSystemSleep` (`SystemProcessingActivity`, begun at the top of
+  `drain()` and ended in its `defer`, also after `pause()`), so App Nap does not slow a run while the window is hidden
+  and an idle Mac still sleeps; the wake timer between runs holds none, so a wake at a claim expiry or a backoff end
+  may come late while the app is napped, when nothing is running.
 - **The stage** (#6, part 2): `DocumentStage` opens the PDF with PDFKit (unreadable, locked or page-less fails the
   attempt) and keeps the `PDFDocument` alive until it returns, because PDFKit cannot draw a page of a released document
   (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters (counted as

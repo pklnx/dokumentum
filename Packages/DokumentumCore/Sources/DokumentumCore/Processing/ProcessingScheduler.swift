@@ -22,6 +22,10 @@ import SwiftData
 /// which gives the attempt back synchronously) and cancels it, and no run starts until `resume()`, which starts one.
 /// The app pauses when the scene goes to the background on iOS and when the Mac app quits, and resumes on
 /// `scenePhase == .active` (`ProcessingLifecycle`).
+///
+/// **App Nap (#130).** Each drain (a run and the runs queued during it) holds one activity (`ProcessingActivityHolding`,
+/// `SystemProcessingActivity` on the Mac), from its start until it ends, also when `pause()` ended it. The wake timer
+/// between runs holds none.
 @MainActor
 public final class ProcessingScheduler {
     /// Waits until a claim expires or a backoff ends; `Task.sleep` in the app.
@@ -32,6 +36,7 @@ public final class ProcessingScheduler {
     private let insertions: AsyncStream<Void>
     private let sleep: Sleep
     private let now: @Sendable () -> Date
+    private let activity: any ProcessingActivityHolding
     private var subscriptions: [Task<Void, Never>] = []
     private var running: Task<Void, Never>?
     private var wakeTimer: Task<Void, Never>?
@@ -54,13 +59,15 @@ public final class ProcessingScheduler {
 
     public init(
         runner: any ProcessingRunning, observer: StoreChangeObserver, insertions: AsyncStream<Void>,
-        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @Sendable () -> Date = { Date() }
+        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @Sendable () -> Date = { Date() },
+        activity: any ProcessingActivityHolding = NoProcessingActivity()
     ) {
         self.runner = runner
         self.observer = observer
         self.insertions = insertions
         self.sleep = sleep
         self.now = now
+        self.activity = activity
     }
 
     /// The app's scheduler for a store on disk, started.
@@ -79,8 +86,14 @@ public final class ProcessingScheduler {
             stage: DocumentStage(recognizer: VisionTextRecognizer()),
             requeue: ProcessingRequeue(defaultsSuite: failures.defaultsSuite),
             takeoverInterval: takeoverInterval ?? ProcessingClaimRules.takeoverInterval)
+        #if os(macOS)
+            // App Nap would slow a run down while the window is hidden (#130).
+            let activity: any ProcessingActivityHolding = SystemProcessingActivity()
+        #else
+            let activity: any ProcessingActivityHolding = NoProcessingActivity()
+        #endif
         let scheduler = ProcessingScheduler(
-            runner: queue, observer: observer, insertions: documentInsertions(of: container))
+            runner: queue, observer: observer, insertions: documentInsertions(of: container), activity: activity)
         scheduler.start()
         return scheduler
     }
@@ -148,6 +161,9 @@ public final class ProcessingScheduler {
     }
 
     private func drain() async {
+        // One activity per drain (#130); the `defer` ends it on every way out, also after `pause()`.
+        activity.begin()
+        defer { activity.end() }
         repeat {
             isQueued = false
             // The queue is an actor of its own: the run leaves the main actor.
