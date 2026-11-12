@@ -121,9 +121,10 @@ extension imports neither store nor model (see 3.4).
 - **Schema versions from day one** (`VersionedSchema`, `SchemaMigrationPlan`),
   with a rule: a CloudKit schema change is additive, and deploying to
   Production is a maintainer step (it cannot be undone).
-- **Sync status** is shown: last import/export event, iCloud account
-  state, account change or sign-out, "iCloud storage full". The app works
-  fully offline.
+- **Sync status** is shown: one line in the sidebar footer (last
+  import/export event, iCloud account state, account change or sign-out,
+  "iCloud storage full"), and an "iCloud Sync" detail opened from it. The
+  app works fully offline.
 - **Frozen enums.** Values that sync (`processingState`, `textSource`,
   `source`) are stored as raw `String`s and mapped to a fallback when a
   value is unknown, so an older TestFlight build on the other device never
@@ -226,7 +227,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 ### 3.6 Porting from document-archive
 | Ported (cleaned up, tests along) | Rebuilt | Dropped |
 |---|---|---|
-| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, on-device classifier with its limits and refusal note, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, import flows, image cleanup and scanner wrapper (built in step 4, #5; the predecessor's code was not read, maintainer decision M1); new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
+| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, the on-device classifier with its limits (step 7, #8: the predecessor was not readable, so its limits were measured again; P0, no refusal note in v1, P8), import flows, image cleanup and scanner wrapper (built in step 4, #5; the predecessor's code was not read, maintainer decision M1); new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
 
 ## 4. Development process
 - Workflow, roles, labels and review rules as in `pklnx/dev-process`; the

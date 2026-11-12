@@ -128,7 +128,7 @@ struct UITestApp {
     static let appIdentifierPrefixes = [
         "sidebar", "documentList", "documentDetail", "documentInfo", "import.", "trash.", "debug.", "dokumentum.",
         "cleanup",
-        "search.",
+        "search.", "syncStatus.",
     ]
 
     /// An audit issue on one of the app's own elements that the audit reports although the element is right

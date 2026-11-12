@@ -89,6 +89,38 @@ struct ClassificationStepTests {
         #expect(try store.classified(waiting).stateRaw == "done")
     }
 
+    /// Review A N-c of #146: the cut-off is recorded when the queue is set up, not at its first run. A document
+    /// imported after the app created its queue but before the first run (the share queue draining at launch) is
+    /// classified.
+    @Test func aDocumentImportedBeforeTheFirstRunOfTheLaunchIsClassified() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let failures = store.failures(deviceA)
+        let classifier = StubClassifier()
+        let queue = store.classifyingQueue(classifier: classifier, failures: failures, clock: clock)
+        #expect(ClassificationSettings(defaultsSuite: failures.defaultsSuite).since == processingStart, "at setup")
+
+        clock.advance(by: 30)
+        let shared = try store.insert(title: "Shared", created: clock.now, device: deviceA, claimedAt: clock.now)
+        clock.advance(by: 30)
+        let report = await queue.run()
+
+        #expect(report.classified == 1)
+        #expect(classifier.count == 1)
+        #expect(try store.classified(shared).title == "Jahresabrechnung Strom")
+        #expect(ClassificationSettings(defaultsSuite: failures.defaultsSuite).since == processingStart, "not moved")
+    }
+
+    /// Without a classifier no cut-off is recorded: a later build with one sets it then.
+    @Test func aQueueWithoutAClassifierRecordsNoCutOff() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let failures = store.failures(deviceA)
+        _ = ProcessingQueue(container: store.container, deviceID: deviceA, failures: failures)
+        #expect(ClassificationSettings(defaultsSuite: failures.defaultsSuite).since == nil)
+    }
+
     /// Without a classifier (the app before part 2), the switch off, or the model unavailable here, the text write
     /// sets `done` directly.
     @Test(arguments: TextWriteCase.allCases)

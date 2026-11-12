@@ -35,12 +35,27 @@ struct SyncStatusTests {
         (4, .offline),
         (26, .reset),
         (28, .reset),
+        (36, .accountUnavailable),
         (1, .other),
         (2, .other),
         (7, .other),
     ])
     func aCloudKitCodeHasItsCategory(code: Int, category: CloudErrorCategory) {
         #expect(CloudErrorCategory.classify([link(code)]) == category)
+    }
+
+    @Test func code36IsFoundUnderACocoaErrorAndInAPartialFailure() {
+        #expect(CloudErrorCategory.classify([link(134400, cocoa), link(36)]) == .accountUnavailable)
+        #expect(CloudErrorCategory.classify([link(2), link(36)]) == .accountUnavailable)
+        #expect(CloudErrorCategory.classify([link(134400, cocoa), link(2), link(36), link(4)]) == .accountUnavailable)
+    }
+
+    @Test func theDecidingCodeIsKept() {
+        #expect(CloudErrorCategory.decide([link(134400, cocoa), link(2), link(4), link(25)]).code == 25)
+        #expect(CloudErrorCategory.decide([link(2), link(4), link(26)]).code == 4)
+        #expect(CloudErrorCategory.decide([link(134400, cocoa), link(36)]).code == 36)
+        #expect(CloudErrorCategory.decide([link(2)]).code == 2)
+        #expect(CloudErrorCategory.decide([link(25, cocoa)]).code == nil)
     }
 
     @Test func storageFullIsFoundUnderACocoaError() {
@@ -185,7 +200,50 @@ struct SyncStatusTests {
         #expect(result.syncOffReason == nil)
     }
 
-    @Test func syncIsOffUntilTheAccountIsKnown() {
-        #expect(SyncStatus().syncOffReason == .couldNotDetermine)
+    @Test func theAccountIsNotKnownUntilCloudKitAnswers() {
+        let fresh = SyncStatus()
+        #expect(fresh.accountState == nil)
+        #expect(fresh.syncOffReason == nil)
+        #expect(fresh.isChecking)
+        #expect(!status(after: .accountStatus(.couldNotDetermine)).isChecking)
+        #expect(!status(after: ended(.setup)).isChecking)
+        #expect(!status(after: ended(.importing, succeeded: false, error: [link(4)])).isChecking)
+    }
+
+    @Test func aRunningEventDoesNotEndChecking() {
+        let running = SyncStatusInput.event(kind: .setup, started: start, ended: nil, succeeded: false, errorChain: [])
+        #expect(status(after: running).isChecking)
+    }
+
+    @Test(arguments: [
+        (9, SyncOffReason.noAccount),
+        (36, .temporarilyUnavailable),
+    ])
+    func anAccountFailureTurnsSyncOffUntilTheAccountAnswers(code: Int, reason: SyncOffReason) {
+        let failed = status(after: .accountStatus(.available), ended(.exporting, succeeded: false, error: [link(code)]))
+        #expect(failed.accountState == .available)
+        #expect(failed.syncOffReason == reason)
+        #expect(failed.lastErrorCode == code)
+        // The answer to the re-ask decides.
+        let answered = SyncStatusReducer.reduce(failed, .accountStatus(.available))
+        #expect(answered.syncOffReason == nil)
+        #expect(answered.lastError == nil)
+        #expect(answered.lastErrorCode == nil)
+        let gone = SyncStatusReducer.reduce(failed, .accountStatus(.noAccount))
+        #expect(gone.syncOffReason == .noAccount)
+    }
+
+    @Test func anAccountAnswerKeepsOtherErrors() {
+        let offline = status(after: ended(.exporting, succeeded: false, error: [link(4)]), .accountStatus(.available))
+        #expect(offline.lastError == .offline)
+        #expect(offline.lastErrorCode == 4)
+    }
+
+    @Test func lastSyncIsTheLaterOfImportAndExport() {
+        #expect(SyncStatus().lastSync == nil)
+        #expect(status(after: ended(.importing)).lastSync == end)
+        #expect(status(after: ended(.exporting)).lastSync == end)
+        #expect(status(after: ended(.importing, at: later), ended(.exporting)).lastSync == later)
+        #expect(status(after: ended(.importing), ended(.exporting, at: later)).lastSync == later)
     }
 }

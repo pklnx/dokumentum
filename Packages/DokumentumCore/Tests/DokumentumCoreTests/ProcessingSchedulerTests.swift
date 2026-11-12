@@ -82,7 +82,7 @@ struct ProcessingSchedulerTests {
 
     private func makeScheduler(
         runner: any ProcessingRunning, clock: TestClock = TestClock(), sleeps: SleepLog? = nil,
-        activity: ActivityLog = ActivityLog()
+        activity: ActivityLog = ActivityLog(), availabilityChanges: AsyncStream<ClassifierAvailability>? = nil
     ) throws -> Setup {
         let container = try TestSupport.makeContainer()
         let center = NotificationCenter()
@@ -92,7 +92,7 @@ struct ProcessingSchedulerTests {
         let (stream, insertions) = AsyncStream<Void>.makeStream()
         let expirySleep = expiry.sleep
         let scheduler = ProcessingScheduler(
-            runner: runner, observer: observer, insertions: stream,
+            runner: runner, observer: observer, insertions: stream, availabilityChanges: availabilityChanges,
             sleep: { duration in
                 sleeps?.durations.withLock { $0.append(duration) }
                 try await expirySleep(duration)
@@ -156,6 +156,22 @@ struct ProcessingSchedulerTests {
         setup.insertions.yield()
         await setup.runs.wait(for: 2)
         #expect(runner.started.count == 2)
+    }
+
+    /// #8, T17: each change of the classifier's availability (a model that became ready) runs the queue.
+    @Test func aChangeOfTheClassifiersAvailabilityTriggersARun() async throws {
+        let runner = StubRunner()
+        let (changes, availability) = AsyncStream<ClassifierAvailability>.makeStream()
+        let setup = try makeScheduler(runner: runner, availabilityChanges: changes)
+        defer { setup.scheduler.stop() }
+        setup.scheduler.start()
+        await setup.runs.wait(for: 1)
+
+        availability.yield(.available)
+        await setup.runs.wait(for: 2)
+        availability.yield(.unavailable(.appleIntelligenceNotEnabled))
+        await setup.runs.wait(for: 3)
+        #expect(runner.started.count == 3)
     }
 
     @Test func aStoreChangeTriggersARunAfterTheDebounce() async throws {
