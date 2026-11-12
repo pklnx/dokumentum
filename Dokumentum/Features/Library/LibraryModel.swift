@@ -23,6 +23,11 @@ enum DetailState: Equatable {
 @MainActor @Observable
 final class LibraryModel {
     let source: any LibrarySource
+    /// The app's one search index (#7, part 2), shared by every window; `nil` for fixture sources in unit tests.
+    /// The search field (part 3) queries it.
+    let searcher: (any DocumentSearching)?
+    /// The index's newest state: `observeSearchIndex()` follows its updates. `nil` until the first one.
+    private(set) var searchIndexState: SearchIndexState?
 
     private(set) var snapshot = LibrarySnapshot.empty
     private(set) var tree = TagTree([])
@@ -68,8 +73,9 @@ final class LibraryModel {
 
     /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
     ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
-    init(source: any LibrarySource, loadNow: Bool = true) {
+    init(source: any LibrarySource, searcher: (any DocumentSearching)? = nil, loadNow: Bool = true) {
         self.source = source
+        self.searcher = searcher
         if loadNow { reload() }
     }
 
@@ -101,6 +107,17 @@ final class LibraryModel {
         for await _ in source.changes {
             reload()
             if let selectedDocumentID { await loadDetail(for: selectedDocumentID) }
+        }
+    }
+
+    /// Follows the search index's updates, one subscription per window (Revision 1, B3), until the calling task is
+    /// cancelled. The root view runs it in `.task`.
+    func observeSearchIndex() async {
+        guard let searcher else { return }
+        let updates = searcher.updates()
+        searchIndexState = await searcher.state
+        for await state in updates {
+            searchIndexState = state
         }
     }
 

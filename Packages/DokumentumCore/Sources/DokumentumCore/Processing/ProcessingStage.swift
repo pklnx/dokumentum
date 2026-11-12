@@ -1,12 +1,18 @@
+import CoreGraphics
+import DokumentumKit
 import Foundation
 import PDFKit
 
 /// What the stages found in a document's PDF: the fields the result write sets when they differ.
 public struct ProcessingResult: Equatable, Sendable {
     public var pageCount: Int
+    /// The document's text and its source; `nil` leaves the text record and `textSource` as they are (a test's
+    /// stage that only counts pages).
+    public var text: ExtractedText?
 
-    public init(pageCount: Int) {
+    public init(pageCount: Int, text: ExtractedText? = nil) {
         self.pageCount = pageCount
+        self.text = text
     }
 }
 
@@ -15,8 +21,7 @@ public struct ProcessingResult: Equatable, Sendable {
 public typealias ProcessingProgress = @Sendable (_ completed: Int, _ total: Int) -> Void
 
 /// The work on one document's PDF (plan of #4, part 5): it runs off the main actor, with no context open, and
-/// throws when the document cannot be processed. Step 3 has one stage, `InspectStage`; step 5 adds text, OCR, the
-/// text layer and the thumbnail here. Tests pass their own.
+/// throws when the document cannot be processed. The app's stage is `DocumentStage`; tests pass their own.
 ///
 /// A stage reports `progress` at least once per page, and checks for cancellation between pages: the queue cancels
 /// it after an interruption or when no progress came for the stall timeout (300 s), and never waits for a cancelled
@@ -25,21 +30,58 @@ public protocol ProcessingStage: Sendable {
     func process(pdfData: Data, progress: @escaping ProcessingProgress) async throws -> ProcessingResult
 }
 
-/// Step 3's one stage, "inspect": PDFKit opens the PDF and gives its page count.
-public struct InspectStage: ProcessingStage {
+/// The app's stage (#6, part 2): PDFKit opens the PDF (unreadable, locked or page-less throws, as step 3's inspect
+/// did) and each page gives its text:
+/// - a page whose own text has at least 16 non-whitespace characters is a text page (T2), its text trimmed;
+/// - every other page is rendered in grayscale at 2400 px on the long side (T3) and recognised (T1,
+///   `VisionTextRecognizer`), its lines joined by newlines.
+///
+/// The text is the pages' texts in page order, joined with a form feed (`ExtractedText`); the source is `.pdfText`
+/// when every page was a text page, else `.vision`, also when nothing was found. Before each page the stage checks
+/// for cancellation, after it reports progress (page k of n). One page image is alive at a time (an autorelease pool
+/// per render), and the `PDFDocument` is kept alive for the whole stage, because PDFKit cannot draw a page whose
+/// document was released (P-h).
+public struct DocumentStage: ProcessingStage {
     public enum Failure: Error, Equatable {
         /// PDFKit cannot open it, it is locked, or it has no page.
         case unreadablePDF
+        /// A page that needs recognition could not be rendered.
+        case renderFailed
     }
 
-    public init() {}
+    public let recognizer: any TextRecognizing
+
+    public init(recognizer: any TextRecognizing = VisionTextRecognizer()) {
+        self.recognizer = recognizer
+    }
 
     @concurrent
     public func process(pdfData: Data, progress: @escaping ProcessingProgress) async throws -> ProcessingResult {
         guard let document = PDFDocument(data: pdfData), !document.isLocked, document.pageCount > 0 else {
             throw Failure.unreadablePDF
         }
-        progress(document.pageCount, document.pageCount)
-        return ProcessingResult(pageCount: document.pageCount)
+        // Held to the end: a page is drawn only while its document lives (P-h).
+        defer { withExtendedLifetime(document) {} }
+        let total = document.pageCount
+        progress(0, total)
+        var pages: [String] = []
+        var recognised = false
+        for index in 0..<total {
+            try Task.checkCancellation()
+            guard let page = document.page(at: index) else { throw Failure.unreadablePDF }
+            if let text = PageText.embeddedText(of: page) {
+                pages.append(text)
+            } else {
+                // The image goes when the page is recognised: one page image at a time.
+                let image = autoreleasepool { PageText.render(page) }
+                guard let image else { throw Failure.renderFailed }
+                let lines = try await recognizer.recognizeText(in: image)
+                pages.append(lines.map(\.text).joined(separator: "\n"))
+                recognised = true
+            }
+            progress(index + 1, total)
+        }
+        return ProcessingResult(
+            pageCount: total, text: ExtractedText(pages: pages, source: recognised ? .vision : .pdfText))
     }
 }
