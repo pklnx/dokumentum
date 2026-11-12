@@ -1174,6 +1174,15 @@ preview image whose default Xcode is newer than the pin.
 **Before a TestFlight build**, start `.github/workflows/release.yml` (`workflow_dispatch`) on the release commit: it
 runs the full `Default` plan and the `UISmoke` plan on iOS and on macOS (`release-ios`, `release-macos`).
 
+**UISmoke on the hosted runners does not pass yet** (first runs 2026-11-12, run 43314705135, attempts 1 and 2; the
+`Default` plan passed on macOS both times). On macOS, 12 of 13 UI tests pass and `ScanSmokeTests.testScanAndCleanupLandInInbox`
+fails both times with the accessibility audit's "Contrast failed for Inbox empty" (the placeholder behind the cleanup
+sheet; the runner is a virtual machine). On iOS, attempt 1 had 10 passed and 2 failed with timeouts that look like load
+on the 3-CPU runner (`LibrarySmokeTests.testSidebarFiltersAndOpensAPDF`: "Timed out while evaluating UI query";
+`ScanSmokeTests.testScanAndCleanupLandInInbox`: "Audit failed to complete in time"); the UISmoke plan took 19 minutes
+there. The tests are not weakened; the workflow stays as the intended gate, and until these are understood a red
+`release-*` run is expected. Follow-up issue: see #163's PR.
+
 ### Xcode Cloud
 
 Kept for the TestFlight uploads (step 8). It was the PR check until 2026-11-12, when its monthly usage
