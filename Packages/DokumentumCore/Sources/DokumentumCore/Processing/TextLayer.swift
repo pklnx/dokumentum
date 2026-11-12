@@ -23,12 +23,16 @@ import PDFKit
 ///
 /// The rewrite (P-l): every page redrawn with `drawPDFPage` into a `CGContext` page with the source's media and
 /// crop box, each recognised line drawn invisibly into its bounding box (font size the box height, scaled to the
-/// box width); then a PDFKit pass sets every page's rotation from the source, copies the source's Info attributes
-/// and adds `DokumentumTextLayer` = `1`, and writes `dataRepresentation()`.
+/// box width); then a PDFKit pass sets every page's rotation from the source and writes `dataRepresentation()`;
+/// then an incremental update replaces the Info dictionary with the source's entries, each with its type and exact
+/// value, plus `DokumentumTextLayer` = `1` (`TextLayerInfo.swift`; PDFKit's own Info changes values, B1 of PR #134).
+/// An Info entry that cannot be carried exactly (a stream) means no rewrite. Between pages the redraw and the guard
+/// stop when the stage is cancelled (`Kept.cancelled`).
 ///
 /// **The guard** (`verify`, all must hold, else the original stays): the new PDF opens, unencrypted; the same page
 /// count; its catalog and pages within the allow-lists; per page the same media box, crop box and rotation; the
-/// same Info attributes and Info keys plus the marker; every line of each source page's own text still in the
+/// same Info attributes (PDFKit) and every Info entry with its type and exact value (CoreGraphics: a string's bytes,
+/// so a date keeps its text and time zone) plus the marker; every line of each source page's own text still in the
 /// page's text; every drawn line in its page's text; and every page rendered pixel-identical to the source at
 /// 300 px on the long side (crop box, rotation applied, RGB).
 public struct TextLayer: Sendable {
@@ -61,8 +65,12 @@ public struct TextLayer: Sendable {
         case pageKey(page: Int, key: String)
         /// A font without an embedded font program on the page at `page`.
         case nonEmbeddedFont(page: Int)
+        /// An Info entry that cannot be carried exactly (a stream): the rewrite would change it.
+        case infoValue
         /// The redraw or the PDFKit pass gave no PDF.
         case rewriteFailed
+        /// The stage was cancelled during the layer (N-1 of PR #134's review B).
+        case cancelled
         /// The rewritten PDF did not pass the guard.
         case guardFailed(GuardFailure)
 
@@ -76,7 +84,9 @@ public struct TextLayer: Sendable {
             case .catalogKey: "catalogKey"
             case .pageKey: "pageKey"
             case .nonEmbeddedFont: "nonEmbeddedFont"
+            case .infoValue: "infoValue"
             case .rewriteFailed: "rewriteFailed"
+            case .cancelled: "cancelled"
             case .guardFailed(let failure): "guard.\(failure.code)"
             }
         }
@@ -140,15 +150,14 @@ public struct TextLayer: Sendable {
         guard !drawable.isEmpty else { return .kept(.noLines) }
         guard let source = Self.cgDocument(data) else { return .kept(.unreadable) }
         if let refusal = Self.refusal(of: source, document: document) { return .kept(refusal) }
-        guard var rewritten = Self.rewrite(source, document: document, lines: drawable, progress: progress) else {
-            return .kept(.rewriteFailed)
-        }
+        let rewrite = Self.rewrite(source, document: document, lines: drawable, progress: progress)
+        // Between pages the redraw and the guard stop when the stage is cancelled; whatever they gave is dropped.
+        if Task.isCancelled { return .kept(.cancelled) }
+        guard var rewritten = rewrite else { return .kept(.rewriteFailed) }
         if let alterRewrite { rewritten = alterRewrite(rewritten) }
-        if let failure = Self.verify(
-            rewritten, against: source, document: document, lines: drawable, progress: progress)
-        {
-            return .kept(.guardFailed(failure))
-        }
+        let failure = Self.verify(rewritten, against: source, document: document, lines: drawable, progress: progress)
+        if Task.isCancelled { return .kept(.cancelled) }
+        if let failure { return .kept(.guardFailed(failure)) }
         return .layered(rewritten)
     }
 
@@ -174,6 +183,7 @@ public struct TextLayer: Sendable {
         if source.isEncrypted || document.isEncrypted || document.isLocked { return .encrypted }
         if isMarked(source, document: document) { return .marked }
         guard let catalog = source.catalog else { return .unreadable }
+        guard info(of: source) != nil else { return .infoValue }
         if let key = keys(of: catalog).sorted().first(where: { !catalogKeys.contains($0) }) {
             return .catalogKey(key)
         }
@@ -306,8 +316,10 @@ public struct TextLayer: Sendable {
 
     // MARK: - The rewrite
 
-    /// The redraw with the invisible lines, then the PDFKit pass (rotation, attributes, marker). `nil` when either
-    /// step gives no PDF.
+    /// The redraw with the invisible lines, then the PDFKit pass (rotation), then an incremental update that replaces
+    /// the Info dictionary with the source's entries, exactly as CoreGraphics reads them, plus the marker
+    /// (`replacingInfo`): PDFKit's own Info rewrites values (Keywords as an array, dates in this device's time zone,
+    /// booleans as integers; B1 of PR #134). `nil` when a step gives no PDF.
     static func rewrite(
         _ source: CGPDFDocument, document: PDFDocument, lines: [Int: [RecognizedLine]], progress: () -> Void
     ) -> Data? {
@@ -321,7 +333,8 @@ public struct TextLayer: Sendable {
         var attributes = document.documentAttributes ?? [:]
         attributes[markerKey] = "1"
         pass.documentAttributes = attributes
-        return pass.dataRepresentation()
+        guard let written = pass.dataRepresentation(), let info = info(of: source) else { return nil }
+        return replacingInfo(in: written, with: markedInfo(info))
     }
 
     static func redraw(
@@ -334,6 +347,7 @@ public struct TextLayer: Sendable {
         var firstBox = first.getBoxRect(.mediaBox)
         guard let context = CGContext(consumer: consumer, mediaBox: &firstBox, nil) else { return nil }
         for index in 0..<source.numberOfPages {
+            guard !Task.isCancelled else { return nil }
             guard let page = source.page(at: index + 1), let original = document.page(at: index) else { return nil }
             var mediaBox = page.getBoxRect(.mediaBox)
             var cropBox = page.getBoxRect(.cropBox)
@@ -414,6 +428,7 @@ public struct TextLayer: Sendable {
             }
         }
         for index in 0..<document.pageCount {
+            guard !Task.isCancelled else { return .pixels(page: index) }
             let same = autoreleasepool { () -> Bool in
                 guard let before = document.page(at: index), let after = output.page(at: index),
                     let expected = pixels(of: before), let actual = pixels(of: after)
@@ -426,17 +441,17 @@ public struct TextLayer: Sendable {
         return nil
     }
 
-    /// The same Info attributes as the source plus the marker, as PDFKit reads them, and the same Info keys plus the
-    /// marker, as CoreGraphics reads them (an entry PDFKit does not show is still compared by its key).
+    /// The same Info attributes as the source plus the marker, as PDFKit reads them, and **every Info entry the same
+    /// as the source's plus the marker, as CoreGraphics reads it: its type and its exact value** (a string's bytes,
+    /// so a date keeps its text and its time zone; B1 of PR #134).
     static func attributesMatch(
         _ output: PDFDocument, _ outputCG: CGPDFDocument, source: CGPDFDocument, document: PDFDocument
     ) -> Bool {
         var expected = document.documentAttributes ?? [:]
         expected[markerKey] = "1"
         guard NSDictionary(dictionary: expected).isEqual(to: output.documentAttributes ?? [:]) else { return false }
-        let sourceKeys = source.info.map(keys(of:)) ?? []
-        let outputKeys = outputCG.info.map(keys(of:)) ?? []
-        return outputKeys == sourceKeys.union([markerKey])
+        guard let sourceInfo = info(of: source), let outputInfo = info(of: outputCG) else { return false }
+        return outputInfo == markedInfo(sourceInfo)
     }
 
     /// `text` without whitespace: the extracted text of a page may break or join lines differently.

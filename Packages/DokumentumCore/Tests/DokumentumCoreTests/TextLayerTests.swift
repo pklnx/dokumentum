@@ -96,9 +96,50 @@ struct TextLayerTests {
             try ModelContext(container).fetch(FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == id }))
                 .first?.file?.pdfData)
 
-        guard case .layered = try layer(data) else {
+        guard case .layered(let layered) = try layer(data) else {
             Issue.record("not layered: \(try layer(data))")
             return
+        }
+        // Its Info (Quartz's Producer and dates in `Z00'00'`) exactly as it was, plus the marker (B1 of PR #134).
+        #expect(try Self.info(layered) == TextLayer.markedInfo(try Self.info(data)))
+    }
+
+    /// The Info entries of `data` as CoreGraphics reads them.
+    static func info(_ data: Data) throws -> [[UInt8]: TextLayer.InfoValue] {
+        let document = try #require(TextLayer.cgDocument(data))
+        return try #require(TextLayer.info(of: document))
+    }
+
+    /// B1 of PR #134: every Info entry keeps its type and exact value through the rewrite (PDFKit alone turns
+    /// Keywords into an array, writes dates in this device's time zone and booleans as integers).
+    @Test(arguments: [
+        "/Keywords (Rechnung; Steuer 2026, wichtig)",
+        "/Flag true /Count 3 /Ratio 0.25 /Trapped /False /Custom [1 (zwei) /Drei << /Vier null >>]",
+        "/CreationDate (D:20260315103000Z) /ModDate (D:20260315103000-05'00')",
+        "/CreationDate (D:20260315103000)",
+        "/CreationDate (D:20260315) /ModDate (D:2017)",
+        "/Title (Rechnung M\\374nchen) /Author (\\376\\377\\000A\\000\\344)",
+    ])
+    func anInfoEntryKeepsItsTypeAndExactValue(_ entries: String) throws {
+        let source = TestPDF.makeRaw(pages: [.bar()], info: "<< \(entries) >>")
+
+        let outcome = try layer(source)
+
+        guard case .layered(let layered) = outcome else {
+            Issue.record("not layered: \(outcome)")
+            return
+        }
+        let before = try Self.info(source)
+        #expect(!before.isEmpty)
+        #expect(try Self.info(layered) == TextLayer.markedInfo(before))
+        if entries.hasPrefix("/Keywords") {
+            // The document holds its Info: keep it alive while the string is read.
+            let document = try #require(TextLayer.cgDocument(layered))
+            let info = try #require(document.info)
+            var keywords: CGPDFStringRef?
+            #expect(CGPDFDictionaryGetString(info, "Keywords", &keywords), "Keywords is no longer a string")
+            #expect(keywords.flatMap { CGPDFStringCopyTextString($0) as String? } == "Rechnung; Steuer 2026, wichtig")
+            withExtendedLifetime(document) {}
         }
     }
 
@@ -222,6 +263,12 @@ struct TextLayerTests {
             name: "a non-embedded font",
             pdf: TestPDF.makeRaw(pages: [.standardFontText("Rechnung Nummer 2026-0042"), .bar()]),
             reason: .nonEmbeddedFont(page: 0)),
+        // An Info entry the rewrite cannot carry exactly (B1 of PR #134).
+        Kept(
+            name: "a stream in the Info dictionary",
+            pdf: TestPDF.makeRaw(
+                pages: [.bar()], objects: [TestPDF.stream("", "Anhang")], info: "<< /Title (T) /Extra 3 0 R >>"),
+            reason: .infoValue),
     ]
 
     @Test(arguments: keptCases)
@@ -274,6 +321,40 @@ struct TextLayerTests {
     }
 
     // MARK: - The guard
+
+    /// The guard's Info compare: a rewrite whose Keywords became an array (what PDFKit writes) is rejected.
+    @Test func theGuardRejectsAChangedInfoValue() throws {
+        let source = TestPDF.makeRaw(pages: [.bar()], info: "<< /Keywords (a, b) >>")
+        let document = try #require(PDFDocument(data: source))
+        let textLayer = TextLayer { data in
+            var info = (try? Self.info(source)).map(TextLayer.markedInfo) ?? [:]
+            info[Array("Keywords".utf8)] = .array([.string(Array("a".utf8)), .string(Array("b".utf8))])
+            return TextLayer.replacingInfo(in: data, with: info) ?? data
+        }
+
+        #expect(
+            textLayer.apply(to: source, document: document, lines: [0: StubRecognizer.boxedLines(Self.lines)])
+                == .kept(.guardFailed(.attributes)))
+    }
+
+    /// N-1 of PR #134's review B: a stage cancelled during the layer stops after the page it is on and throws.
+    @Test func aCancelledStageStopsTheLayerAfterItsPage() async throws {
+        let source = TestPDF.makeImageOnly(pages: [["a"], ["b"], ["c"]])
+        let layerReports = ProgressCounter()
+        let stage = stage()
+
+        let run = Task {
+            try await stage.process(pdfData: source) { completed, total in
+                // The last page's own report, then one per page of the redraw: cancel at the redraw's first.
+                guard completed == total else { return }
+                layerReports.add()
+                if layerReports.count == 2 { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+        }
+
+        await #expect(throws: CancellationError.self) { try await run.value }
+        #expect(layerReports.count == 2, "the redraw went on after the cancel")
+    }
 
     /// The guard's pixel compare: a rewrite whose page looks different is rejected, every other check holding. The
     /// difference is made in the test (the same rewrite, drawn from a copy whose bar sits 10 pt lower), because how a

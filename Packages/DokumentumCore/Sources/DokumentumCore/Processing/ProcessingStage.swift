@@ -105,6 +105,8 @@ public struct DocumentStage: ProcessingStage {
             {
             case .layered(let data):
                 layered = data
+            case .kept(.cancelled):
+                throw CancellationError()
             case .kept(let reason):
                 Log.processing.notice("No text layer; the file is kept as it is: \(reason.code, privacy: .public)")
             }
