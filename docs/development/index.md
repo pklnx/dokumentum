@@ -362,6 +362,11 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`willTerminateNotification`), and resumes on `.active` (`ProcessingLifecycle`). The refund completes before iOS
   suspends the app, so a later kill of the suspended app leaves nothing counted; a crash, an out-of-memory kill or a
   power loss during a stage still counts.
+- **App Nap** (#130): on the Mac each drain of the scheduler (a run and the runs queued during it) holds one
+  `ProcessInfo` activity with `.userInitiatedAllowingIdleSystemSleep` (`SystemProcessingActivity`, begun at the top of
+  `drain()` and ended in its `defer`, also after `pause()`), so App Nap does not slow a run while the window is hidden
+  and an idle Mac still sleeps; the wake timer between runs holds none, so a wake at a claim expiry or a backoff end
+  may come late while the app is napped, when nothing is running.
 - **The stage** (#6, part 2): `DocumentStage` opens the PDF with PDFKit (unreadable, locked or page-less fails the
   attempt) and keeps the `PDFDocument` alive until it returns, because PDFKit cannot draw a page of a released document
   (P-h). A page whose own text (`page.string`, trimmed) has at least 16 non-whitespace characters (counted as
@@ -678,13 +683,18 @@ below).
 - **Words** (`SearchTokenizer`): maximal runs of letters, digits and combining marks; everything else
   separates (hyphen, U+2011, slash, apostrophe, the form feed between pages). "12.03.2024" is three words. A
   hyphen (`-`, U+2010 or a soft hyphen) at a line end joins the word only before a lowercase letter
-  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). A soft hyphen inside a word is
-  removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
+  ("Steuer-\nbescheid" → `steuerbescheid`, "Kfz-\nSteuer" stays two). The line end may also be a form feed (a
+  page end), alone or with one line break before or after it ("Steuer-\fbescheid", "Steuer-\n\fbescheid" and
+  "Steuer-\f\nbescheid" → `steuerbescheid`); two line breaks or two form feeds separate. A soft hyphen inside a
+  word is removed ("Steuer\u{AD}bescheid" → `steuerbescheid`). Plain ASCII words are only lowercased;
   other words are normalised once per distinct form (`SearchNormalizer.Cache`, kept until `mergeOverflow`).
 - **Matching** (P1): every term of a query must match, each in any field. A term matches a word that starts
   with it; from 4 characters (`SearchIndex.infixMinimumLength`) also one that contains it. The 4 counts
   the characters of the word as typed (not bytes: `θην` does not find "Αθήνα"), and it holds for every
-  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. Transcriptions: the
+  alternative form (`SearchTerm.allowsInfix`), so "Mül" does not infix-match "Schmueller" through `muel`. An
+  alternative also needs 4 characters of its own, so "muel" does not infix-match "Formular" through `mul`
+  (#132). The trade-off: "muel" also no longer finds "Schmüller" (indexed `schmuller`) by infix; it still finds
+  "Schmueller", "Mueller", "Müller" and "Müll", and "Müll"/"muell" infix-match "Schmüller". Transcriptions: the
   index also stores the *a/o/u* form of every word with *ae/oe/ue* (`mueller` → also `muller`; a side effect is
   `steuer` → also `steur`); a query term also tries its *a/o/u* form and, typed with ä/ö/ü, its *ae/oe/ue*
   form. So "Müller", "Mueller" and "muller" find each other in every direction.
