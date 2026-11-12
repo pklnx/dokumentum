@@ -225,7 +225,13 @@ to-one cascade relationships. SwiftData on 27 ignores `propertiesToFetch` (measu
 what keeps lists light. **A document's file and text are created once, at import**, in the same save as the
 document, the text with an empty `extractedText`. Later steps write `pdfData` and `extractedText` in place and
 never insert a second file or text; processing requires `text != nil`. A second one that still arises (two
-devices before syncing) stays unlinked and is counted by the repair, never deleted.
+devices before syncing) stays unlinked and is counted by the repair, never deleted. **The thumbnail too is made at
+import** (#6, part 4, T5), in the same save: page 1, crop box and rotation applied, JPEG at quality 0.7, 480 px on
+the long side (`Thumbnail`, about 8 KB); a page that cannot be rendered leaves it out and the import still
+succeeds. Processing makes one only for a document imported before step 5 that the re-queue pass recorded (N3,
+below), never for a document imported since, so a device that has the document before its thumbnail (records
+arrive in any order) never makes a second one. The text layer does not change how a page looks, so a thumbnail is
+never made again.
 
 **The store.** `ArchiveStore` is the one boundary around it. `StoreChoice` decides per launch:
 
@@ -422,8 +428,22 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   this device's claim**, so this device processes it at once and the other device waits instead of taking it over; a
   document the other device re-queued (`pending`) or processed (`.pdfText`, `.vision`) fails the re-check. Each is one
   write under the discipline below; one that backs off leaves the flag unset, so the next run's pass tries again. The
-  re-queued documents without a thumbnail are recorded (`processingRequeue.thumbnailBackfill`) for part 4's backfill
-  (N3).
+  re-queued documents without a thumbnail are recorded (`processingRequeue.thumbnailBackfill`) for the backfill (N3).
+- **Thumbnail backfill** (#6, part 4, N3): only for a recorded document, the stage's task renders a thumbnail after the
+  stage returned, and the result write inserts and links it only when the document still has none. A thumbnail
+  another save links in the window makes the write back off (the link is part of the document row), so no second
+  thumbnail and no orphan arises on this device. The record goes when a result write of the document saved, and when
+  the queue sees the document `done` (the other device processed it) or gone. Two devices can still both backfill
+  the same old document only in a takeover race; the thumbnail that loses the link then stays an orphan the repair
+  counts, as for files and texts.
+- **Try again** (#6, P2): `ProcessingQueue.retry(_:)`, through `ProcessingScheduler.retry(_:)`, which runs the queue
+  after it. A `failed` document goes back to `pending` with this device's claim in one write under the discipline
+  below (re-check `failed`, `RowState` check, one save), and this device's failure counter and claim sighting are
+  cleared after the save, so the next run starts again at attempt 1 without a backoff. It writes nothing for a
+  document that is not `failed`, on an edit in the window (the counter stays), and while the queue holds a stage of
+  that document on this device, from its start until the queue has handled its outcome (`busy`: the other device's
+  `failed` can arrive during this device's own retry). An in-memory
+  store has no scheduler; its "Try again" writes through a queue that no scheduler runs.
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
@@ -550,9 +570,30 @@ Sidebar filters, counts and the tag tree are pure Kit code over these values (`L
 The repair follows the same observer. It exists for stores on disk only; an in-memory store follows its own
 saves. A local save therefore reads the library once more after the debounce (5 s); a read is light.
 
+**Thumbnails and the processing state** (#6, part 4; maintainer decisions P1 and P2). Every row on the iPhone and
+the Mac shows its first page's thumbnail at the leading edge (`RowThumbnail`), a fixed 40 × 56 pt, with a neutral
+grey placeholder until it is there; it is decorative and hidden from VoiceOver, so a row's sentence is unchanged.
+The source loads it (`LibrarySource.loadThumbnail`, `ThumbnailLoader` in Core: the document by key and its
+thumbnail by key in a short-lived context, decoded off the main actor at 168 px, the decoded images kept by
+`instanceID`, at most 300; `ThumbnailLoaderSQLTests`). A document without a thumbnail is looked for again at each
+read of the library (`LibraryModel.revision`), so one that arrives by sync shows. Misses are not remembered: on a
+store on disk every save, a local one too, posts `NSPersistentStoreRemoteChange`, so a remembered miss would have to
+be forgotten at nearly every read anyway (review N3 of #135). The fixed size keeps the Mac's row
+heights (#81): the hidden measuring copy shows the placeholder and loads nothing, and measures the same height. The
+processing state is shown only in the detail (`ProcessingStatusBar`, above the PDF or its placeholder): "Text
+recognition pending", "Recognising text…" or "Text recognition failed", and for a failed document "Try again"
+(`LibraryModel.retryProcessing`, which reads the library again at once); not for a trashed document, which is not
+processed until it is restored. Nothing for a processed document; the rows
+show no state. The line's text is primary on the window's background, not on a material, and its identifier names
+the state (`documentDetail.processing.pending|running|failed`, `documentDetail.processing.retry`).
+
 **Fixtures.** `Dokumentum/Features/Fixtures/` is `#if DEBUG` only, so a Release build contains no sample data
 (checked with `strings` on its binary). `FixtureCatalog` has the sample documents, with fixed `id`s and
-`instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read.
+`instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read. Each PDF sample gets its
+thumbnail as the importer makes it; the samples are processed except "Medical invoice" (pending), the annual
+statement with the long title and "Scanned receipt" (failed; the receipt is not a PDF), for the detail's status
+line. `LibrarySmokeTests` audits the failed line over the annual statement's PDF, not over a placeholder, whose
+description is a known false positive of the audit in light.
 - `-UITestSeed YES`: an in-memory store with the samples. UI tests, screenshots and a look at the app use it;
   nothing is saved. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
   store on disk in a temporary folder, removed when the app quits. `-UITestFailingSaves YES` (in-memory stores
@@ -585,7 +626,8 @@ drives them through the menu bar's key equivalents.
 **Accessibility.** Tests query identifiers (`AccessibilityID`), never localized text. Every sidebar row has
 the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged labels, not
 `NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
-accessibility action that selects the row, as a click does. Document rows read as one sentence
+accessibility action that selects the row, as a click does. Document rows read as one sentence; their thumbnail is
+decorative and hidden from VoiceOver
 (`LibraryDocument.accessibilityLabel`). On the Mac they are tagged rows too, not links, for the same reason
 the audit gave ("Unknown role" on a link's row, #82): a button to VoiceOver through its select action, which
 selects the document. They have no button trait: the action alone makes the row a button, and without the action

@@ -3,7 +3,8 @@ import DokumentumKit
 import SwiftUI
 
 /// One list row (PQ4): the title, or "Untitled document"; the document date; correspondent and type;
-/// the tag names; in the trash, since when. No thumbnail until step 5. VoiceOver reads it as one sentence.
+/// the tag names; in the trash, since when; the first page's thumbnail at the leading edge (#6, P1), decorative.
+/// VoiceOver reads it as one sentence, without the thumbnail.
 struct DocumentRow: View {
     let document: LibraryDocument
     /// The display paths of the document's tags, sorted.
@@ -19,38 +20,42 @@ struct DocumentRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(verbatim: title)
-                .font(.headline)
-                .lineLimit(2)
-            HStack(spacing: 6) {
-                Text(document.documentDate, format: .dateTime.day().month().year())
-                if !metadata.isEmpty {
-                    Text(verbatim: metadata)
-                        .lineLimit(1)
+        HStack(alignment: .top, spacing: 10) {
+            RowThumbnail(instanceID: document.instanceID)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: title)
+                    .font(.headline)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(document.documentDate, format: .dateTime.day().month().year())
+                    if !metadata.isEmpty {
+                        Text(verbatim: metadata)
+                            .lineLimit(1)
+                    }
                 }
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            if !tagPaths.isEmpty {
-                Label {
-                    Text(verbatim: tagPaths.joined(separator: ", "))
-                        .lineLimit(1)
-                } icon: {
-                    Image(systemName: "tag")
-                }
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-            }
-            if let trashedSince {
-                Label {
-                    Text(trashedSince)
-                } icon: {
-                    Image(systemName: "trash")
+                if !tagPaths.isEmpty {
+                    Label {
+                        Text(verbatim: tagPaths.joined(separator: ", "))
+                            .lineLimit(1)
+                    } icon: {
+                        Image(systemName: "tag")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                if let trashedSince {
+                    Label {
+                        Text(trashedSince)
+                    } icon: {
+                        Image(systemName: "trash")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)

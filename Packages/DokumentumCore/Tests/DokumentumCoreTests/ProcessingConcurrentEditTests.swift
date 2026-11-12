@@ -52,6 +52,7 @@ struct ProcessingConcurrentEditTests {
         case .result: try store.insert(title: "Original", device: deviceA, claimedAt: processingStart)
         case .classification:
             try store.insert(title: "Original", stateRaw: "classify", device: deviceA, claimedAt: processingStart)
+        case .retry: try store.insert(title: "Original", stateRaw: "failed")
         }
     }
 

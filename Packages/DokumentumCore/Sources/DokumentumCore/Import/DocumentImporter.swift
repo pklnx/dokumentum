@@ -41,8 +41,9 @@ public protocol DocumentImporting: Sendable {
 /// the container in `DokumentumApp`, so every window and every later source (Photos, the share queue) goes
 /// through the same actor.
 ///
-/// **It only inserts.** A new `Document` with its `DocumentFile` and `DocumentText`, in one save, in a fresh
-/// context. It never writes to an existing row: a duplicate is reported, not touched (SwiftData writes whole
+/// **It only inserts.** A new `Document` with its `DocumentFile`, `DocumentText` and `DocumentThumbnail`, in one
+/// save, in a fresh context. The thumbnail (`Thumbnail`, #6 T5) is rendered from page 1 during PDFKit's check; when
+/// it cannot be rendered the document is imported without one, and processing never makes one later (N3). It never writes to an existing row: a duplicate is reported, not touched (SwiftData writes whole
 /// rows and has no merge policy).
 ///
 /// **Order of one import:** the type (PDF or image: PDF bytes, `%PDF-` within the first KB, are a PDF whatever
@@ -68,11 +69,20 @@ public actor DocumentImporter: DocumentImporting {
     /// This device's `processingDeviceID` (`DeviceIdentity`): the importing device claims the document (T4).
     public let deviceID: String
     private let now: @Sendable () -> Date
+    private let makeThumbnail: ThumbnailMaker
 
-    public init(container: ModelContainer, deviceID: String, now: @escaping @Sendable () -> Date = { Date() }) {
+    /// Renders a document's thumbnail from its opened PDF; `Thumbnail.make(from:)` in the app, a failing one in
+    /// tests.
+    public typealias ThumbnailMaker = @Sendable (PDFDocument) -> Data?
+
+    public init(
+        container: ModelContainer, deviceID: String, now: @escaping @Sendable () -> Date = { Date() },
+        makeThumbnail: @escaping ThumbnailMaker = { Thumbnail.make(from: $0) }
+    ) {
         self.container = container
         self.deviceID = deviceID
         self.now = now
+        self.makeThumbnail = makeThumbnail
     }
 
     public func importFile(
@@ -141,19 +151,19 @@ public actor DocumentImporter: DocumentImporting {
         guard !data.isEmpty else { return .failed(.empty) }
         let hash = await Self.hash(data)
         if let duplicate = firstDuplicateCheck(hash) { return duplicate }
-        let pageCount: Int
-        switch await Self.validate(data) {
+        let checked: Checked
+        switch await Self.validate(data, thumbnail: makeThumbnail) {
         case .failure(.unreadablePDF) where Self.kind(fileName: fileName, contentType: contentType) == .image:
             // Bytes that look like a PDF but do not open as one, under an image label: an image with `%PDF-` in
             // its metadata. It goes on as an image, as before #86; a real PDF is never rasterized (`ImageCoding`).
             return await runImages([data], fileName: fileName, title: nil, source: .image).outcome
         case .failure(let failure): return .failed(failure)
-        case .success(let pages): pageCount = pages
+        case .success(let result): checked = result
         }
         if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
         return commit(
             pdfData: data, hash: hash, title: importTitle(fromFileName: fileName), fileName: fileName,
-            source: source, pageCount: pageCount)
+            source: source, checked: checked)
     }
 
     /// Images to one PDF: the hash over the original bytes, the first duplicate check, the PDF built (that
@@ -167,15 +177,15 @@ public actor DocumentImporter: DocumentImporting {
         guard let built = await Self.buildPDF(items) else {
             return ImageImportResult(outcome: .failed(.unreadableImage))
         }
-        let pageCount: Int
-        switch await Self.validate(built.data) {
+        let checked: Checked
+        switch await Self.validate(built.data, thumbnail: makeThumbnail) {
         case .failure: return ImageImportResult(outcome: .failed(.unreadableImage))
-        case .success(let pages): pageCount = pages
+        case .success(let result): checked = result
         }
         if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
         let outcome = commit(
             pdfData: built.data, hash: hash, title: title ?? importTitle(fromFileName: fileName),
-            fileName: fileName, source: source, pageCount: pageCount)
+            fileName: fileName, source: source, checked: checked)
         // Left out counts only for the document saved here.
         guard case .imported = outcome else { return ImageImportResult(outcome: outcome) }
         return ImageImportResult(outcome: outcome, leftOut: built.leftOut)
@@ -193,14 +203,14 @@ public actor DocumentImporter: DocumentImporting {
         guard let built = await Self.buildPDF(edited: items) else {
             return ImageImportResult(outcome: .failed(.unreadableImage))
         }
-        let pageCount: Int
-        switch await Self.validate(built.data) {
+        let checked: Checked
+        switch await Self.validate(built.data, thumbnail: makeThumbnail) {
         case .failure: return ImageImportResult(outcome: .failed(.unreadableImage))
-        case .success(let pages): pageCount = pages
+        case .success(let result): checked = result
         }
         if let hook = ProcessingEnvironment.current.importWillCommit { await hook() }
         let outcome = commit(
-            pdfData: built.data, hash: hash, title: title, fileName: "", source: source, pageCount: pageCount)
+            pdfData: built.data, hash: hash, title: title, fileName: "", source: source, checked: checked)
         guard case .imported = outcome else { return ImageImportResult(outcome: outcome) }
         return ImageImportResult(outcome: outcome, leftOut: built.leftOut)
     }
@@ -220,7 +230,7 @@ public actor DocumentImporter: DocumentImporting {
     /// The second duplicate check, the insert and the one save, in a fresh context, without a suspension.
     /// `hash` is the input's (T3), `pdfData` what is stored.
     private func commit(
-        pdfData data: Data, hash: String, title: String, fileName: String, source: DocumentSource, pageCount: Int
+        pdfData data: Data, hash: String, title: String, fileName: String, source: DocumentSource, checked: Checked
     ) -> ImportOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -237,7 +247,7 @@ public actor DocumentImporter: DocumentImporting {
         document.source = source
         document.contentHash = hash
         document.fileSize = data.count
-        document.pageCount = pageCount
+        document.pageCount = checked.pageCount
         document.processingState = .pending
         document.processingDeviceID = deviceID
         document.processingClaimedAt = date
@@ -248,6 +258,11 @@ public actor DocumentImporter: DocumentImporting {
         context.insert(text)
         document.file = file
         document.text = text
+        if let imageData = checked.thumbnail {
+            let thumbnail = DocumentThumbnail(documentID: document.id, imageData: imageData, createdAt: date)
+            context.insert(thumbnail)
+            document.thumbnail = thumbnail
+        }
         do {
             try context.save()
         } catch {
@@ -302,14 +317,24 @@ public actor DocumentImporter: DocumentImporting {
         PDFBuilder.makePDF(fromEditedImages: items)
     }
 
+    /// What PDFKit's check found: the page count and the thumbnail, `nil` when it could not be rendered.
+    struct Checked: Sendable {
+        var pageCount: Int
+        var thumbnail: Data?
+    }
+
     /// PDFKit's check: the PDF opens, is not locked by a password (PQ9) and has a page. Off the actor. A PDF
     /// without a page counts as unreadable: PDFKit on 27 does not open one (`aFileThatFailsInsertsNothing`).
+    /// With the PDF open, `thumbnail` renders page 1 (T5); a render failure leaves the thumbnail out and the
+    /// import goes on.
     @concurrent
-    static func validate(_ data: Data) async -> Result<Int, ImportFailure> {
+    static func validate(_ data: Data, thumbnail: ThumbnailMaker) async -> Result<Checked, ImportFailure> {
         guard let document = PDFDocument(data: data) else { return .failure(.unreadablePDF) }
         if document.isLocked { return .failure(.passwordProtected) }
         guard document.pageCount > 0 else { return .failure(.unreadablePDF) }
-        return .success(document.pageCount)
+        let image = withExtendedLifetime(document) { thumbnail(document) }
+        if image == nil { Log.importing.notice("No thumbnail: page 1 could not be rendered") }
+        return .success(Checked(pageCount: document.pageCount, thumbnail: image))
     }
 
     /// The document that already holds these bytes, trashed ones included (PQ3): the oldest with this

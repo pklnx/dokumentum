@@ -12,11 +12,15 @@ public struct ProcessingResult: Equatable, Sendable {
     /// The PDF with the invisible text layer (#6, part 3), which replaces the stored file; `nil` keeps the stored
     /// bytes as they are.
     public var layeredPDF: Data?
+    /// The thumbnail to insert when the document has none (`Thumbnail`): set by the queue, only for a document the
+    /// re-queue pass recorded for the backfill (#6, part 4, N3); `nil` otherwise.
+    public var thumbnail: Data?
 
-    public init(pageCount: Int, text: ExtractedText? = nil, layeredPDF: Data? = nil) {
+    public init(pageCount: Int, text: ExtractedText? = nil, layeredPDF: Data? = nil, thumbnail: Data? = nil) {
         self.pageCount = pageCount
         self.text = text
         self.layeredPDF = layeredPDF
+        self.thumbnail = thumbnail
     }
 }
 

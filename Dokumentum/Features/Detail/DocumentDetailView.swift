@@ -2,12 +2,14 @@ import DokumentumCore
 import DokumentumKit
 import SwiftUI
 
-/// The detail column: the open document's PDF, or why there is none (PQ12), and its info panel.
+/// The detail column: the open document's PDF, or why there is none (PQ12), its processing state when it is not
+/// processed yet (`ProcessingStatusBar`, #6 P2), and its info panel.
 struct DocumentDetailView: View {
     @Bindable var model: LibraryModel
 
     var body: some View {
         content
+            .safeAreaInset(edge: .top, spacing: 0) { ProcessingStatusBar(model: model) }
             .navigationTitle(title)
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)

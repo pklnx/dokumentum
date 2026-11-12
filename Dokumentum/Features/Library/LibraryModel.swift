@@ -28,6 +28,15 @@ final class LibraryModel {
     let searcher: (any DocumentSearching)?
     /// The index's newest state: `observeSearchIndex()` follows its updates. `nil` until the first one.
     private(set) var searchIndexState: SearchIndexState?
+    /// "Try again" for a failed document (#6, P2): the app's processing scheduler, or for an in-memory store a queue
+    /// that no scheduler runs; `nil` for fixture sources in unit tests, which then show no button.
+    let retrier: (any ProcessingRetrying)?
+    /// The document whose "Try again" is being written, so the button is not pressed twice.
+    private(set) var retrying: UUID?
+
+    /// Counts the reads of the source: a row's thumbnail that has not arrived is looked for again at each one, so it
+    /// shows once it arrives by sync (#6, part 4).
+    private(set) var revision = 0
 
     /// The search field's text, filter chips and scope (#7, part 3). It stays when the sidebar's selection changes
     /// (P7); on the iPhone it ends when the stack goes back to the sidebar. A new text runs a query at once, without a
@@ -106,9 +115,13 @@ final class LibraryModel {
 
     /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
     ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
-    init(source: any LibrarySource, searcher: (any DocumentSearching)? = nil, loadNow: Bool = true) {
+    init(
+        source: any LibrarySource, searcher: (any DocumentSearching)? = nil,
+        retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true
+    ) {
         self.source = source
         self.searcher = searcher
+        self.retrier = retrier
         if loadNow { reload() }
     }
 
@@ -120,6 +133,7 @@ final class LibraryModel {
     /// Reads the source again and refilters. A selected document that left the list is deselected.
     func reload() {
         isLoaded = true
+        revision += 1
         snapshot = source.snapshot()
         tree = TagTree(snapshot.tags)
         counts = LibraryCounts(snapshot.documents, tree: tree)
@@ -353,6 +367,25 @@ final class LibraryModel {
                 case .orderedSame: lhs.0.uuidString < rhs.0.uuidString
                 }
             }
+    }
+
+    // MARK: Processing
+
+    /// Whether "Try again" can be offered: the library has a retrier.
+    var canRetryProcessing: Bool { retrier != nil }
+
+    /// "Try again" for the failed document with `instanceID` (#6, P2): the queue sets it back to `pending` with this
+    /// device's claim and clears this device's failure counter (`ProcessingQueue.retry(_:)`); the library is read
+    /// again at once, so the status line shows the new state without waiting for the change event. Nothing while a
+    /// retry is being written.
+    @discardableResult
+    func retryProcessing(of instanceID: UUID) async -> ProcessingRetryOutcome? {
+        guard let retrier, retrying == nil else { return nil }
+        retrying = instanceID
+        defer { retrying = nil }
+        let outcome = await retrier.retry(instanceID)
+        reload()
+        return outcome
     }
 
     // MARK: Sidebar

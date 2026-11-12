@@ -149,6 +149,16 @@ final class StageTracker: Sendable {
         state.withLock { $0.abandoned.values.count(where: { $0 == .timedOut }) }
     }
 
+    /// Whether the queue holds a stage of `document`: from `begin` until the queue has handled its outcome
+    /// (`finish`, `abandonAfterTimeout`, `interruptCurrent`, `cancelBeforeStart`), all on the queue's actor. Not
+    /// `ended`: the stage's task sets that before the queue resumes, and in that gap the queue still writes the stage's
+    /// result (review N1 of #135).
+    func isRunning(document: UUID) -> Bool {
+        state.withLock { state in
+            state.current?.attempt.document == document
+        }
+    }
+
     /// The stages let go (interrupted or timed out) that are still alive. For tests.
     var abandonedAlive: Int {
         state.withLock { $0.abandoned.count }

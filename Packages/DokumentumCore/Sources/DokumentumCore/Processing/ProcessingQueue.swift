@@ -42,6 +42,8 @@ public struct ProcessingReport: Equatable, Sendable {
     /// Documents finished in `done` without a model answer (#8): the switch off, the model unavailable on this
     /// device, a text too short, the wait for the model ended after 6 hours, or the third failed attempt.
     public var classificationSkipped = 0
+    /// Thumbnails the result writes of this run inserted for documents the re-queue pass recorded (#6, part 4, N3).
+    public var thumbnailsBackfilled = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
@@ -60,6 +62,25 @@ public struct ProcessingReport: Equatable, Sendable {
     }
 
     public init() {}
+}
+
+/// What "Try again" did (`ProcessingQueue.retry(_:)`).
+public enum ProcessingRetryOutcome: Equatable, Sendable {
+    /// Saved: the document is `pending` with this device's claim, and this device's failure counter is cleared.
+    case queued
+    /// The document is not `failed` (any more), or it is gone: nothing written.
+    case notFailed
+    /// A stage of this document runs on this device: nothing written.
+    case busy
+    /// The check before the save found the row changed by another save: rolled back, nothing written.
+    case metAnotherSave
+    /// The store failed (logged).
+    case failed
+}
+
+/// Something that sets a `failed` document back to `pending` ("Try again"); `ProcessingQueue` in the app.
+public protocol ProcessingRetrying: Sendable {
+    func retry(_ instanceID: UUID) async -> ProcessingRetryOutcome
 }
 
 /// Something that runs the queue once; `ProcessingQueue` in the app, a stub in tests.
@@ -90,7 +111,18 @@ public protocol ProcessingRunning: Sendable {
 ///    `ExtractedText.byteLimit` UTF-8 bytes), with a text layer the file record's `pdfData` and the document's
 ///    `fileSize` (#6, part 3), and `processingState = .done`, in one save. Its check before the save reads the
 ///    document row, the text row and, with a layer, the file row (each by key) again. `contentHash` stays the hash of
-///    the imported bytes, so importing them again is still a duplicate.
+///    the imported bytes, so importing them again is still a duplicate. **Thumbnail backfill** (#6, part 4, N3): only
+///    for a document the re-queue pass recorded (`ProcessingRequeue.thumbnailBackfill`, imported before step 5), the
+///    stage's task renders a thumbnail from the loaded original bytes after the stage returned (`Thumbnail`; the
+///    layer is invisible), and the result write inserts and links it only when the document still has none; a
+///    thumbnail another save links in the window makes the write back off (the link is part of the row). A document
+///    imported by this build got its thumbnail at import and is never recorded, so a device that has the document
+///    before its thumbnail never makes a second one. A recorded document leaves the record when a result write saved,
+///    or when it is seen `done` or gone.
+///
+/// **Try again** (`retry(_:)`, #6 P2): a `failed` document goes back to `pending` with this device's claim in one
+/// write under the discipline below, and this device's failure counter is cleared after it saved; refused while the
+/// queue holds a stage of that document, from its start until the queue has handled its outcome.
 ///
 /// **Classification (#8, part 1).** With a classifier (`DocumentClassifying`), the text result write sets `classify`
 /// instead of `done` when this device's switch is on, the classifier is not unavailable on this device, and the
@@ -157,7 +189,7 @@ public protocol ProcessingRunning: Sendable {
 ///
 /// **Resume after quit** is the next run: a document left in `.processing` with this device's claim is processed
 /// again.
-public actor ProcessingQueue: ProcessingRunning {
+public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     /// Sleeps the stall watchdog's timeout; the suspending clock in the app.
     public typealias Sleep = @Sendable (Duration) async throws -> Void
 
@@ -184,9 +216,10 @@ public actor ProcessingQueue: ProcessingRunning {
         }
     }
 
-    /// The queue's writes: the claim, the text's result, and the classification's result (#8).
+    /// The queue's writes: the claim and the result of a run, the classification's result (#8), and "Try again"
+    /// (`retry(_:)`).
     public enum Write: Sendable, Equatable {
-        case claim, result, classification
+        case claim, result, classification, retry
     }
 
     public let container: ModelContainer
@@ -266,6 +299,30 @@ public actor ProcessingQueue: ProcessingRunning {
         Log.processing.notice("Processing interrupted; attempt given back: \(refunded, privacy: .public)")
     }
 
+    /// "Try again" for a `failed` document (#6, P2): sets it back to `pending` with this device's claim, so this
+    /// device processes it at once, in one write under the discipline (re-check `failed`, `RowState` check, one save,
+    /// nothing written on a mismatch), then clears this device's failure counter (and its claim sighting), so the
+    /// next run starts again from attempt 1 without a backoff. Refused (`busy`) while the queue holds a stage of this
+    /// document, from its start until the queue has handled its outcome (`StageTracker.isRunning`): this device can be
+    /// retrying a `failed` document itself when its own counter is below the limit. The method
+    /// has no suspension, so no run of this queue interleaves with it; a run that decided on the document before and
+    /// has not written its claim yet finds the state changed and writes nothing. The caller asks for a run.
+    public func retry(_ instanceID: UUID) -> ProcessingRetryOutcome {
+        guard !stages.isRunning(document: instanceID) else {
+            Log.processing.notice("Try again refused: the document's stage is running")
+            return .busy
+        }
+        let outcome = Self.retryWrite(
+            instanceID, deviceID: deviceID, now: now(), in: container, beforeCheck: hooks.beforeCheck)
+        if outcome == .queued {
+            // After the save: a write that did not save leaves the counter, and the document stays `failed`.
+            failures.forget([instanceID])
+            sightings.forget([instanceID])
+        }
+        Log.processing.notice("Try again: \(String(describing: outcome), privacy: .public)")
+        return outcome
+    }
+
     /// One run over every document that is not `done`.
     @discardableResult
     public func run() async -> ProcessingReport {
@@ -279,7 +336,7 @@ public actor ProcessingQueue: ProcessingRunning {
         let candidates: [Candidate]
         do {
             try Self.forgetCounters(
-                [failures, classificationFailures], sightings: sightings, in: container)
+                [failures, classificationFailures], sightings: sightings, requeue: requeue, in: container)
             candidates = try Self.scan(in: container)
         } catch {
             Log.processing.error("Processing scan failed: \(Log.code(of: error), privacy: .public)")
@@ -394,7 +451,9 @@ public actor ProcessingQueue: ProcessingRunning {
             writeFailed(id, expecting: held, into: &report)
             return .next
         }
-        switch await runStage(pdfData: loaded.data, attempt: attempt) {
+        // N3: only a document the re-queue pass recorded gets a thumbnail from processing.
+        let backfills = requeue?.thumbnailBackfill.contains(id) ?? false
+        switch await runStage(pdfData: loaded.data, attempt: attempt, makesThumbnail: backfills) {
         case .returned(let result):
             // Finished before the counter goes, in one step: a late interruption changes nothing (N2).
             guard failures.succeed(attempt) else {
@@ -406,6 +465,8 @@ public actor ProcessingQueue: ProcessingRunning {
             // Decided before the write, read from the row inside it (the cut-off compares its `createdAt`).
             let classifies = since != nil && classificationIsOn
             var nextState = ProcessingState.done
+            let thumbnail = backfills ? result.thumbnail : nil
+            var inserted = false
             let outcome = write(.result, id, expecting: held, checksText: text != nil, checksFile: layered != nil) {
                 document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
@@ -421,12 +482,21 @@ public actor ProcessingQueue: ProcessingRunning {
                     file.pdfData = layered
                     if document.fileSize != layered.count { document.fileSize = layered.count }
                 }
+                // Only when none is linked: a second one would leave one of them an orphan.
+                if let thumbnail, document.thumbnail == nil, let context = document.modelContext {
+                    let record = DocumentThumbnail(documentID: document.id, imageData: thumbnail, createdAt: self.now())
+                    context.insert(record)
+                    document.thumbnail = record
+                    inserted = true
+                }
                 if classifies, let since, document.createdAt >= since { nextState = .classify }
                 document.processingState = nextState
             }
             if count(outcome, into: &report) {
                 if nextState == .classify { report.toClassify += 1 } else { report.done += 1 }
                 if layered != nil { report.layered += 1 }
+                if inserted { report.thumbnailsBackfilled += 1 }
+                if backfills { requeue?.forgetThumbnailBackfill([id]) }
                 if let (_, capped) = text, capped.isCapped {
                     report.textsCapped += 1
                     Log.processing.notice(
@@ -502,10 +572,18 @@ public actor ProcessingQueue: ProcessingRunning {
 
     /// Runs the stage in a task of its own, raced by the stall watchdog and `interruptNow()`. A stage that loses the
     /// race is cancelled and not waited for; whatever it returns later is dropped.
-    private func runStage(pdfData: Data, attempt: ProcessingFailures.Attempt) async -> StageOutcome {
+    /// With `makesThumbnail`, the stage's task renders the thumbnail after the stage returned (the backfill, N3).
+    private func runStage(pdfData: Data, attempt: ProcessingFailures.Attempt, makesThumbnail: Bool) async
+        -> StageOutcome
+    {
         let stage = stage
         return await race(attempt: attempt, counter: failures) { progress in
-            .returned(try await stage.process(pdfData: pdfData, progress: progress))
+            var returned = try await stage.process(pdfData: pdfData, progress: progress)
+            if makesThumbnail, returned.thumbnail == nil, !Task.isCancelled {
+                returned.thumbnail = Thumbnail.make(fromPDF: pdfData)
+                progress(1, 1)
+            }
+            return .returned(returned)
         }
     }
 
@@ -585,9 +663,10 @@ public actor ProcessingQueue: ProcessingRunning {
             \(report.skipped, privacy: .public), dropped \(report.dropped, privacy: .public), backed off \
             \(report.backedOff, privacy: .public), saves \(report.saves, privacy: .public), timed out \
             \(report.timedOut, privacy: .public), interrupted \(report.interrupted, privacy: .public), stalled \
-            \(report.stalled, privacy: .public), to classify \(report.toClassify, privacy: .public), classified \
-            \(report.classified, privacy: .public), declined \(report.declined, privacy: .public), classification \
-            skipped \(report.classificationSkipped, privacy: .public)
+            \(report.stalled, privacy: .public), thumbnails backfilled \(report.thumbnailsBackfilled, privacy: .public), \
+            to classify \(report.toClassify, privacy: .public), classified \(report.classified, privacy: .public), \
+            declined \(report.declined, privacy: .public), classification skipped \
+            \(report.classificationSkipped, privacy: .public)
             """)
     }
 }
@@ -673,12 +752,14 @@ extension ProcessingQueue {
         return candidates
     }
 
-    /// Removes the failure counters (the text step's and the classification step's, review N3 of #8) and claim
-    /// sightings of documents that are `done` or gone, so the keys do not grow.
+    /// Removes the failure counters (the text step's and the classification step's, review N3 of #8), claim sightings
+    /// and thumbnail-backfill records of documents that are `done` or gone, so the keys do not grow.
     static func forgetCounters(
-        _ counters: [ProcessingFailures], sightings: ClaimSightings, in container: ModelContainer
+        _ counters: [ProcessingFailures], sightings: ClaimSightings, requeue: ProcessingRequeue? = nil,
+        in container: ModelContainer
     ) throws {
-        let tracked = Array(Set(counters.flatMap(\.documents) + sightings.documents))
+        let backfill = requeue?.thumbnailBackfill ?? []
+        let tracked = Array(Set(counters.flatMap(\.documents) + sightings.documents).union(backfill))
         guard !tracked.isEmpty else { return }
         let context = ModelContext(container)
         let documents = try context.fetch(
@@ -688,6 +769,7 @@ extension ProcessingQueue {
         guard !gone.isEmpty else { return }
         for counter in counters { counter.forget(gone) }
         sightings.forget(gone)
+        requeue?.forgetThumbnailBackfill(Set(gone).intersection(backfill))
     }
 
     /// The document's PDF, in a context of its own that ends with the load: the one blob read of a run.
@@ -751,6 +833,37 @@ extension ProcessingQueue {
         } catch {
             context.rollback()
             Log.processing.error("A processing write failed: \(Log.code(of: error), privacy: .public)")
+            return .failed
+        }
+    }
+
+    /// The write of `retry(_:)`, steps 1 to 5 of the discipline, without a suspension.
+    static func retryWrite(
+        _ instanceID: UUID, deviceID: String, now: Date, in container: ModelContainer,
+        beforeCheck: (@Sendable (Write) throws -> Void)?
+    ) -> ProcessingRetryOutcome {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        do {
+            guard let document = try fetch(instanceID, in: context), document.processingState == .failed else {
+                return .notFailed
+            }
+            let read = RowState.capture(document)
+            document.processingState = .pending
+            document.processingDeviceID = deviceID
+            document.processingClaimedAt = now
+            try beforeCheck?(.retry)
+            let key = RowKey(entity: .document, instanceID: instanceID)
+            guard try RowState.read([key], in: container)[key] == read else {
+                context.rollback()
+                Log.processing.notice("A Try again write met another save of its document and wrote nothing")
+                return .metAnotherSave
+            }
+            try context.save()
+            return .queued
+        } catch {
+            context.rollback()
+            Log.processing.error("A Try again write failed: \(Log.code(of: error), privacy: .public)")
             return .failed
         }
     }
