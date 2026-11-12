@@ -255,7 +255,8 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     ///   - classifier: the classification step's model (#8); `nil`: no step, the text result write sets `done`.
     ///   - classificationFailures: its own attempt counter; by default under `classificationDefaultsKey` in the
     ///     text counter's defaults suite.
-    ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite.
+    ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite. With
+    ///     a classifier, the cut-off is recorded now if there is none yet (P9).
     ///   - calendar: the calendar a suggested date is stored in (the detail's date picker uses the current one).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
@@ -283,10 +284,14 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             classificationFailures
             ?? ProcessingFailures(
                 defaultsSuite: failures.defaultsSuite, key: ProcessingFailures.classificationDefaultsKey)
-        self.classificationSettings =
-            classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
+        let settings = classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
+        self.classificationSettings = settings
         self.calendar = calendar
         stages = StageTracker(onWait: hooks.waitsForStage)
+        // P9: the cut-off is recorded when the queue is set up, before its first run: the app creates the queue at
+        // launch before anything of that launch is imported (the share queue, a drop), so such a document is
+        // classified (review A N-c of #146).
+        if classifier != nil { settings.recordSince(now()) }
     }
 
     /// A known interruption (#97 point 4): gives the running attempt back, cancels its stage and ends the wait for
@@ -333,7 +338,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             report.requeued = requeue.run(in: container, deviceID: deviceID, now: now()).requeued
             report.saves += report.requeued
         }
-        // P9: the cut-off is the first run with a classifier on this device.
+        // P9: the cut-off, recorded by `init` (and here only when its defaults were cleared since).
         let classificationSince = classifier.map { _ in classificationSettings.recordSince(now()) }
         let candidates: [Candidate]
         do {
