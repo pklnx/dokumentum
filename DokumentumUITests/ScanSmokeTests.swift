@@ -54,6 +54,7 @@ final class ScanSmokeTests: XCTestCase {
         }
         XCTAssertGreaterThan(page.frame.height, page.frame.width, "page 1 is not portrait before the turn")
         ui.attachWindowScreenshot("cleanup-1-sheet", to: self)
+        ui.auditAccessibility("cleanup", in: self)
 
         // Page 1 turned a quarter: the page shows landscape.
         click(ui.element("cleanup.rotate"))

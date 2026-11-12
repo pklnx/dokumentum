@@ -495,7 +495,7 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac two issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
+attachment of the run. On the Mac three issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
@@ -505,6 +505,9 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
   stays (#74, maintainer decision 4).
 - `import.menu`, action, "Action is missing": the AppKit toolbar menu button that a SwiftUI `Menu` becomes.
   None of the 13 SwiftUI variants tried passes (#82). VoiceOver opening the menu: not verified, #3 Done-when.
+- `cleanup.filter`, action, "Action is missing": the cleanup sheet's Filter menu, also a SwiftUI `Menu`; a
+  pop-up `Picker` in its place is reported the same (#112). `ScanSmokeTests` audits the sheet; its corner
+  handles are steppers and its page an image for VoiceOver, so they have known roles.
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show

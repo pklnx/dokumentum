@@ -83,6 +83,9 @@ final class ImportController {
     func importPhotos(_ items: [any ImportPhotoItem]) async -> ImportReport {
         var report = ImportReport()
         guard !items.isEmpty, cleanup == nil else { return report }
+        // A Save whose sheet never reported its dismissal is imported now, never by this pick's sheet (review
+        // 5867292360, finding 3).
+        await importSavedCleanup()
         var loaded: [Data] = []
         for item in items {
             do {

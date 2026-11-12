@@ -74,6 +74,7 @@ private struct PageEditorView: View {
                     .frame(width: frame.width, height: frame.height)
                     .offset(x: frame.minX, y: frame.minY)
                     .accessibilityElement()
+                    .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(Text("Page \(position(of: page))"))
                     .accessibilityIdentifier(AccessibilityID.cleanupPage)
 
@@ -170,13 +171,15 @@ private struct CornerHandle: View {
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
                     .onChanged { move($0.location) }
             )
-            .accessibilityElement()
-            .accessibilityLabel(label)
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: nudge(true)
-                case .decrement: nudge(false)
-                @unknown default: break
+            // For VoiceOver a stepper: its role is known on both devices (the Mac's audit, review 5867292360), and
+            // increment and decrement move the corner 2 % outwards and inwards.
+            .accessibilityRepresentation {
+                Stepper {
+                    label
+                } onIncrement: {
+                    nudge(true)
+                } onDecrement: {
+                    nudge(false)
                 }
             }
             .accessibilityIdentifier(AccessibilityID.cleanupCorner(shownAs))
@@ -248,19 +251,9 @@ private struct CleanupBar: View {
             }
             .accessibilityIdentifier(AccessibilityID.cleanupRotate)
             Spacer()
-            Menu {
-                Picker(selection: filter) {
-                    ForEach(PageFilter.allCases, id: \.self) { filter in
-                        Text(Self.name(of: filter)).tag(filter)
-                    }
-                } label: {
-                    Text("Filter")
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label("Filter", systemImage: "camera.filters")
-            }
-            .accessibilityIdentifier(AccessibilityID.cleanupFilter)
+            filterControl
+                .accessibilityLabel(Text("Filter"))
+                .accessibilityIdentifier(AccessibilityID.cleanupFilter)
             Spacer()
             edgesButton
                 .accessibilityIdentifier(AccessibilityID.cleanupEdges)
@@ -274,6 +267,27 @@ private struct CleanupBar: View {
         }
         .labelStyle(BarLabelStyle())
         .disabled(model.selectedPage == nil)
+    }
+
+    /// The filter menu, in the bar's look. The Mac's accessibility audit reports "Action is missing" on it, as on the
+    /// "+" menu and also on a pop-up picker in its place (measured, #112 fix round 1): accepted in `UITestApp`.
+    private var filterControl: some View {
+        Menu {
+            Picker(selection: filter) {
+                filterOptions
+            } label: {
+                Text("Filter")
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Filter", systemImage: "camera.filters")
+        }
+    }
+
+    private var filterOptions: some View {
+        ForEach(PageFilter.allCases, id: \.self) { filter in
+            Text(Self.name(of: filter)).tag(filter)
+        }
     }
 
     @ViewBuilder

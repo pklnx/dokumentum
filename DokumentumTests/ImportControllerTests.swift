@@ -341,6 +341,29 @@ struct ImportControllerTests {
         #expect(notice.message == String(localized: "\(4) photos could not be read and were left out."))
     }
 
+    /// Review 5867292360, finding 3: a Save whose sheet never reported its dismissal is imported when the next pick
+    /// opens, before that pick's cleanup, and never by the next sheet's dismissal (here after its Cancel).
+    @Test func aSaveWhoseSheetDidNotReportItsDismissalIsImportedBeforeTheNextPick() async throws {
+        let id = UUID()
+        let importer = StubImporter(images: ImageImportResult(outcome: .imported(instanceID: id)))
+        let controller = ImportController(
+            importer: importer, reader: StubReader(), library: LibraryModel(source: SnapshotSource([Self.row(id)])),
+            detector: StubPageDetector())
+        let (first, second) = (CleanupPhotos.photo("eins"), CleanupPhotos.photo("zwei"))
+
+        await controller.importPhotos([StubPhoto(data: first)])
+        controller.closeCleanupForSave()
+        #expect(importer.editedImports.isEmpty, "no dismissal reported yet")
+
+        await controller.importPhotos([StubPhoto(data: second)])
+        #expect(importer.editedImports.map { $0.items.map(\.data) } == [[first]], "the first Save, before the new pick")
+        #expect(controller.cleanup?.images == [second])
+
+        controller.cancelCleanup()
+        await controller.importSavedCleanup()
+        #expect(importer.editedImports.count == 1, "the second sheet's Cancel imports nothing")
+    }
+
     @Test func noPhotoHandedOverIsOneFailureAndOpensNoCleanup() async throws {
         let importer = StubImporter()
         let controller = ImportController(

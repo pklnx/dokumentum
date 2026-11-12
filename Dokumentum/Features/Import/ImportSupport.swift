@@ -59,6 +59,9 @@ struct ImportSupport: ViewModifier {
                 )
                 .interactiveDismissDisabled()
             }
+            // A window closed while its sheet animated out after Save: its pages are still imported (review
+            // 5867292360, finding 3). The task keeps the controller until then.
+            .onDisappear { [controller] in Task { await controller.importSavedCleanup() } }
             #if os(macOS)
                 .dropDestination(for: ImportedFile.self) { files, _ in
                     Task { await controller.importDropped(files) }
