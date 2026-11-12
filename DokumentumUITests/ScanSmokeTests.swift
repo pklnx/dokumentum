@@ -54,20 +54,32 @@ final class ScanSmokeTests: XCTestCase {
         }
         XCTAssertGreaterThan(page.frame.height, page.frame.width, "page 1 is not portrait before the turn")
         ui.attachWindowScreenshot("cleanup-1-sheet", to: self)
+        // The Filter menu's VoiceOver name, "Filter" in English and German (#136): the iPhone's menu button has it as
+        // its label, the Mac's AppKit menu button as its title (its label stays empty there, so the audit lists it so).
+        let filter = ui.element("cleanup.filter")
         #if os(macOS)
-            // The Mac's audit of the sheet (review 5867292360). On the iPhone the audit reports "Contrast failed" on
-            // the toolbar's system Cancel button (white on its dark glass, #112 fix round 1); not audited there yet.
-            ui.auditAccessibility("cleanup", in: self)
+            XCTAssertEqual(filter.title, "Filter", "the Filter menu has no VoiceOver name")
+        #else
+            XCTAssertEqual(filter.label, "Filter", "the Filter menu has no VoiceOver name")
+            // The toolbar's system buttons, whose "Contrast failed" the audit's accepted issues let pass (#136):
+            // their measured text contrast is the check instead.
+            ui.assertTextContrast("cleanup.cancel", in: self)
+            ui.assertTextContrast("cleanup.save", in: self)
         #endif
+        // The sheet's audit on both devices (review 5867292360, #136).
+        ui.auditAccessibility("cleanup", in: self)
 
-        // Page 1 turned a quarter: the page shows landscape.
+        // Page 1 turned a quarter: the page shows landscape. The page's frame comes from the app's accessibility
+        // tree, which can lag behind the screen on a busy simulator (the turned page was on screen in a failed run
+        // with a fixed 10 s, review 5867813357), so the wait is the suite's 30 s, scaled (#136).
         click(ui.element("cleanup.rotate"))
         let landscape = XCTNSPredicateExpectation(
             predicate: NSPredicate { element, _ in
                 guard let element = element as? XCUIElement, element.exists else { return false }
                 return element.frame.width > element.frame.height
             }, object: page)
-        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 10), .completed, "page 1 did not turn")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [landscape], timeout: UITestApp.timeout(30)), .completed, "page 1 did not turn")
         ui.attachWindowScreenshot("cleanup-2-rotated", to: self)
 
         // Page 2 removed.
