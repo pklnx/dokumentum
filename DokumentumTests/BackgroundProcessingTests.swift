@@ -252,9 +252,12 @@ struct BackgroundProcessingTests {
         let background = setup.background
         let importer = BackgroundImportNotifying(base: stub) { background.userImported($0) }
         let controller = ImportController(
-            importer: importer, reader: StubReader(), library: LibraryModel(source: EmptySource()))
+            importer: importer, reader: StubReader(), library: LibraryModel(source: EmptySource()),
+            detector: StubPageDetector())
 
-        await controller.importPhotos([StubPhoto(data: Data([1]))])
+        // Picked photos open the cleanup (#5, part 3); its Save imports them through `importEditedImages`.
+        await controller.importPhotos([StubPhoto(data: CleanupPhotos.photo("eins"))])
+        await controller.saveCleanup()
         await setup.submits.wait(for: 1, "no continued request was submitted")
 
         #expect(setup.tasks.continuedRequests.count == 1)

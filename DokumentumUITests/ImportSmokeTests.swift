@@ -83,8 +83,8 @@ final class ImportSmokeTests: XCTestCase {
             XCTAssertTrue(panel.waitForNonExistence(timeout: 10), "the open panel stayed open")
         #else
             // The Photos picker runs in another process, but its elements are in the app's tree. On the simulator it
-            // shows the simulator's sample photos. Two of them, picked in reverse order, become one document that
-            // opens (PQ1, PQ5).
+            // shows the simulator's sample photos. Two of them, picked in reverse order, open the cleanup, and its
+            // Save makes them one document that opens (PQ1, PQ5).
             photos.tap()
             let samplePhotos = ui.app.images.matching(identifier: "PXGGridLayout-Info")
             XCTAssertTrue(samplePhotos.firstMatch.waitForExistence(timeout: 60), "the Photos picker shows no photos")
@@ -97,6 +97,12 @@ final class ImportSmokeTests: XCTestCase {
             ).firstMatch
             XCTAssertTrue(add.waitForExistence(timeout: 10), "no Done button in the Photos picker")
             add.tap()
+            // The cleanup opens for them (#5, part 3); Save as they are, with the detected edges.
+            let save = ui.element("cleanup.save")
+            XCTAssertTrue(save.waitForExistence(timeout: 60), "the cleanup did not open")
+            XCTAssertTrue(ui.element("cleanup.thumbnail.1").exists, "the cleanup does not show two pages")
+            ui.attachWindowScreenshot("8-photos-cleanup", to: self)
+            save.tap()
             XCTAssertTrue(
                 ui.element("documentDetail.pdf").waitForExistence(timeout: 60), "the photos did not open as a document")
             ui.attachWindowScreenshot("7-photos-document", to: self)
