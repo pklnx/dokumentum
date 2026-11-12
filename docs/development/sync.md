@@ -332,7 +332,11 @@ never the title, date or metadata)
   **Write**) and check that the line "Classification" reads `on`. Record it in the results row Z, for both devices.
 - Run it at the end of run 1 and before every stop: at the end of a sitting, after step 0 stops (entitlement), after
   C7's recovery fails, when M1/M2 are stopped or skipped, and before closing the apps for any other reason (for
-  example a crash or the end of the day). A later sitting turns it off again on both before its first case.
+  example the end of the day). **After a crash** of either app, relaunch both apps and run Z before anything else;
+  the run continues afterwards as a later sitting does. A later sitting turns it off again on both before its first
+  case.
+- The line "Classification" reads the stored setting again every second, so it also shows a change made elsewhere
+  (for example #8 part 3's switch in the app's settings, once it exists).
 
 ## Run 2 (M1, M2; about 30 minutes, run within run 1 on this build)
 
