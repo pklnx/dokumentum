@@ -408,12 +408,15 @@ struct TextLayerTests {
         let document = try #require(PDFDocument(data: source))
         // The same rewrite (rotation, attributes, marker from the source), drawn from a copy whose text page is blank.
         let withoutText = TestPDF.make(contents: [.blank, .image(Self.lines)])
+        // `rewrite` carries the Info of the PDF it draws from, and Quartz stamps CreationDate and ModDate to the
+        // second, so the copy's dates can differ from the source's (#148): the rewrite gets the source's Info back.
+        let sourceInfo = TextLayer.markedInfo(try Self.info(source))
         let textLayer = TextLayer { data in
-            guard let original = PDFDocument(data: source), let drawn = TextLayer.cgDocument(withoutText) else {
-                return data
-            }
-            return TextLayer.rewrite(drawn, document: original, lines: [1: StubRecognizer.boxedLines(Self.lines)]) {}
-                ?? data
+            guard let original = PDFDocument(data: source), let drawn = TextLayer.cgDocument(withoutText),
+                let rewritten = TextLayer.rewrite(
+                    drawn, document: original, lines: [1: StubRecognizer.boxedLines(Self.lines)], progress: {})
+            else { return data }
+            return TextLayer.replacingInfo(in: rewritten, with: sourceInfo) ?? data
         }
         let lines = [1: StubRecognizer.boxedLines(Self.lines)]
 
