@@ -509,14 +509,19 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     classifies that document next (T7). A document in `classify` always ends in `done`, never `failed`, so it is
     classified at most once, on one device, and a field the user cleared later is never filled again.
   - **Outcomes** (T4): no classifier, the switch off, or `unavailable` (`deviceNotEligible`,
-    `appleIntelligenceNotEnabled`) write `done` without a model call; `notReady` (also thrown as
-    `ClassificationFailure.notReady`) waits without an attempt until this device's own claim is 6 hours old, then
-    writes `done`: the staleness is checked before the claim renewal the rules would make (`ClassificationWait`, N4),
-    the report wakes the scheduler at the claim's expiry (`nextClaimEnd`), and without an own claim the step claims
-    first. A text with fewer than 50 non-whitespace characters writes `done` without a model call. An answer fills the
+    `appleIntelligenceNotEnabled`) write `done` without a model call; `notReady` waits without an attempt until this
+    device's own claim is 6 hours old, then writes `done`: the staleness is checked before the claim renewal the rules
+    would make (`ClassificationWait`, N4), the report wakes the scheduler at the claim's expiry (`nextClaimEnd`), and
+    without an own claim the step claims first. A request that **throws** `ClassificationFailure.notReady` (the
+    availability said `available`) is decided on the claim as it was before this run renewed it, so a stale own claim
+    ends the wait there too (review B1 of #146); the queue then remembers it in memory, asks again at most every 15
+    minutes (`notReadyRetry`) and finishes the document at the claim's end without another request.
+    A text with fewer than 50 non-whitespace characters writes `done` without a model call. An answer fills the
     empty fields and writes `done`; a decline (refusal, guardrail, unsupported language) writes `done` with nothing
-    filled and is logged as a fixed code, never retried (P8: no note). `rateLimited` gives the attempt back and pauses
-    classification in this queue until its reset date, else 15 minutes (`nextRetry`). Every other error and the 300 s
+    filled and is logged as a fixed code, never retried (P8: no note; a decline whose `done` write meets another save
+    is kept in memory like an answer, so the next run finishes without asking). `rateLimited` gives the attempt back
+    and pauses classification in this queue until its reset date, else 15 minutes, and at least 1 minute, also for a
+    reset date in the past (`nextRetry`). Every other error and the 300 s
     watchdog count an attempt in **the classification counter** (`ProcessingFailures` under `classificationFailures`,
     T5, forgotten with the text counter when the document is `done` or gone, N3), with the backoff of the text step; the
     third writes `done`. `interruptNow()` gives the attempt back to the counter it was counted in (`StageTracker`
@@ -526,7 +531,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     the type within 40 characters and 3 words; at most 3 distinct tags; the date a valid Gregorian date from 1900 to
     next year **found in the text** in one of the forms of `DateForms` (`14.01.2026`, `14.1.26`, `2026-01-14`,
     `14. Januar 2026`, `Jänner`, `14 January 2026`, `January 14, 2026`). A checked answer is kept in the queue's memory,
-    keyed by document and text record, until its write saved (T3).
+    keyed by document and text record, until its write saved (T3); after a text record swap the model is asked again.
+    The memory (answers and waits) is dropped for a document that left `classify` another way.
   - **Empty fields** (`ClassificationFields`, T2, P2, P7): correspondent, type and tags when none is set; title and
     date only while the document was never edited (`modifiedAt == createdAt`; the date also `documentDate ==
     createdAt`; an empty title always). So a file-name title and the import date are replaced until the first edit,

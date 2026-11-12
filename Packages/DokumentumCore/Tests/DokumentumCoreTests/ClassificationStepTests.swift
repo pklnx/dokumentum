@@ -280,7 +280,7 @@ struct ClassificationStepTests {
         let next = await queue.run()
 
         #expect(next.classified == 1)
-        #expect(classifier.count == 1, "the model was asked again")
+        #expect(classifier.count == 1, "the model must not be asked again: the cached answer is written")
         let row = try store.classified(id)
         #expect(row.title == "Mein Titel")
         #expect(row.documentDate == processingStart, "edited: the date stays")
@@ -290,30 +290,37 @@ struct ClassificationStepTests {
         #expect(row.stateRaw == "done")
     }
 
-    /// A linked record renamed or merged in the window makes the write back off too: the check reads every
-    /// metadata row the write links.
-    @Test func aRenameOfTheMatchedCorrespondentInTheWindowBacksOff() async throws {
+    /// A record the write links, renamed in the write's window by another save (review A B1 of #146): the write
+    /// backs off, and **the rename stays stored**. Without the record's row in the check, the write's stale copy of
+    /// that row would be saved back whole and undo the rename (#56). One case per kind the write links.
+    @Test(arguments: [MetadataKind.correspondent, .documentType, .tag])
+    func aRenameOfALinkedRecordInTheWindowBacksOffAndTheRenameStays(kind: MetadataKind) async throws {
         let store = try ProcessingStore()
         defer { store.remove() }
         let clock = TestClock()
         let id = try store.insertClassify()
-        let known = try store.insertMetadata(.correspondent, "Stadtwerke München")
+        let name =
+            switch kind {
+            case .correspondent: "Stadtwerke München"
+            case .documentType: "Abrechnung"
+            case .tag: "Strom"
+            }
+        let known = try store.insertMetadata(kind, name)
         let renamed = Mutex(false)
-        let hooks = ProcessingQueue.Hooks(beforeCheck: { kind in
-            guard kind == .classification, !renamed.withLock({ $0 }) else { return }
+        let hooks = ProcessingQueue.Hooks(beforeCheck: { write in
+            guard write == .classification, !renamed.withLock({ $0 }) else { return }
             renamed.withLock { $0 = true }
-            let context = ModelContext(store.container)
-            let record = try #require(
-                try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == known }))
-                    .first)
-            record.name = "SWM"
-            try context.save()
+            try store.renameMetadata(kind, known, to: "Umbenannt")
         })
 
         let first = await store.classifyingQueue(classifier: StubClassifier(), clock: clock, hooks: hooks).run()
 
         #expect(first.backedOff == 1)
-        #expect(try store.classified(id).correspondent == nil)
+        #expect(first.saves == 0)
+        #expect(try store.metadataName(kind, known) == "Umbenannt", "the rename was written over")
+        let row = try store.classified(id)
+        #expect(row.stateRaw == "classify")
+        #expect(row.correspondent == nil && row.documentType == nil && row.tags.isEmpty)
     }
 
     // MARK: Outcomes (T4)
@@ -822,5 +829,222 @@ struct ClassificationStepTests {
         #expect(row.correspondent == nil)
         #expect(row.documentDate == processingStart)
         #expect(try store.correspondents().isEmpty)
+    }
+
+    // MARK: Fix round 1 of #146
+
+    /// Review B1: a request that throws `notReady` while the availability says `available` (assets gone mid-request).
+    /// Within the claim's 6 hours the model is asked at most once per `notReadyRetry`; at the claim's end the document
+    /// is finished without another request, and the claim is not renewed.
+    @Test func aThrownNotReadyWaitsAndEndsWithTheClaim() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let counter = store.failures(deviceA)
+        let classifier = StubClassifier { _ in throw ClassificationFailure.notReady }
+        let queue = store.classifyingQueue(classifier: classifier, classificationFailures: counter, clock: clock)
+        let claimEnd = processingStart.addingTimeInterval(ProcessingClaimRules.takeoverInterval)
+
+        let first = await queue.run()
+        #expect(first.waiting == 1)
+        #expect(first.nextClaimEnd == claimEnd)
+        #expect(first.nextRetry == processingStart.addingTimeInterval(ClassificationLimits.notReadyRetry))
+        #expect(counter.count(for: id) == 0, "no attempt")
+        _ = await queue.run()
+        _ = await queue.run()
+        #expect(classifier.count == 1, "asked again before the retry time")
+
+        clock.advance(by: ClassificationLimits.notReadyRetry)
+        #expect(await queue.run().waiting == 1)
+        #expect(classifier.count == 2, "asked again after the retry time")
+
+        clock.advance(by: ProcessingClaimRules.takeoverInterval - ClassificationLimits.notReadyRetry)
+        let last = await queue.run()
+        #expect(last.classificationSkipped == 1)
+        #expect(classifier.count == 2, "the wait ends without another request")
+        let row = try store.row(id)
+        #expect(row.stateRaw == "done")
+        #expect(row.claimedAt == processingStart, "the claim was not renewed")
+    }
+
+    /// Review B1, without the queue's memory (a relaunch): the stale own claim is renewed before the request, and
+    /// the thrown `notReady` is decided on the claim as it was before that renewal, so the wait ends.
+    @Test func aThrownNotReadyOnAStaleOwnClaimEndsTheWaitAfterTheRenewal() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        clock.advance(by: ProcessingClaimRules.takeoverInterval)
+        let classifier = StubClassifier { _ in throw ClassificationFailure.notReady }
+
+        let report = await store.classifyingQueue(classifier: classifier, clock: clock).run()
+
+        #expect(classifier.count == 1)
+        #expect(report.classificationSkipped == 1)
+        #expect(report.saves == 2, "the renewal, then done")
+        #expect(try store.row(id).stateRaw == "done")
+    }
+
+    /// A thrown `notReady` on a fresh own claim (not renewed by this run) waits until that claim's end, without a
+    /// write.
+    @Test func aThrownNotReadyOnAFreshClaimWaitsForThatClaim() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        try store.insertClassify(claimedAt: processingStart.addingTimeInterval(-hour))
+        let classifier = StubClassifier { _ in throw ClassificationFailure.notReady }
+
+        let report = await store.classifyingQueue(classifier: classifier, clock: clock).run()
+
+        #expect(report.saves == 0)
+        #expect(
+            report.nextClaimEnd
+                == processingStart.addingTimeInterval(ProcessingClaimRules.takeoverInterval - hour))
+    }
+
+    /// Review B N-1: a rate limit whose reset date has passed still pauses for the minimum, so the wake is never in
+    /// the past and the next run does not ask again at once.
+    @Test func aRateLimitWithAPastResetPausesForTheMinimum() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        try store.insertClassify()
+        let classifier = StubClassifier { call in
+            if call == 1 { throw ClassificationFailure.rateLimited(until: processingStart.addingTimeInterval(-60)) }
+            return billSuggestion
+        }
+        let queue = store.classifyingQueue(classifier: classifier, clock: clock)
+
+        let first = await queue.run()
+        #expect(first.nextRetry == processingStart.addingTimeInterval(ClassificationLimits.minimumRateLimitPause))
+        #expect(await queue.run().waiting == 1)
+        #expect(classifier.count == 1, "asked again during the pause")
+        clock.advance(by: ClassificationLimits.minimumRateLimitPause)
+        #expect(await queue.run().classified == 1)
+    }
+
+    /// Review B N-2 (T5): the queue's default classification counter is the text counter's suite under its own key,
+    /// so a classification failure never counts as a text failure.
+    @Test func theDefaultClassificationCounterIsSeparateFromTheTextCounter() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let failures = store.failures(deviceA)
+        struct Broken: Error {}
+        let queue = store.classifyingQueue(
+            classifier: StubClassifier { _ in throw Broken() }, failures: failures, clock: clock)
+
+        #expect(await queue.run().failures == 1)
+
+        #expect(failures.count(for: id) == 0, "counted in the text counter")
+        let classification = ProcessingFailures(
+            defaultsSuite: failures.defaultsSuite, key: ProcessingFailures.classificationDefaultsKey)
+        #expect(classification.count(for: id) == 1)
+        #expect(ProcessingFailures.classificationDefaultsKey != ProcessingFailures.defaultsKey)
+    }
+
+    /// Review A N-a, B N-3: a text record swapped during the request drops the answer; nothing is written.
+    @Test func aTextRecordSwappedDuringTheCallDropsTheAnswer() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let call = Checkpoint()
+        defer { call.release() }
+        let queue = store.classifyingQueue(classifier: StubClassifier(checkpoint: call), clock: clock)
+
+        let run = Task { await queue.run() }
+        await call.reached()
+        try store.swapText(of: id, to: "Ein ganz anderes Schreiben ohne Absender und ohne Datum, lang genug dafür.")
+        call.release()
+        let report = await run.value
+
+        #expect(report.dropped == 1)
+        #expect(report.saves == 0)
+        let row = try store.classified(id)
+        #expect(row.stateRaw == "classify")
+        #expect(row.correspondent == nil)
+    }
+
+    /// Review B N-3: a cached answer belongs to its text record. After a swap, the next run asks the model again
+    /// with the new text instead of writing the old answer.
+    @Test func aCachedAnswerIsNotUsedForAnotherTextRecord() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let edited = Mutex(false)
+        let hooks = ProcessingQueue.Hooks(beforeCheck: { write in
+            guard write == .classification, !edited.withLock({ $0 }) else { return }
+            edited.withLock { $0 = true }
+            try store.edit(id) { document, _ in document.isInbox = false }
+        })
+        let classifier = StubClassifier { call in
+            call == 1 ? billSuggestion : ClassificationSuggestion(documentType: "Brief")
+        }
+        let queue = store.classifyingQueue(classifier: classifier, clock: clock, hooks: hooks)
+        #expect(await queue.run().backedOff == 1, "the answer is cached")
+        let other = "Ein ganz anderes Schreiben ohne Absender und ohne Datum, lang genug dafür."
+        try store.swapText(of: id, to: other)
+
+        let next = await queue.run()
+
+        #expect(next.classified == 1)
+        #expect(classifier.count == 2)
+        #expect(classifier.requests.last?.text == other)
+        let row = try store.classified(id)
+        #expect(row.documentType == "Brief")
+        #expect(row.correspondent == nil, "the old text's answer was written")
+    }
+
+    /// Review A N-b, B N-4: a decline whose `done` write meets another save is not asked again; the next run
+    /// finishes the document from the cached decline.
+    @Test func aDeclineIsNotAskedAgainAfterItsWriteMetAnotherSave() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let edited = Mutex(false)
+        let hooks = ProcessingQueue.Hooks(beforeCheck: { write in
+            guard write == .classification, !edited.withLock({ $0 }) else { return }
+            edited.withLock { $0 = true }
+            try store.edit(id) { document, _ in document.isInbox = false }
+        })
+        let classifier = StubClassifier { _ in throw ClassificationFailure.declined(.refusal) }
+        let queue = store.classifyingQueue(classifier: classifier, clock: clock, hooks: hooks)
+
+        let first = await queue.run()
+        #expect(first.backedOff == 1)
+        #expect(first.declined == 0)
+        let next = await queue.run()
+
+        #expect(next.declined == 1)
+        #expect(classifier.count == 1, "the decline was asked again")
+        #expect(try store.classified(id).stateRaw == "done")
+    }
+
+    /// Review B N-5: what the queue keeps in memory for a document goes when the document leaves `classify` another
+    /// way (here another save finishes it).
+    @Test func theMemoryOfADocumentThatLeftClassifyIsDropped() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let edited = Mutex(false)
+        let hooks = ProcessingQueue.Hooks(beforeCheck: { write in
+            guard write == .classification, !edited.withLock({ $0 }) else { return }
+            edited.withLock { $0 = true }
+            try store.edit(id) { document, _ in document.isInbox = false }
+        })
+        let queue = store.classifyingQueue(classifier: StubClassifier(), clock: clock, hooks: hooks)
+        #expect(await queue.run().backedOff == 1)
+        #expect(await queue.classificationMemory == [id])
+
+        try store.edit(id) { document, _ in document.processingState = .done }
+        _ = await queue.run()
+
+        #expect(await queue.classificationMemory.isEmpty)
     }
 }

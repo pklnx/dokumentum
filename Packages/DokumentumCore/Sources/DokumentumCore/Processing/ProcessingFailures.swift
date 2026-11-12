@@ -21,7 +21,9 @@ import Synchronization
 /// state of each attempt (running, then finished or interrupted) sit behind the same `Mutex`, so no update is
 /// lost. A refund happens only while its attempt is running; `succeed` marks the attempt finished and removes the
 /// counter in one step, so a late interruption neither refunds a finished attempt nor brings a counter back. One
-/// instance per defaults suite: the lock is the instance's.
+/// instance per defaults suite **and key**: the lock is the instance's and guards only its own key, so the text
+/// step's counter and the classification step's counter (#8, T5) are two instances on one suite, each the only
+/// writer of its key.
 public final class ProcessingFailures: Sendable {
     /// The key of the text step's counter in the per-device defaults.
     public static let defaultsKey = "processingFailures"

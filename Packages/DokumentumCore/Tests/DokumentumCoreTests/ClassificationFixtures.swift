@@ -142,6 +142,52 @@ extension ProcessingStore {
         return id
     }
 
+    /// Renames a tag, correspondent or type in a context of its own: another save.
+    func renameMetadata(_ kind: MetadataKind, _ id: UUID, to name: String) throws {
+        let context = ModelContext(container)
+        switch kind {
+        case .tag:
+            let record = try #require(
+                try context.fetch(FetchDescriptor<DokumentumCore.Tag>(predicate: #Predicate { $0.instanceID == id }))
+                    .first)
+            record.name = name
+        case .correspondent:
+            let record = try #require(
+                try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == id })).first)
+            record.name = name
+        case .documentType:
+            let record = try #require(
+                try context.fetch(FetchDescriptor<DocumentType>(predicate: #Predicate { $0.instanceID == id })).first)
+            record.name = name
+        }
+        try context.save()
+    }
+
+    /// The stored name of a tag, correspondent or type.
+    func metadataName(_ kind: MetadataKind, _ id: UUID) throws -> String? {
+        let context = ModelContext(container)
+        switch kind {
+        case .tag:
+            return try context.fetch(FetchDescriptor<DokumentumCore.Tag>(predicate: #Predicate { $0.instanceID == id }))
+                .first?.name
+        case .correspondent:
+            return try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == id }))
+                .first?.name
+        case .documentType:
+            return try context.fetch(FetchDescriptor<DocumentType>(predicate: #Predicate { $0.instanceID == id }))
+                .first?.name
+        }
+    }
+
+    /// Links a new text record to the document in another context (a swapped text record), with `text`.
+    func swapText(of id: UUID, to text: String) throws {
+        try edit(id) { document, context in
+            let record = DocumentText(documentID: document.id, extractedText: text, createdAt: processingStart)
+            context.insert(record)
+            document.text = record
+        }
+    }
+
     func correspondents() throws -> [String] {
         try ModelContext(container).fetch(FetchDescriptor<Correspondent>()).map(\.name).sorted()
     }

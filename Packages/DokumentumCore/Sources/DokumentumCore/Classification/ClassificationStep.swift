@@ -5,11 +5,24 @@ import SwiftData
 // The classification step of the processing queue (#8, part 1): the outcomes table and the result write are
 // described on `ProcessingQueue`; docs/development/index.md, "The processing queue", has the whole step.
 
-/// A checked answer whose write has not saved yet (T3): the next run writes it without asking the model again,
-/// as long as the document still links the text record it was made from.
+/// A model answer whose write has not saved yet (T3): the next run writes it without asking the model again, as
+/// long as the document still links the text record it was made from. A decline is kept the same way, so a `done`
+/// write that met another save does not ask the model a second time (reviews of #146, A N-b, B N-4).
 struct CachedSuggestion: Sendable {
+    enum Answer: Sendable {
+        case suggestion(CheckedSuggestion)
+        case declined
+    }
+
     var text: PersistentIdentifier
-    var suggestion: CheckedSuggestion
+    var answer: Answer
+}
+
+/// A request that threw `ClassificationFailure.notReady` (review B1 of #146): the step does not ask again before
+/// `retryAt`, and finishes the document at `claimEnd`, the end of this device's claim the wait was decided on.
+struct ModelWait: Sendable {
+    var claimEnd: Date
+    var retryAt: Date
 }
 
 extension ProcessingQueue {
@@ -40,7 +53,7 @@ extension ProcessingQueue {
             finish(id, expecting: held, reason: "unavailable.\(reason)", into: &report)
             return true
         case .notReady:
-            waitForModel(id, held: held, into: &report)
+            waitForModel(id, decidedOn: held, held: held, into: &report)
             return true
         case .available:
             break
@@ -52,6 +65,19 @@ extension ProcessingQueue {
                 return true
             }
             classificationPausedUntil = nil
+        }
+        // A request threw `notReady` earlier: no new request before its retry time; the wait ends with the claim.
+        if let wait = modelWaits[id] {
+            if now() >= wait.claimEnd {
+                finish(id, expecting: held, reason: "notReady", into: &report)
+                return true
+            }
+            if now() < wait.retryAt {
+                report.waiting += 1
+                report.nextRetry = min(report.nextRetry ?? wait.retryAt, wait.retryAt)
+                report.nextClaimEnd = min(report.nextClaimEnd ?? wait.claimEnd, wait.claimEnd)
+                return true
+            }
         }
         // The text and the known records, by key, in a context that ends with the read.
         guard let input = Self.readClassificationInput(of: id, in: container) else {
@@ -66,30 +92,38 @@ extension ProcessingQueue {
             finish(id, expecting: held, reason: "shortText", into: &report)
             return true
         }
+        // The claim as the decision found it, before this run renews it: a thrown `notReady` is decided on it (B1).
+        let decided = held
         if claim != .keep {
             guard let claimed = writeClaim(id, expecting: held, into: &report) else { return true }
             held = claimed
         }
         let checked: CheckedSuggestion
         if let cached = suggestions[id], cached.text == input.text {
-            checked = cached.suggestion
+            switch cached.answer {
+            case .suggestion(let suggestion):
+                checked = suggestion
+            case .declined:
+                if finish(id, expecting: held, reason: nil, into: &report) { report.declined += 1 }
+                return true
+            }
         } else {
             suggestions[id] = nil
             // One job at a time across both kinds of stage (T6).
             guard await stages.waitUntilStartable(), !Task.isCancelled else { return false }
-            switch await askModel(classifier, id: id, input: input, held: held, into: &report) {
+            switch await askModel(classifier, id: id, input: input, decided: decided, held: held, into: &report) {
             case .answer(let answer): checked = answer
             case .handled: return true
             case .stop: return false
             }
-            suggestions[id] = CachedSuggestion(text: input.text, suggestion: checked)
+            suggestions[id] = CachedSuggestion(text: input.text, answer: .suggestion(checked))
         }
         let outcome = Self.writeClassification(
             id, expecting: held, suggestion: checked, now: now(), calendar: calendar, in: container,
             beforeCheck: hooks.beforeCheck)
         switch outcome {
         case .saved:
-            suggestions[id] = nil
+            forget(id)
             report.saves += 1
             report.done += 1
             report.classified += 1
@@ -97,12 +131,28 @@ extension ProcessingQueue {
             // Kept: the next run decides the fields again and writes without asking the model (T3).
             report.backedOff += 1
         case .changed:
-            suggestions[id] = nil
+            forget(id)
             report.dropped += 1
         case .failed:
             break
         }
         return true
+    }
+
+    /// The documents the queue keeps something in memory for (a cached answer, a wait for the model). For tests.
+    var classificationMemory: Set<UUID> { Set(suggestions.keys).union(modelWaits.keys) }
+
+    /// Drops what the queue keeps in memory for a document: its cached answer and its wait for the model.
+    func forget(_ id: UUID) {
+        suggestions[id] = nil
+        modelWaits[id] = nil
+    }
+
+    /// Keeps the memory only for documents still in `classify` (review B N-5 of #146): one that another device
+    /// finished, or that was deleted, leaves it.
+    func forgetClassificationMemory(keeping candidates: [Candidate]) {
+        let open = Set(candidates.filter { $0.input.state == .classify }.map(\.instanceID))
+        for id in Set(suggestions.keys).union(modelWaits.keys) where !open.contains(id) { forget(id) }
     }
 
     private enum ModelOutcome {
@@ -113,8 +163,11 @@ extension ProcessingQueue {
     }
 
     /// Counts the attempt, asks the model and handles every outcome but an answer.
+    /// - Parameters:
+    ///   - decided: the claim as the decision found it, before this run's claim write.
+    ///   - held: the claim the writes expect now.
     private func askModel(
-        _ classifier: any DocumentClassifying, id: UUID, input: ClassificationInput, held: Held,
+        _ classifier: any DocumentClassifying, id: UUID, input: ClassificationInput, decided: Held, held: Held,
         into report: inout ProcessingReport
     ) async -> ModelOutcome {
         let counter = classificationFailures
@@ -140,7 +193,8 @@ extension ProcessingQueue {
             }
             return .answer(SuggestionRules.check(suggestion, text: text, now: now()))
         case .threw(let failure as ClassificationFailure):
-            return handle(failure, attempt: attempt, id: id, held: held, into: &report)
+            return handle(
+                failure, attempt: attempt, id: id, text: input.text, decided: decided, held: held, into: &report)
         case .threw(let error):
             guard counter.fail(attempt) else {
                 report.interrupted += 1
@@ -183,8 +237,8 @@ extension ProcessingQueue {
     }
 
     private func handle(
-        _ failure: ClassificationFailure, attempt: ProcessingFailures.Attempt, id: UUID, held: Held,
-        into report: inout ProcessingReport
+        _ failure: ClassificationFailure, attempt: ProcessingFailures.Attempt, id: UUID, text: PersistentIdentifier,
+        decided: Held, held: Held, into report: inout ProcessingReport
     ) -> ModelOutcome {
         let counter = classificationFailures
         switch failure {
@@ -195,13 +249,17 @@ extension ProcessingQueue {
                 return .stop
             }
             Log.processing.notice("Classification declined: \(failure.code, privacy: .public)")
+            // Kept until the `done` write saved, so a write that meets another save does not ask again.
+            suggestions[id] = CachedSuggestion(text: text, answer: .declined)
             if finish(id, expecting: held, reason: nil, into: &report) { report.declined += 1 }
         case .rateLimited(let until):
             guard counter.refund(attempt) else {
                 report.interrupted += 1
                 return .stop
             }
-            let resume = until ?? now().addingTimeInterval(ClassificationLimits.rateLimitPause)
+            // A reset date in the past (or none) still pauses: never a wake in the past (B N-1 of #146).
+            let earliest = now().addingTimeInterval(ClassificationLimits.minimumRateLimitPause)
+            let resume = max(until ?? now().addingTimeInterval(ClassificationLimits.rateLimitPause), earliest)
             classificationPausedUntil = resume
             report.waiting += 1
             report.nextRetry = min(report.nextRetry ?? resume, resume)
@@ -211,7 +269,12 @@ extension ProcessingQueue {
                 report.interrupted += 1
                 return .stop
             }
-            waitForModel(id, held: held, into: &report)
+            // Decided on the claim before this run renewed it (B1 of #146): a stale own claim ends the wait here.
+            if let claimEnd = waitForModel(id, decidedOn: decided, held: held, into: &report) {
+                let retryAt = min(now().addingTimeInterval(ClassificationLimits.notReadyRetry), claimEnd)
+                modelWaits[id] = ModelWait(claimEnd: claimEnd, retryAt: retryAt)
+                report.nextRetry = min(report.nextRetry ?? retryAt, retryAt)
+            }
         }
         return .handled
     }
@@ -229,24 +292,36 @@ extension ProcessingQueue {
     }
 
     /// The model is not ready: wait, without an attempt, until this device's own claim is stale; then finish. The
-    /// staleness is checked here, before the claim the rules would renew (N4).
-    private func waitForModel(_ id: UUID, held: Held, into report: inout ProcessingReport) {
+    /// staleness is decided on `decided`, the claim before any renewal of this run (N4; review B1 of #146), and the
+    /// writes expect `held`, the claim now (the same unless this run already wrote a claim). Returns the end of the
+    /// wait when the document waits, `nil` when it was finished or nothing was written.
+    @discardableResult
+    private func waitForModel(
+        _ id: UUID, decidedOn decided: Held, held: Held, into report: inout ProcessingReport
+    ) -> Date? {
+        let until: Date
         switch ClassificationWait.decide(
-            deviceID: held.deviceID, claimedAt: held.claimedAt, thisDevice: deviceID, now: now(),
+            deviceID: decided.deviceID, claimedAt: decided.claimedAt, thisDevice: deviceID, now: now(),
             interval: takeoverInterval)
         {
         case .finish:
             finish(id, expecting: held, reason: "notReady", into: &report)
-        case .wait(let until):
-            report.waiting += 1
-            report.nextClaimEnd = min(report.nextClaimEnd ?? until, until)
+            return nil
+        case .wait(let end):
+            until = end
         case .claimAndWait:
-            guard let claimed = writeClaim(id, expecting: held, into: &report), let claimedAt = claimed.claimedAt
-            else { return }
-            let until = claimedAt.addingTimeInterval(takeoverInterval)
-            report.waiting += 1
-            report.nextClaimEnd = min(report.nextClaimEnd ?? until, until)
+            if held != decided, held.deviceID == deviceID, let claimedAt = held.claimedAt {
+                // This run already claimed it before the request.
+                until = claimedAt.addingTimeInterval(takeoverInterval)
+            } else {
+                guard let claimed = writeClaim(id, expecting: held, into: &report), let claimedAt = claimed.claimedAt
+                else { return nil }
+                until = claimedAt.addingTimeInterval(takeoverInterval)
+            }
         }
+        report.waiting += 1
+        report.nextClaimEnd = min(report.nextClaimEnd ?? until, until)
+        return until
     }
 
     /// The claim write of the classification step: the state stays `classify`. The held state after it, or `nil`
@@ -269,8 +344,9 @@ extension ProcessingQueue {
     @discardableResult
     private func finish(_ id: UUID, expecting held: Held, reason: String?, into report: inout ProcessingReport) -> Bool
     {
-        suggestions[id] = nil
         let outcome = write(.classification, id, expecting: held) { $0.processingState = .done }
+        // A write that met another save keeps the cached answer (a decline) for the next run.
+        if outcome == .saved || outcome == .changed { forget(id) }
         guard count(outcome, into: &report) else { return false }
         report.done += 1
         if let reason {

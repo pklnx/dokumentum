@@ -244,6 +244,8 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     var suggestions: [UUID: CachedSuggestion] = [:]
     /// No classification request before this time: the classifier was rate limited.
     var classificationPausedUntil: Date?
+    /// Documents whose request threw `notReady`, by document (review B1 of #146).
+    var modelWaits: [UUID: ModelWait] = [:]
 
     /// - Parameters:
     ///   - sightings: this device's claim sightings; by default in the failure counter's defaults suite.
@@ -342,6 +344,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             Log.processing.error("Processing scan failed: \(Log.code(of: error), privacy: .public)")
             return report
         }
+        forgetClassificationMemory(keeping: candidates)
         if let afterScan = hooks.afterScan { await afterScan() }
         documents: for candidate in candidates {
             var next: Candidate? = candidate
@@ -514,8 +517,13 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             }
             return .next
         case .suggested:
-            // Only the classification stage answers so.
-            _ = failures.fail(attempt)
+            // Unreachable: the text stage's work always returns `.returned`. `StageOutcome` is shared with the
+            // classification stage, so the switch names it; counted as a failed attempt, never written.
+            guard failures.fail(attempt) else {
+                report.interrupted += 1
+                return .stop
+            }
+            failed(attempt, expecting: held, into: &report)
             return .next
         case .threw(let error):
             guard failures.fail(attempt) else {

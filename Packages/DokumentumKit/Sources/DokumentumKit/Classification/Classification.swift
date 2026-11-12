@@ -110,6 +110,10 @@ public enum ClassificationLimits {
     public static let earliestYear = 1900
     /// How long the step waits after a rate limit without a reset date.
     public static let rateLimitPause: TimeInterval = 15 * 60
+    /// The shortest pause after a rate limit, also when its reset date has passed (review B N-1 of #146).
+    public static let minimumRateLimitPause: TimeInterval = 60
+    /// After a request threw "not ready", the next request waits this long (at most until the claim ends).
+    public static let notReadyRetry: TimeInterval = 15 * 60
     /// Values a model writes for "unknown": dropped (compared after `MetadataName.normalized`).
     public static let placeholders: Set<String> = [
         "unbekannt", "unklar", "unknown", "n/a", "na", "none", "keine", "keiner", "kein", "-", "--", "?", "null",
