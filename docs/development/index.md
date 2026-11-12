@@ -77,7 +77,7 @@ live in `Packages/`.
   `XCLocalSwiftPackageReference`. With the latter `xcodebuild` builds the package but silently drops
   its tests from a test plan and still reports success. `check-project.py` guards this.
 - **Signing is automatic with the committed team.** Signed builds run on the maintainer's machine. Agents'
-  local builds and Xcode Cloud's test workflows build macOS without team and entitlements, see "The unsigned
+  local builds and the CI test jobs (GitHub Actions, formerly Xcode Cloud) build macOS without team and entitlements, see "The unsigned
   path".
 
 ## Build and test
@@ -112,9 +112,9 @@ does not apply, and the flag stays barred for agents. The fix for a forgotten pr
 `Config/Unsigned.xcconfig` makes the macOS build ad hoc, without a team and without entitlements. It
 sets only macOS-conditioned keys, so the simulator keeps the real team and keys, which a build shows in
 its `*-Simulated.xcent` files. The project does not reference the file: it reaches a build only through
-this variable, or through Xcode Cloud's copy (see "Xcode Cloud").
+this variable, or, for Xcode Cloud's test workflows, through its copy (see "Xcode Cloud"; the GitHub Actions jobs use the variable).
 
-**What this leaves untested.** macOS tests in local unsigned builds and in Xcode Cloud run without the entitlements and
+**What this leaves untested.** macOS tests in local unsigned builds and in CI (GitHub Actions, formerly Xcode Cloud) run without the entitlements and
 outside the sandbox, with no iCloud or push keys. Only the maintainer's signed build exercises them. A
 macOS test passing here says nothing about behaviour that depends on them.
 
@@ -1151,8 +1151,12 @@ requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app
 (`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
 (`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
 iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
-is set. The tests run serially (`-parallel-testing-enabled NO`) and with test timeouts (300 s a test, 600 s at most):
-in parallel the hosted app tests stalled on these runners, in both jobs, with no test failing. A failed or cancelled run uploads its `.xcresult` bundles as an artifact. The workflow needs no secrets and only
+is set. The tests run serially (`-parallel-testing-enabled NO`) as a workaround for #164: in parallel mode the
+`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure, in one run of each job; the
+hosted app tests had finished; thread pool starvation is suspected, the trigger is not proven). Switch back to
+parallel mode when #164 is fixed. No per-test time allowance is set (it is not verified that it bounds Swift Testing
+tests, and a frozen pool stops `.timeLimit` too), so the bound of a stuck run is the job timeout of 30 minutes. A
+failed or cancelled run uploads its `.xcresult` bundles as an artifact (kept 7 days). The workflow needs no secrets and only
 `contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.
 
 ### Xcode Cloud

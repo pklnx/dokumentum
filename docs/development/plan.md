@@ -44,11 +44,11 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | Item | Value |
 |---|---|
 | Targets | One multiplatform SwiftUI app target (iOS + native macOS, not Mac Catalyst); a share extension for iOS (step 3: it hands shared files to the app through the app-group queue) |
-| Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked against the Xcode that Xcode Cloud offers (`ci_scripts/ci_post_clone.sh`, pinned in `.xcode-version`); if Xcode Cloud lags behind, the minimum stays at the newest SDK it offers until it catches up |
+| Minimum OS | iOS 27, macOS 27 (the systems on both devices). Checked against the Xcode of the CI (`ci_scripts/ci_post_clone.sh`, pinned in `.xcode-version`; the GitHub Actions runner image and Xcode Cloud); if the CI lags behind, the minimum stays at the newest SDK it offers until it catches up |
 | Bundle ID | `space.pklnx.Dokumentum` (extension: `space.pklnx.Dokumentum.Share`) |
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
-| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; agents' local builds and Xcode Cloud's test workflows build macOS unsigned, section 4) |
+| Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; agents' local builds and the CI test jobs (GitHub Actions, formerly Xcode Cloud) build macOS unsigned, section 4) |
 | Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; user-selected files, read only; no app group, no network. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
@@ -61,6 +61,7 @@ Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 |---|---|---|---|---|
 | MacBook Air, the maintainer's signing Mac (2026-11-11) | 27.2.1 (26B131) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | none installed |
 | MacBook Pro, returned to Apple (2026-11-07) | 27.2 (26B7124) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.2 |
+| GitHub Actions runner, image `xcode-27-arm64` 20261104.0337 (2026-11-12; Xcode selected by `DEVELOPER_DIR`) | 27.0.1 | 27.2 (27B52) (the image's default is 27.1) | iOS 27.2 family, read from the CI log of `ci_post_clone.sh` | iOS 27.0 (has the iPhone 18 Pro), 27.1, 27.2 |
 | Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
 The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`
@@ -70,9 +71,8 @@ builds and SDK versions are in the Xcode Cloud log, which was not read for this
 row. The last log read was PR #37's (build 4, action `Default - iOS`, commit
 `87cc89a`, recorded on #1), under Xcode 27.1 (27A9275): macOS 27.0 (26A428), SDKs
 iOS 27.1, iOS Simulator 27.1 and macOS 27.0. The script prints no simulator
-runtimes. The checks are
-`Dokumentum | PR | Default - iOS`, `Dokumentum | PR | Default - macOS` and
-`Dokumentum | PR`.
+runtimes. Since 2026-11-12 the build and test checks are `app-ios` and `app-macos` (GitHub Actions, `app.yml`). Xcode Cloud's former
+checks were `Dokumentum | PR | Default - iOS`, `Dokumentum | PR | Default - macOS` and `Dokumentum | PR`.
 
 ## 3. Architecture
 

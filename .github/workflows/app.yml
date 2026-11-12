@@ -4,8 +4,12 @@ name: App
 # section 6, question 1). Both jobs mirror Xcode Cloud's former "Default - iOS" and "Default - macOS" actions:
 # the Dokumentum scheme, built unsigned, then the Default test plan. The UISmoke plan is not part of it.
 # There is deliberately no `paths` filter: these jobs are required checks, so they must run on every pull request.
-# The tests run serially, with test timeouts: in parallel, the hosted app tests stalled on these 3-CPU runners
-# (a run of each job stopped producing output until it was cancelled, no test had failed).
+# The tests run serially (-parallel-testing-enabled NO) as a workaround for #164: in parallel mode the
+# DokumentumCoreTests process froze on these 3-CPU runners (no output, no time-limit failure; thread pool
+# starvation is suspected, the trigger is not proven). The hosted app tests had finished. Switch back to
+# parallel mode when #164 is fixed. No per-test time allowance is set: it is not verified that
+# -test-timeouts-enabled bounds Swift Testing tests, and a frozen pool stops `.timeLimit` as well, so the
+# bound of a stuck run is the job timeout.
 # `xcode-27` is a preview runner image; it has Xcode 27.1 as the default, so each job selects the pinned Xcode.
 on:
   push:
@@ -30,7 +34,7 @@ jobs:
   app-ios:
     name: app-ios
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,7 +56,6 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test-without-building -scheme Dokumentum -testPlan Default \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 \
             -parallel-testing-enabled NO \
             -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/test.xcresult"
@@ -63,11 +66,12 @@ jobs:
           name: app-ios-xcresult
           path: ${{ runner.temp }}/*.xcresult
           if-no-files-found: ignore
+          retention-days: 7
 
   app-macos:
     name: app-macos
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,7 +93,6 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test-without-building -scheme Dokumentum -testPlan Default \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 \
             -parallel-testing-enabled NO \
             -destination 'platform=macOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/test.xcresult"
@@ -100,3 +103,4 @@ jobs:
           name: app-macos-xcresult
           path: ${{ runner.temp }}/*.xcresult
           if-no-files-found: ignore
+          retention-days: 7
