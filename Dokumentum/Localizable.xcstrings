@@ -1040,6 +1040,17 @@
         }
       }
     },
+    "Recognising text…" : {
+      "comment" : "Detail status line: the document's text is being recognised right now (processing state processing).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text wird erkannt …"
+          }
+        }
+      }
+    },
     "Remove Page" : {
       "comment" : "Photo cleanup sheet: leaves the selected page out of the document.",
       "localizations" : {
@@ -1229,6 +1240,28 @@
         }
       }
     },
+    "Text recognition failed" : {
+      "comment" : "Detail status line: text recognition gave up on this document (processing state failed).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texterkennung fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Text recognition pending" : {
+      "comment" : "Detail status line: the document waits for text recognition (processing queue state pending).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texterkennung ausstehend"
+          }
+        }
+      }
+    },
     "The file is being downloaded from iCloud." : {
       "comment" : "Below “Still downloading”.",
       "localizations" : {
@@ -1352,6 +1385,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Papierkorb leer"
+          }
+        }
+      }
+    },
+    "Try again" : {
+      "comment" : "Button in the detail status line of a document whose text recognition failed: queues it again.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erneut versuchen"
           }
         }
       }

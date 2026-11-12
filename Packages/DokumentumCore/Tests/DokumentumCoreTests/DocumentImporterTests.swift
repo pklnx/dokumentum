@@ -59,11 +59,12 @@ struct DocumentImporterTests {
         #expect(document.correspondent == nil)
         #expect(document.documentType == nil)
         #expect(document.tags ?? [] == [])
-        #expect(document.thumbnail == nil)
+        // Page 1's thumbnail, in the same save (#6, part 4; `ThumbnailTests`).
+        #expect(document.thumbnail?.documentID == document.id)
         let context = ModelContext(container)
         #expect(try context.fetchCount(FetchDescriptor<DocumentFile>()) == 1)
         #expect(try context.fetchCount(FetchDescriptor<DocumentText>()) == 1)
-        #expect(try context.fetchCount(FetchDescriptor<DocumentThumbnail>()) == 0)
+        #expect(try context.fetchCount(FetchDescriptor<DocumentThumbnail>()) == 1)
     }
 
     /// Image bytes, so the declared type decides (PDF bytes would be a PDF without it, #86).

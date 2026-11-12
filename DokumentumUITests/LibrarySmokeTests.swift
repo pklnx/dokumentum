@@ -1,8 +1,9 @@
 import XCTest
 
 /// The library on the sample documents (`-UITestSeed`): the sidebar filters, the tag tree expands,
-/// and the detail shows a PDF or why there is none. On the iPhone the split view is a navigation
-/// stack, on the Mac three columns.
+/// and the detail shows a PDF or why there is none. Rows show their first page's thumbnail, and the detail of a
+/// document whose text recognition failed says so and offers "Try again" (#6, part 4). On the iPhone the split view
+/// is a navigation stack, on the Mac three columns.
 final class LibrarySmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test
     // cannot see the app's code.
@@ -28,8 +29,10 @@ final class LibrarySmokeTests: XCTestCase {
     private static let waterBill = 3
     private static let accountStatement = 4
     private static let carInsurance = 7
-    /// Scanned receipt (Inbox, a file that is not a PDF).
+    /// Scanned receipt (Inbox, a file that is not a PDF, so no thumbnail; its text recognition failed).
     private static let scannedReceipt = 9
+    /// The annual statement with the long title (Inbox, a PDF whose text recognition failed).
+    private static let annualStatement = 6
 
     override func setUp() {
         continueAfterFailure = false
@@ -48,6 +51,7 @@ final class LibrarySmokeTests: XCTestCase {
         #if os(macOS)
             assertMacListElements(ui)
         #endif
+        assertRowsShowThumbnails(ui)
 
         #if os(iOS)
             // The iPhone opens on the Inbox list; back to the sidebar.
@@ -115,7 +119,77 @@ final class LibrarySmokeTests: XCTestCase {
             ui.attachWindowScreenshot("7-unreadable", to: self)
             ui.assertTextContrast("documentDetail.unreadable", in: self)
             ui.assertTextContrast("documentDetail.unreadable.description", in: self)
+        #else
+            // The annual statement is in the Inbox: back to the sidebar first.
+            goBack(ui)
+            goBack(ui)
+            ui.activate("sidebar.inbox")
         #endif
+        ui.activate(Self.documentRow(Self.annualStatement))
+        XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        assertFailedProcessingCanBeTriedAgain(ui)
+    }
+
+    /// The annual statement is open: above its PDF the detail says that text recognition failed, with "Try again"
+    /// (#6, P2), and passes the audit (over the PDF: the placeholders' descriptions are a known false positive in light,
+    /// see `assertTextContrast`); "Try again" sets it back to pending (the UI test's in-memory store runs no queue, so
+    /// it stays there), and the button goes. On the Mac the line's text reaches 4.5:1 in light and dark, measured from
+    /// its own pixels.
+    @MainActor
+    private func assertFailedProcessingCanBeTriedAgain(
+        _ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            ui.element("documentDetail.processing.failed").waitForExistence(timeout: 20),
+            "no “Text recognition failed”", file: file, line: line)
+        XCTAssertTrue(ui.element("documentDetail.processing.retry").exists, "no “Try again”", file: file, line: line)
+        ui.attachWindowScreenshot("8-processing-failed", to: self)
+        #if os(macOS)
+            ui.assertTextContrast("documentDetail.processing.failed", in: self, file: file, line: line)
+        #endif
+        ui.auditAccessibility("processing-failed", in: self, file: file, line: line)
+
+        ui.activate("documentDetail.processing.retry", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("documentDetail.processing.pending").waitForExistence(timeout: 20),
+            "“Try again” did not set the document back to pending", file: file, line: line)
+        XCTAssertFalse(ui.element("documentDetail.processing.failed").exists, file: file, line: line)
+        XCTAssertFalse(ui.element("documentDetail.processing.retry").exists, file: file, line: line)
+        ui.attachWindowScreenshot("9-processing-pending", to: self)
+    }
+
+    /// The Inbox's rows show their first page's thumbnail at the leading edge (#6, P1); the Scanned receipt has none
+    /// (its file is not a PDF) and shows the placeholder. The thumbnail is hidden from VoiceOver, so it is compared
+    /// in the rows' own pixels: the leading 72 × 60 pt of a row with a thumbnail differ from a row with the placeholder
+    /// in at least a quarter of the thumbnail's area (a white page on the grey placeholder, in light and dark). With
+    /// both showing the placeholder they are the same.
+    @MainActor
+    private func assertRowsShowThumbnails(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
+        let withThumbnail = ui.element(Self.documentRow(Self.electricityBill))
+        let placeholder = ui.element(Self.documentRow(Self.scannedReceipt))
+        XCTAssertTrue(placeholder.waitForExistence(timeout: 10), "no Scanned receipt row", file: file, line: line)
+        // The thumbnail is loaded off the main actor after the row appears: its pixels are the signal.
+        var differing = 0
+        var minimum = 0
+        let deadline = Date().addingTimeInterval(20)
+        repeat {
+            guard
+                let measured = UITestApp.leadingBandDifference(
+                    withThumbnail.screenshot(), placeholder.screenshot(), width: 72, height: 60,
+                    pointWidths: (withThumbnail.frame.width, placeholder.frame.width))
+            else {
+                XCTFail("the rows' screenshots could not be measured", file: file, line: line)
+                return
+            }
+            (differing, minimum) = (measured.differing, measured.thumbnailArea / 4)
+        } while differing < minimum && Date() < deadline
+        let summary = "THUMBNAIL rows 1 vs 9: \(differing) px differ, \(minimum) needed"
+        print(summary)
+        let attachment = XCTAttachment(string: summary)
+        attachment.name = UITestApp.attachmentName("thumbnail-rows")
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThanOrEqual(differing, minimum, "the row shows no thumbnail", file: file, line: line)
     }
 
     /// Every sidebar row (Library, tags, correspondents, types, Trash) has a VoiceOver value that starts with

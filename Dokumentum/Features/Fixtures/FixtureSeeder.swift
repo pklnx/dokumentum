@@ -17,7 +17,8 @@
     ///   run it before their samples synced get documents with equal `id`s: #2's known, counted case.
     ///
     /// Each document is written with its `DocumentText` (at most `textLimit` bytes) and, unless it is the
-    /// "still downloading" sample, its `DocumentFile`, in one save. Every PDF is generated (`SyntheticPDF`);
+    /// "still downloading" sample, its `DocumentFile`, and for a PDF its `DocumentThumbnail` as the importer makes it
+    /// (#6, part 4), in one save, in the catalog's processing state (a processed sample with its text as `.pdfText`). Every PDF is generated (`SyntheticPDF`);
     /// nothing is read from disk.
     enum FixtureSeeder {
         enum InstanceIDs {
@@ -81,7 +82,15 @@
                     context.insert(file)
                     document.file = file
                     document.fileSize = data.count
+                    if case .pdf = sample.file, let image = Thumbnail.make(fromPDF: data) {
+                        let thumbnail = DocumentThumbnail(
+                            documentID: document.id, imageData: image, createdAt: document.createdAt)
+                        context.insert(thumbnail)
+                        document.thumbnail = thumbnail
+                    }
                 }
+                document.processingState = values.processingState
+                if values.processingState == .done, !text.extractedText.isEmpty { document.textSource = .pdfText }
                 if case .pdf(let pages) = sample.file { document.pageCount = pages.count }
                 added += 1
             }

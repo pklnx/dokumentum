@@ -19,12 +19,14 @@ struct LibraryRootView: View {
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
-    /// - Parameter searcher: the app's one search index (#7, part 2); every window's model follows its updates.
+    /// - Parameters:
+    ///   - searcher: the app's one search index (#7, part 2); every window's model follows its updates.
+    ///   - retrier: "Try again" for a failed document (#6, P2).
     init(
         source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting,
-        searcher: (any DocumentSearching)? = nil
+        searcher: (any DocumentSearching)? = nil, retrier: (any ProcessingRetrying)? = nil
     ) {
-        let model = LibraryModel(source: source, searcher: searcher, loadNow: false)
+        let model = LibraryModel(source: source, searcher: searcher, retrier: retrier, loadNow: false)
         _model = State(initialValue: model)
         _trash = State(initialValue: LibraryTrash(model: model))
         _importController = State(initialValue: ImportController(importer: importer, library: model))
