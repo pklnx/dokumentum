@@ -275,18 +275,23 @@ struct TextLayerTests {
 
     // MARK: - The guard
 
-    /// P-m: a page whose text uses a font without its program may not render the same after the redraw (the redraw
-    /// embeds a substitute), and the guard's pixel compare rejects it even without the font check. Measured for this
-    /// PR: Helvetica at 48 pt differs at 300 px, at 16 pt only from 600 px on, which the 300 px compare misses: hence
-    /// the font check before the rewrite (R1-N1).
-    @Test func theGuardRejectsAPageThatRendersDifferently() throws {
-        let data = TestPDF.makeRaw(pages: [.standardFontText("Rechnung Nummer 2026-0042", size: 48), .bar()])
-        let document = try #require(PDFDocument(data: data))
-        let source = try #require(TextLayer.cgDocument(data))
-        let lines = [1: StubRecognizer.boxedLines(Self.lines)]
-        let rewritten = try #require(TextLayer.rewrite(source, document: document, lines: lines) {})
+    /// The guard's pixel compare: a rewrite whose page looks different is rejected, every other check holding. The
+    /// difference is made in the test (the same rewrite, drawn from a copy whose bar sits 10 pt lower), because how a
+    /// redraw changes a page is the platform's: a page in Helvetica without its program (P-m) rendered differently at
+    /// 300 px on macOS at 48 pt but identically on the iOS simulator, and at 16 pt identically on both. That is why
+    /// the font check comes before the rewrite (R1-N1).
+    @Test func theGuardRejectsAPageThatLooksDifferent() throws {
+        let source = TestPDF.makeRaw(pages: [.bar(), .bar()])
+        let document = try #require(PDFDocument(data: source))
+        let moved = TestPDF.makeRaw(pages: [TestPDF.RawPage(content: "0 0 0 rg 72 690 300 24 re f"), .bar()])
+        let lines = [0: StubRecognizer.boxedLines(Self.lines), 1: StubRecognizer.boxedLines(Self.lines)]
+        let textLayer = TextLayer { data in
+            guard let original = PDFDocument(data: source), let drawn = TextLayer.cgDocument(moved) else { return data }
+            return TextLayer.rewrite(drawn, document: original, lines: lines) {} ?? data
+        }
 
-        #expect(TextLayer.verify(rewritten, against: source, document: document, lines: lines) {} == .pixels(page: 0))
+        #expect(
+            textLayer.apply(to: source, document: document, lines: lines) == .kept(.guardFailed(.pixels(page: 0))))
     }
 
     /// Each check of the guard, shown with a rewrite changed before it sees it.

@@ -396,9 +396,9 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   unless the new PDF opens unencrypted with the same page count, catalog and pages within the allow-lists, the same
   media box, crop box and rotation per page, the same Info attributes and Info keys plus the marker, each source page's
   own text lines and every drawn line in the page's text (whitespace ignored), and every page pixel-identical to the
-  source at 300 px (RGB, crop box, rotation). The 300 px compare alone misses a substituted font at small sizes
-  (measured: Helvetica without its program differs at 48 pt, at 16 pt only from 600 px on), which is why the font
-  check comes first. Why a file was kept is logged as a fixed code. The redraw and the guard report progress per page,
+  source at 300 px (RGB, crop box, rotation). The 300 px compare alone misses a substituted font (measured: a page in
+  Helvetica without its program, redrawn, differs at 300 px on macOS at 48 pt but not on the iOS simulator, and at
+  16 pt on neither), which is why the font check comes first. Why a file was kept is logged as a fixed code. The redraw and the guard report progress per page,
   for the watchdog. A rewrite **keeps** every page's look, size, boxes, rotation, order and count, the page's own
   text, and the Info entries; it **drops** the original bytes (the file is re-encoded; `contentHash` stays the hash of
   the imported bytes, so importing them again is still a duplicate) and gains the invisible text.
