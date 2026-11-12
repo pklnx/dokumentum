@@ -8,7 +8,7 @@
 - Issue #3 (library UI): all five parts are merged, and the Mac accessibility audit passes (#82). The VoiceOver check of the Import menu passed on the signed Mac build (2026-11-11). It stays open for the maintainer's own look (PQ17).
 - Issue #4 (import): parts 1–5 are merged (sub-issues #58–#62; part 4, the share extension, is #85; part 5, the processing queue, is #96). Follow-up #87 hardens the share queue: part 1 is merged as #95, and part 2 (#94) is in review as PR #100. Multi-page TIFFs (#90) are in review as PR #101; the Mac placeholder follow-up #89 has a plan in `review`. M1 (signed Mac build) passed on 2026-11-11; M2–M4 are open.
 - Apple: enrolment is done, Team ID `88GY2V9C2A`. The iCloud container, the app group and both App IDs are registered. The App Store Connect record "Dokumentum" exists (primary language German, store metadata only).
-- Xcode Cloud is onboarded and is the PR check. The ruleset `main` with the required checks is active.
+- Xcode Cloud is onboarded and is kept for the TestFlight uploads; since 2026-11-12 the PR check for build and app tests is GitHub Actions macOS (`app.yml`: `app-ios`, `app-macos`; PR #162). The ruleset swap is the maintainer's step. The ruleset `main` with the required checks is active.
 
 ## Development machine
 - Signed builds and device runs: the maintainer's MacBook Air (M5), which replaced the MacBook Pro permanently on 2026-11-11 (maintainer decision on #1).

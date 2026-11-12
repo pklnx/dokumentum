@@ -41,6 +41,19 @@ struct DokumentumApp: App {
         /// The Sync lab (#31, part 2): Debug builds only.
         let syncLab: SyncLab
     #endif
+    /// The "Suggestions" settings (#8, part 3): this device's switch and the classifier's availability, for the Mac's
+    /// Settings window and the iPhone's settings sheet.
+    let suggestionSettings: SuggestionSettings
+    /// The suite of the classification switch for an in-memory store (tests and UI tests): emptied at each such
+    /// launch, so a UI test that turns the switch off never changes this device's real setting.
+    nonisolated static let inMemorySettingsSuite = "Dokumentum.InMemoryLaunchSettings"
+
+    /// The suite of the classification switch (#139, review N1 of #159): for a store on disk the processing queue's
+    /// (`ProcessingFailures`' suite, which the queue's `ClassificationSettings` defaults to, `ProcessingQueue.init`),
+    /// so the settings write the key the queue reads; for an in-memory store `inMemorySettingsSuite`.
+    static func settingsSuite(isOnDisk: Bool) -> String? {
+        isOnDisk ? ProcessingFailures().defaultsSuite : inMemorySettingsSuite
+    }
     #if os(iOS)
         /// The processing queue's background tasks (plan of #6, part 5): continued processing after a user's import,
         /// the processing task when the app goes to the background. `nil` where `processing` is.
@@ -107,6 +120,13 @@ struct DokumentumApp: App {
         #endif
         search.start(storeChanges: storeChanges?.changes())
         let deviceID = DeviceIdentity.processingDeviceID()
+        // The classification step's model (#8): the on-device model; a Debug launch can fix its availability.
+        #if DEBUG
+            let classifier = UITestClassifierAvailability.classifier(
+                FoundationModelsClassifier(), arguments: ProcessInfo.processInfo.arguments)
+        #else
+            let classifier: any DocumentClassifying = FoundationModelsClassifier()
+        #endif
         let documentImporter = DocumentImporter(container: container, deviceID: deviceID)
         #if DEBUG
             let takeoverInterval = ProcessingTakeoverArgument.seconds(arguments: ProcessInfo.processInfo.arguments)
@@ -119,7 +139,7 @@ struct DokumentumApp: App {
             // imports anything, so the first launch's cut-off (P9) comes before those documents.
             let processing = ProcessingScheduler.start(
                 for: container, observer: storeChanges, deviceID: deviceID, takeoverInterval: takeoverInterval,
-                classifier: FoundationModelsClassifier())
+                classifier: classifier)
             #if os(macOS)
                 // Quitting is a known interruption: the running attempt is given back (#97 point 4).
                 ProcessingLifecycle.pauseWhenTerminating(processing)
@@ -130,6 +150,16 @@ struct DokumentumApp: App {
             processing = nil
             retrier = ProcessingQueue(container: container, deviceID: deviceID, failures: ProcessingFailures())
         }
+        // The switch lives where the queue reads it (`ProcessingQueue`: the failure counter's suite); a store that runs
+        // no queue gets a suite of its own that each launch empties. A change of the switch requests a run.
+        let settingsSuite = Self.settingsSuite(isOnDisk: choice.isOnDisk)
+        if !choice.isOnDisk {
+            UserDefaults().removePersistentDomain(forName: Self.inMemorySettingsSuite)
+        }
+        let scheduler = processing
+        suggestionSettings = SuggestionSettings(
+            classifier: classifier, settings: ClassificationSettings(defaultsSuite: settingsSuite),
+            requestRun: { scheduler?.requestRun() })
         #if os(iOS)
             // Registered before the app finishes launching, once per identifier (T13, N4). Every user import goes
             // through the importer below, which asks for a continued-processing task; a CloudKit import never does.
@@ -188,6 +218,8 @@ struct DokumentumApp: App {
             #if DEBUG
                 .environment(syncLab)
             #endif
+            // The iPhone's settings sheet reads it (`SettingsButton`).
+            .environment(suggestionSettings)
         }
         // A launch is an activation too; the share queue and the processing queue each run one at a time and
         // queue one more run. The background pauses processing on iOS (`ProcessingLifecycle`).
@@ -215,6 +247,12 @@ struct DokumentumApp: App {
                 #if DEBUG
                     DebugCommands()
                 #endif
+            }
+        #endif
+        #if os(macOS)
+            // The Mac's Settings window (⌘,), with the "Suggestions" section (#8, part 3).
+            Settings {
+                SettingsView(model: suggestionSettings)
             }
         #endif
         #if DEBUG && os(macOS)

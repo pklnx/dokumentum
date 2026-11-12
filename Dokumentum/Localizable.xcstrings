@@ -256,6 +256,17 @@
         }
       }
     },
+    "After text recognition, Apple Intelligence suggests a title, correspondent, document type, tags and date. Suggestions only fill empty fields and never change what you entered." : {
+      "comment" : "Settings, Suggestions footer: what the suggestions do.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach der Texterkennung schlägt Apple Intelligence Titel, Korrespondent, Dokumenttyp, Tags und Datum vor. Vorschläge füllen nur leere Felder und ändern nichts, was du eingegeben hast."
+          }
+        }
+      }
+    },
     "All Documents" : {
       "comment" : "Sidebar row, list title and Go menu item.",
       "localizations" : {
@@ -280,6 +291,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Already in the archive"
+          }
+        }
+      }
+    },
+    "Apple Intelligence is getting ready. Suggestions start once it is ready." : {
+      "comment" : "Settings, under the suggestions switch: the on-device model is still being downloaded or prepared.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence wird vorbereitet. Vorschläge beginnen, sobald es bereit ist."
           }
         }
       }
@@ -478,6 +500,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumenttypen"
+          }
+        }
+      }
+    },
+    "Documents added on this Mac while suggestions are off or not available never get suggestions, not even later or on your other devices." : {
+      "comment" : "Settings, Suggestions footer (Mac): the switch belongs to this device; documents added here while it is off are never classified.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumente, die auf diesem Mac hinzugefügt werden, während Vorschläge aus oder nicht verfügbar sind, bekommen nie Vorschläge, auch nicht später oder auf deinen anderen Geräten."
+          }
+        }
+      }
+    },
+    "Documents added on this iPhone while suggestions are off or not available never get suggestions, not even later or on your other devices." : {
+      "comment" : "Settings, Suggestions footer (iPhone): the switch belongs to this device; documents added here while it is off are never classified.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokumente, die auf diesem iPhone hinzugefügt werden, während Vorschläge aus oder nicht verfügbar sind, bekommen nie Vorschläge, auch nicht später oder auf deinen anderen Geräten."
           }
         }
       }
@@ -991,6 +1035,72 @@
         }
       }
     },
+    "Not available: Apple Intelligence cannot be used on this Mac right now." : {
+      "comment" : "Settings, under the disabled suggestions switch (Mac): the model is unavailable for a reason the system does not name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Apple Intelligence lässt sich auf diesem Mac gerade nicht verwenden."
+          }
+        }
+      }
+    },
+    "Not available: Apple Intelligence cannot be used on this iPhone right now." : {
+      "comment" : "Settings, under the disabled suggestions switch (iPhone): the model is unavailable for a reason the system does not name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Apple Intelligence lässt sich auf diesem iPhone gerade nicht verwenden."
+          }
+        }
+      }
+    },
+    "Not available: Apple Intelligence is turned off. Turn it on in Settings > Apple Intelligence & Siri." : {
+      "comment" : "Settings, under the disabled suggestions switch (iPhone): Apple Intelligence is off in the Settings app.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Schalte es in den Einstellungen unter „Apple Intelligence & Siri“ ein."
+          }
+        }
+      }
+    },
+    "Not available: Apple Intelligence is turned off. Turn it on in System Settings > Apple Intelligence & Siri." : {
+      "comment" : "Settings, under the disabled suggestions switch (Mac): Apple Intelligence is off in System Settings.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Apple Intelligence ist ausgeschaltet. Schalte es in den Systemeinstellungen unter „Apple Intelligence & Siri“ ein."
+          }
+        }
+      }
+    },
+    "Not available: this Mac does not support Apple Intelligence." : {
+      "comment" : "Settings, under the disabled suggestions switch (Mac): the device cannot run Apple Intelligence.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Dieser Mac unterstützt Apple Intelligence nicht."
+          }
+        }
+      }
+    },
+    "Not available: this iPhone does not support Apple Intelligence." : {
+      "comment" : "Settings, under the disabled suggestions switch (iPhone): the device cannot run Apple Intelligence.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar: Dieses iPhone unterstützt Apple Intelligence nicht."
+          }
+        }
+      }
+    },
     "OK" : {
       "comment" : "Button that closes the import notice.",
       "localizations" : {
@@ -1317,6 +1427,17 @@
         }
       }
     },
+    "Settings" : {
+      "comment" : "iPhone: the sidebar's toolbar button that opens the settings, and the settings sheet's title.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen"
+          }
+        }
+      }
+    },
     "Show Info" : {
       "comment" : "Toolbar button and Mac menu item (Document › Show Info, ⌘I) that shows the info panel.",
       "localizations" : {
@@ -1335,6 +1456,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wird noch geladen"
+          }
+        }
+      }
+    },
+    "Suggest metadata with Apple Intelligence" : {
+      "comment" : "Settings: the switch that turns metadata suggestions on or off on this device.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metadaten mit Apple Intelligence vorschlagen"
+          }
+        }
+      }
+    },
+    "Suggesting metadata…" : {
+      "comment" : "Detail status line: the document's text is recognised and Apple Intelligence is suggesting its metadata (processing state classify).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metadaten werden vorgeschlagen …"
+          }
+        }
+      }
+    },
+    "Suggestions" : {
+      "comment" : "Settings: the section header of the metadata suggestions (#8).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorschläge"
+          }
+        }
+      }
+    },
+    "Suggestions are made on this device. The document's text is not sent anywhere for them." : {
+      "comment" : "Settings, Suggestions footer: the privacy statement.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorschläge entstehen auf diesem Gerät. Der Text des Dokuments wird dafür nirgendwohin gesendet."
           }
         }
       }

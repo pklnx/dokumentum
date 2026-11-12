@@ -48,6 +48,14 @@ struct SidebarView: View {
                 SyncStatusFooter(source: syncStatus)
             }
         }
+        #if os(iOS)
+            // The settings (#8, part 3); the Mac has its Settings window (⌘,).
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    SettingsButton()
+                }
+            }
+        #endif
         #if DEBUG && os(iOS)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

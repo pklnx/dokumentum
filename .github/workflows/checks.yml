@@ -1,6 +1,6 @@
 name: Checks
 
-# Checks that run on Linux. Build and app tests run in Xcode Cloud (docs/development/plan.md, section 4).
+# Checks that run on Linux. Build and app tests run on GitHub Actions macOS runners (app.yml; docs/development/plan.md, section 4).
 # There is deliberately no `paths` filter: these jobs are required checks, so they must run on every pull request.
 on:
   push:
