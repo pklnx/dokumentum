@@ -170,6 +170,13 @@ struct UITestApp {
                     "the cleanup sheet's Filter menu, a SwiftUI Menu like import.menu; a pop-up Picker in its place is "
                     + "reported the same (#112, fix round 1). Its VoiceOver name \"Filter\" is its title, not its "
                     + "label (ScanSmokeTests, #136). VoiceOver opening it: not verified, device check M2."),
+            AcceptedAuditIssue(
+                identifier: "settings.suggestions.availability", auditType: .contrast, description: "Contrast failed",
+                reason:
+                    "the settings' availability note, primary text in callout medium on the grouped form; measured "
+                    + "14.13:1 light (#262626 on #f7f7f7) and 10.14:1 dark (#dfdfdf on #302e2d) on its own "
+                    + "screenshot (#139). The audit fails it in light for \"getting ready\" and passes the same "
+                    + "element for \"turned off\". LibrarySmokeTests measures its contrast in every run."),
         ]
     #else
         /// The iPhone's accepted issues, all on the cleanup sheet (#136). The toolbar's Cancel and Save are the

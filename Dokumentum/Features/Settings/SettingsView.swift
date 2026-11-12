@@ -19,16 +19,18 @@ struct SettingsView: View {
                 .disabled(!model.canChangeSwitch)
                 .accessibilityIdentifier(AccessibilityID.settingsSuggestionsSwitch)
                 if let note = SuggestionSettingsText.availabilityNote(model.availability) {
-                    Label {
+                    // The symbol is decoration, hidden from VoiceOver; the identifier is on the text alone, like
+                    // `PlaceholderView`: as one combined element with the hourglass, the Mac audit failed the note in
+                    // light at a measured 14.13:1.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: SuggestionSettingsText.availabilitySymbol(model.availability))
+                            .accessibilityHidden(true)
                         Text(note)
                             .fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: SuggestionSettingsText.availabilitySymbol(model.availability))
+                            .accessibilityIdentifier(AccessibilityID.settingsSuggestionsAvailability)
                     }
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.primary)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier(AccessibilityID.settingsSuggestionsAvailability)
                 }
             } header: {
                 Text(SuggestionSettingsText.section)

@@ -733,7 +733,7 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac three issues are accepted, on the iPhone eight, all on the cleanup sheet
+attachment of the run. On the Mac four issues are accepted, on the iPhone eight, all on the cleanup sheet
 (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
@@ -752,6 +752,10 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
   `ScanSmokeTests` asserts both. The visible title gives that name already; the menu's `.accessibilityLabel`
   keeps it when the label is only a symbol, whose own name is read otherwise ("Bearbeiten" for
   `slider.horizontal.3`, measured on both devices, #136).
+- `settings.suggestions.availability`, contrast, "Contrast failed": the settings' availability note (#139),
+  primary text in callout medium on the grouped form, its symbol hidden from VoiceOver. In light the audit fails it
+  for "getting ready" and passes the same element for "turned off"; measured 14.13:1 in light (#262626 on #f7f7f7)
+  and 10.14:1 in dark on its own screenshot. `LibrarySmokeTests` measures it in every run (`assertTextContrast`).
 
 On the iPhone (#136):
 - `cleanup.cancel` and `cleanup.save`, contrast, "Contrast failed": the sheet's system toolbar buttons, a glass
