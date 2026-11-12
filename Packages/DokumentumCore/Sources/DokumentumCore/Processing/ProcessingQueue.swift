@@ -32,17 +32,31 @@ public struct ProcessingReport: Equatable, Sendable {
     public var requeued = 0
     /// Results that replaced the stored PDF with one with the invisible text layer (#6, part 3).
     public var layered = 0
+    /// Text result writes that set `classify` instead of `done` (#8): the classification step comes next.
+    public var toClassify = 0
+    /// Classification writes after a model answer (#8): the empty fields filled, `done`.
+    public var classified = 0
+    /// Documents the model declined (refusal, guardrail, language; #8): `done` without suggestions, never asked
+    /// again. Logged only (P8).
+    public var declined = 0
+    /// Documents finished in `done` without a model answer (#8): the switch off, the model unavailable on this
+    /// device, a text too short, the wait for the model ended after 6 hours, or the third failed attempt.
+    public var classificationSkipped = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
     /// When the first fresh claim of another device that this run waited for expires, by this device's clock.
     public var nextExpiry: Date?
     /// When the first backoff this run waited for, or started with a failed attempt, ends, by this device's clock.
+    /// Also the end of a classifier's rate limit (#8).
     public var nextRetry: Date?
+    /// When the first own claim of a document that waits for the model to become ready expires, by this device's
+    /// clock (#8, review N4): the run then finishes it without suggestions.
+    public var nextClaimEnd: Date?
 
-    /// When the scheduler runs the queue again: the earlier of `nextExpiry` and `nextRetry`.
+    /// When the scheduler runs the queue again: the earliest of `nextExpiry`, `nextRetry` and `nextClaimEnd`.
     public var nextWake: Date? {
-        [nextExpiry, nextRetry].compactMap(\.self).min()
+        [nextExpiry, nextRetry, nextClaimEnd].compactMap(\.self).min()
     }
 
     public init() {}
@@ -77,6 +91,31 @@ public protocol ProcessingRunning: Sendable {
 ///    `fileSize` (#6, part 3), and `processingState = .done`, in one save. Its check before the save reads the
 ///    document row, the text row and, with a layer, the file row (each by key) again. `contentHash` stays the hash of
 ///    the imported bytes, so importing them again is still a duplicate.
+///
+/// **Classification (#8, part 1).** With a classifier (`DocumentClassifying`), the text result write sets `classify`
+/// instead of `done` when this device's switch is on, the classifier is not unavailable on this device, and the
+/// document was created at or after this device's cut-off (`ClassificationSettings`, P9). The same run then
+/// classifies that document next (T7). A document in `classify` (claims, takeover, trash and backoff as for the text,
+/// the text record needed, the file not) is handled by `classify(_:claim:into:)`, which always ends in `done`:
+///
+/// | Situation | Write | Attempt |
+/// |---|---|---|
+/// | no classifier, the switch off, the model unavailable (`deviceNotEligible`, `appleIntelligenceNotEnabled`) | `done` | none |
+/// | the model not ready | nothing; waits until this device's own claim is 6 h old, then `done` (N4) | none |
+/// | fewer than 50 non-whitespace characters | `done`, the model not called | none |
+/// | an answer | the empty fields filled (`ClassificationFields`), `done` | cleared |
+/// | declined (refusal, guardrail, language) | `done`, nothing filled, logged | cleared |
+/// | rate limited | nothing; classification pauses until its reset (else 15 min) | given back |
+/// | any other error, the stall timeout | nothing, backoff 1 min, 10 min; the third writes `done`, never `failed` | counted |
+/// | `interruptNow()` | nothing | given back |
+///
+/// The classification counter is its own (`ProcessingFailures.classificationDefaultsKey`, T5); both kinds of stage
+/// share `StageTracker`, so one stage runs at a time (T6). An answer is checked (`SuggestionRules`) and kept in memory
+/// keyed by document and text record until its write saved, so a write that met another save is retried by the next
+/// run without asking the model again (T3). The result write (`writeClassification`) follows the discipline below:
+/// it decides each field's emptiness on the row it fetched, resolves names against the live records it fetches
+/// (`MetadataMatcher`; a new correspondent or type is inserted, a tag never), sets only the fields it fills and `done`,
+/// never calls `touch()`, and its check reads the document row and every metadata row it linked or found linked again.
 ///
 /// Before its scan, a run does this device's one-time re-queue pass (`ProcessingRequeue`) until it completed once.
 ///
@@ -145,9 +184,9 @@ public actor ProcessingQueue: ProcessingRunning {
         }
     }
 
-    /// The queue's two writes.
+    /// The queue's writes: the claim, the text's result, and the classification's result (#8).
     public enum Write: Sendable, Equatable {
-        case claim, result
+        case claim, result, classification
     }
 
     public let container: ModelContainer
@@ -156,23 +195,38 @@ public actor ProcessingQueue: ProcessingRunning {
     private let failures: ProcessingFailures
     private let sightings: ClaimSightings
     private let stage: any ProcessingStage
-    private let now: @Sendable () -> Date
-    private let takeoverInterval: TimeInterval
+    let now: @Sendable () -> Date
+    let takeoverInterval: TimeInterval
     private let stallTimeout: Duration
     private let watchdogSleep: Sleep
-    private let hooks: Hooks
+    let hooks: Hooks
     private let requeue: ProcessingRequeue?
+    let classifier: (any DocumentClassifying)?
+    let classificationFailures: ProcessingFailures
+    let classificationSettings: ClassificationSettings
+    let calendar: Calendar
     /// The stage this queue waits for and the ones it let go.
     let stages: StageTracker
+    /// Checked answers whose write has not saved yet, by document, with the text record they were made from (T3).
+    var suggestions: [UUID: CachedSuggestion] = [:]
+    /// No classification request before this time: the classifier was rate limited.
+    var classificationPausedUntil: Date?
 
     /// - Parameters:
     ///   - sightings: this device's claim sightings; by default in the failure counter's defaults suite.
     ///   - watchdogSleep: sleeps the stall timeout; `Task.sleep` on the suspending clock in the app.
     ///   - requeue: the one-time re-queue pass, run before the scan until it completed; `nil` runs none (tests of
     ///     other things).
+    ///   - classifier: the classification step's model (#8); `nil`: no step, the text result write sets `done`.
+    ///   - classificationFailures: its own attempt counter; by default under `classificationDefaultsKey` in the
+    ///     text counter's defaults suite.
+    ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite.
+    ///   - calendar: the calendar a suggested date is stored in (the detail's date picker uses the current one).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
         stage: any ProcessingStage = DocumentStage(), requeue: ProcessingRequeue? = nil,
+        classifier: (any DocumentClassifying)? = nil, classificationFailures: ProcessingFailures? = nil,
+        classificationSettings: ClassificationSettings? = nil, calendar: Calendar = .current,
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
         stallTimeout: Duration = ProcessingQueue.stallTimeout,
         watchdogSleep: @escaping Sleep = { try await Task.sleep(for: $0, clock: .suspending) },
@@ -189,6 +243,14 @@ public actor ProcessingQueue: ProcessingRunning {
         self.now = now
         self.hooks = hooks
         self.requeue = requeue
+        self.classifier = classifier
+        self.classificationFailures =
+            classificationFailures
+            ?? ProcessingFailures(
+                defaultsSuite: failures.defaultsSuite, key: ProcessingFailures.classificationDefaultsKey)
+        self.classificationSettings =
+            classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
+        self.calendar = calendar
         stages = StageTracker(onWait: hooks.waitsForStage)
     }
 
@@ -198,7 +260,7 @@ public actor ProcessingQueue: ProcessingRunning {
     /// document.
     public nonisolated func interruptNow() {
         guard let current = stages.interruptCurrent() else { return }
-        let refunded = failures.refund(current.attempt)
+        let refunded = current.counter.refund(current.attempt)
         current.task?.cancel()
         current.outcome.resolve(.interrupted)
         Log.processing.notice("Processing interrupted; attempt given back: \(refunded, privacy: .public)")
@@ -212,9 +274,12 @@ public actor ProcessingQueue: ProcessingRunning {
             report.requeued = requeue.run(in: container, deviceID: deviceID, now: now()).requeued
             report.saves += report.requeued
         }
+        // P9: the cut-off is the first run with a classifier on this device.
+        let classificationSince = classifier.map { _ in classificationSettings.recordSince(now()) }
         let candidates: [Candidate]
         do {
-            try Self.forgetCounters(failures, sightings: sightings, in: container)
+            try Self.forgetCounters(
+                [failures, classificationFailures], sightings: sightings, in: container)
             candidates = try Self.scan(in: container)
         } catch {
             Log.processing.error("Processing scan failed: \(Log.code(of: error), privacy: .public)")
@@ -222,26 +287,38 @@ public actor ProcessingQueue: ProcessingRunning {
         }
         if let afterScan = hooks.afterScan { await afterScan() }
         documents: for candidate in candidates {
-            // Cancelled: the scheduler paused (the app goes to the background or quits).
-            if Task.isCancelled { break }
-            let now = now()
-            let input = decisionInput(for: candidate, now: now)
-            let decision = ProcessingClaimRules.decide(
-                input, thisDevice: deviceID, failures: failures.count(for: candidate.instanceID), now: now,
-                takeoverInterval: takeoverInterval)
-            switch decision {
-            case .skip:
-                report.skipped += 1
-            case .wait(.claimedElsewhere(let until)):
-                report.waiting += 1
-                report.nextExpiry = min(report.nextExpiry ?? until, until)
-            case .wait(.retryAfter(let date)):
-                report.waiting += 1
-                report.nextRetry = min(report.nextRetry ?? date, date)
-            case .wait:
-                report.waiting += 1
-            case .process(let claim):
-                guard await process(candidate, claim: claim, into: &report) else { break documents }
+            var next: Candidate? = candidate
+            // T7: a text result write that set `classify` hands its document on, so it is classified next.
+            while let current = next {
+                // Cancelled: the scheduler paused (the app goes to the background or quits).
+                if Task.isCancelled { break documents }
+                next = nil
+                let now = now()
+                let input = decisionInput(for: current, now: now)
+                let counter = current.input.state == .classify ? classificationFailures : failures
+                let decision = ProcessingClaimRules.decide(
+                    input, thisDevice: deviceID, failures: counter.count(for: current.instanceID), now: now,
+                    takeoverInterval: takeoverInterval)
+                switch decision {
+                case .skip:
+                    report.skipped += 1
+                case .wait(.claimedElsewhere(let until)):
+                    report.waiting += 1
+                    report.nextExpiry = min(report.nextExpiry ?? until, until)
+                case .wait(.retryAfter(let date)):
+                    report.waiting += 1
+                    report.nextRetry = min(report.nextRetry ?? date, date)
+                case .wait:
+                    report.waiting += 1
+                case .process(let claim) where current.input.state == .classify:
+                    guard await classify(current, claim: claim, into: &report) else { break documents }
+                case .process(let claim):
+                    switch await process(current, claim: claim, since: classificationSince, into: &report) {
+                    case .next: break
+                    case .stop: break documents
+                    case .classify(let handed): next = handed
+                    }
+                }
             }
         }
         Self.log(report)
@@ -253,33 +330,46 @@ public actor ProcessingQueue: ProcessingRunning {
     private func decisionInput(for candidate: Candidate, now: Date) -> ProcessingClaimInput {
         var input = candidate.input
         let id = candidate.instanceID
-        if input.state == .pending || input.state == .processing, !input.deviceID.isEmpty, input.deviceID != deviceID,
+        if input.state == .pending || input.state == .processing || input.state == .classify, !input.deviceID.isEmpty,
+            input.deviceID != deviceID,
             let claimedAt = input.claimedAt
         {
             input.claimSeenSince = sightings.see(id, deviceID: input.deviceID, claimedAt: claimedAt, now: now)
         } else if sightings.sighting(of: id) != nil {
             sightings.forget([id])
         }
-        input.retryNotBefore = failures.backoff(for: id, now: now).retryNotBefore
+        let counter = input.state == .classify ? classificationFailures : failures
+        input.retryNotBefore = counter.backoff(for: id, now: now).retryNotBefore
         return input
     }
 
-    /// Processes one document; `false` ends the run (interrupted, cancelled, or stalled).
+    /// What follows a document's text step.
+    enum Next {
+        case next
+        /// The run ends (interrupted, cancelled, or stalled).
+        case stop
+        /// The result write set `classify`: classify this document next (T7).
+        case classify(Candidate)
+    }
+
+    /// Processes one document's text.
+    /// - Parameter since: the classification cut-off (P9); `nil` without a classifier.
     private func process(
-        _ candidate: Candidate, claim: ProcessingDecision.ClaimWrite, into report: inout ProcessingReport
-    ) async -> Bool {
+        _ candidate: Candidate, claim: ProcessingDecision.ClaimWrite, since: Date?,
+        into report: inout ProcessingReport
+    ) async -> Next {
         let id = candidate.instanceID
         // One job at a time (N1): a stage that was let go and has not returned blocks the next one.
-        guard await stages.waitUntilStartable(), !Task.isCancelled else { return false }
+        guard await stages.waitUntilStartable(), !Task.isCancelled else { return .stop }
         let loaded: LoadedFile
         switch Self.loadFile(of: id, in: container) {
         case .file(let file): loaded = file
         case .noData:
             report.waiting += 1
-            return true
+            return .next
         case .changed:
             report.dropped += 1
-            return true
+            return .next
         }
         // The writes expect the file whose data was loaded: one relinked or replaced later drops the result.
         var held = candidate.held(file: loaded.file)
@@ -290,7 +380,7 @@ public actor ProcessingQueue: ProcessingRunning {
                 document.processingClaimedAt = claimedAt
                 document.processingState = .processing
             }
-            guard count(outcome, into: &report) else { return true }
+            guard count(outcome, into: &report) else { return .next }
             held = Held(
                 stateRaw: ProcessingState.processing.storedValue ?? "", deviceID: deviceID, claimedAt: claimedAt,
                 file: loaded.file)
@@ -302,17 +392,20 @@ public actor ProcessingQueue: ProcessingRunning {
             Log.processing.error(
                 "Processing gave up: \(attempt.number - 1, privacy: .public) attempts on this device never returned")
             writeFailed(id, expecting: held, into: &report)
-            return true
+            return .next
         }
         switch await runStage(pdfData: loaded.data, attempt: attempt) {
         case .returned(let result):
             // Finished before the counter goes, in one step: a late interruption changes nothing (N2).
             guard failures.succeed(attempt) else {
                 report.interrupted += 1
-                return false
+                return .stop
             }
             let text = result.text.map { ($0.source, $0.capped()) }
             let layered = result.layeredPDF
+            // Decided before the write, read from the row inside it (the cut-off compares its `createdAt`).
+            let classifies = since != nil && classificationIsOn
+            var nextState = ProcessingState.done
             let outcome = write(.result, id, expecting: held, checksText: text != nil, checksFile: layered != nil) {
                 document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
@@ -328,22 +421,36 @@ public actor ProcessingQueue: ProcessingRunning {
                     file.pdfData = layered
                     if document.fileSize != layered.count { document.fileSize = layered.count }
                 }
-                document.processingState = .done
+                if classifies, let since, document.createdAt >= since { nextState = .classify }
+                document.processingState = nextState
             }
             if count(outcome, into: &report) {
-                report.done += 1
+                if nextState == .classify { report.toClassify += 1 } else { report.done += 1 }
                 if layered != nil { report.layered += 1 }
                 if let (_, capped) = text, capped.isCapped {
                     report.textsCapped += 1
                     Log.processing.notice(
                         "A document's text was over \(ExtractedText.byteLimit, privacy: .public) bytes and was cut")
                 }
+                if nextState == .classify {
+                    var input = candidate.input
+                    input.state = .classify
+                    input.deviceID = held.deviceID
+                    input.claimedAt = held.claimedAt
+                    input.hasText = true
+                    let stateRaw = ProcessingState.classify.storedValue ?? "classify"
+                    return .classify(Candidate(instanceID: id, input: input, stateRaw: stateRaw))
+                }
             }
-            return true
+            return .next
+        case .suggested:
+            // Only the classification stage answers so.
+            _ = failures.fail(attempt)
+            return .next
         case .threw(let error):
             guard failures.fail(attempt) else {
                 report.interrupted += 1
-                return false
+                return .stop
             }
             Log.processing.error(
                 """
@@ -351,11 +458,11 @@ public actor ProcessingQueue: ProcessingRunning {
                 on this device
                 """)
             failed(attempt, expecting: held, into: &report)
-            return true
+            return .next
         case .timedOut:
             guard failures.fail(attempt) else {
                 report.interrupted += 1
-                return false
+                return .stop
             }
             report.timedOut += 1
             Log.processing.error(
@@ -364,12 +471,12 @@ public actor ProcessingQueue: ProcessingRunning {
             guard stages.timedOutAlive < 2 else {
                 report.stalled = true
                 Log.processing.error("Processing stalled: two stages that timed out have not returned")
-                return false
+                return .stop
             }
-            return true
+            return .next
         case .interrupted:
             report.interrupted += 1
-            return false
+            return .stop
         }
     }
 
@@ -396,23 +503,34 @@ public actor ProcessingQueue: ProcessingRunning {
     /// Runs the stage in a task of its own, raced by the stall watchdog and `interruptNow()`. A stage that loses the
     /// race is cancelled and not waited for; whatever it returns later is dropped.
     private func runStage(pdfData: Data, attempt: ProcessingFailures.Attempt) async -> StageOutcome {
+        let stage = stage
+        return await race(attempt: attempt, counter: failures) { progress in
+            .returned(try await stage.process(pdfData: pdfData, progress: progress))
+        }
+    }
+
+    /// Runs `work` (either kind of stage) in a task of its own, raced by the stall watchdog and `interruptNow()`,
+    /// under the one `StageTracker` (T6). `counter` is the one `attempt` was counted in.
+    func race(
+        attempt: ProcessingFailures.Attempt, counter: ProcessingFailures,
+        work: @escaping @Sendable (@escaping ProcessingProgress) async throws -> StageOutcome
+    ) async -> StageOutcome {
         let outcome = FirstOutcome()
         let watchdog = StallWatchdog(timeout: stallTimeout, sleep: watchdogSleep) { outcome.resolve(.timedOut) }
         let stages = stages
-        let stage = stage
-        let id = stages.begin(attempt: attempt, outcome: outcome)
+        let id = stages.begin(attempt: attempt, counter: counter, outcome: outcome)
         // A pause that came before `begin` found no stage to interrupt; it cancelled the run first, so it is seen
         // here, and the stage never starts (review B1 of #120). One that comes after `begin` interrupts the stage.
         if Task.isCancelled {
             _ = stages.cancelBeforeStart(id)
-            failures.refund(attempt)
+            counter.refund(attempt)
             return .interrupted
         }
         watchdog.kick()
         let task = Task.detached {
             let result: StageOutcome
             do {
-                result = .returned(try await stage.process(pdfData: pdfData) { _, _ in watchdog.kick() })
+                result = try await work { _, _ in watchdog.kick() }
             } catch {
                 result = .threw(error)
             }
@@ -423,7 +541,7 @@ public actor ProcessingQueue: ProcessingRunning {
         let result = await outcome.value
         watchdog.stop()
         switch result {
-        case .returned, .threw:
+        case .returned, .suggested, .threw:
             stages.finish(id)
         case .timedOut:
             stages.abandonAfterTimeout(id)
@@ -435,7 +553,7 @@ public actor ProcessingQueue: ProcessingRunning {
     }
 
     /// Adds a write's outcome to `report`; `true` when it saved.
-    private func count(_ outcome: WriteOutcome, into report: inout ProcessingReport) -> Bool {
+    func count(_ outcome: WriteOutcome, into report: inout ProcessingReport) -> Bool {
         switch outcome {
         case .saved:
             report.saves += 1
@@ -450,7 +568,7 @@ public actor ProcessingQueue: ProcessingRunning {
         return false
     }
 
-    private func write(
+    func write(
         _ kind: Write, _ instanceID: UUID, expecting held: Held, checksText: Bool = false, checksFile: Bool = false,
         change: (Document) -> Void
     ) -> WriteOutcome {
@@ -467,7 +585,9 @@ public actor ProcessingQueue: ProcessingRunning {
             \(report.skipped, privacy: .public), dropped \(report.dropped, privacy: .public), backed off \
             \(report.backedOff, privacy: .public), saves \(report.saves, privacy: .public), timed out \
             \(report.timedOut, privacy: .public), interrupted \(report.interrupted, privacy: .public), stalled \
-            \(report.stalled, privacy: .public)
+            \(report.stalled, privacy: .public), to classify \(report.toClassify, privacy: .public), classified \
+            \(report.classified, privacy: .public), declined \(report.declined, privacy: .public), classification \
+            skipped \(report.classificationSkipped, privacy: .public)
             """)
     }
 }
@@ -495,11 +615,16 @@ extension ProcessingQueue {
         var deviceID: String
         var claimedAt: Date?
         var file: PersistentIdentifier?
+        /// The classification step (#8) works on the text, not the file: it expects the same text record instead
+        /// (`text`, when set) and leaves the file out.
+        var checksFile = true
+        var text: PersistentIdentifier?
 
         func matches(_ document: Document) -> Bool {
             document.processingStateRaw == stateRaw && document.processingDeviceID == deviceID
                 && document.processingClaimedAt == claimedAt && document.deletedAt == nil
-                && document.file?.persistentModelID == file && document.text != nil
+                && (!checksFile || document.file?.persistentModelID == file) && document.text != nil
+                && (text == nil || document.text?.persistentModelID == text)
         }
     }
 
@@ -548,12 +673,12 @@ extension ProcessingQueue {
         return candidates
     }
 
-    /// Removes the failure counters and claim sightings of documents that are `done` or gone, so the keys do not
-    /// grow.
+    /// Removes the failure counters (the text step's and the classification step's, review N3 of #8) and claim
+    /// sightings of documents that are `done` or gone, so the keys do not grow.
     static func forgetCounters(
-        _ failures: ProcessingFailures, sightings: ClaimSightings, in container: ModelContainer
+        _ counters: [ProcessingFailures], sightings: ClaimSightings, in container: ModelContainer
     ) throws {
-        let tracked = Array(Set(failures.documents + sightings.documents))
+        let tracked = Array(Set(counters.flatMap(\.documents) + sightings.documents))
         guard !tracked.isEmpty else { return }
         let context = ModelContext(container)
         let documents = try context.fetch(
@@ -561,7 +686,7 @@ extension ProcessingQueue {
         let open = Set(documents.filter { $0.processingState != .done }.map(\.instanceID))
         let gone = tracked.filter { !open.contains($0) }
         guard !gone.isEmpty else { return }
-        failures.forget(gone)
+        for counter in counters { counter.forget(gone) }
         sightings.forget(gone)
     }
 

@@ -449,7 +449,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`ProcessingConcurrentEditTests`, including #56's repair as the other writer, in both orders).
 - **Triggers** (`ProcessingScheduler`, stores on disk only): launch, every save that inserts a `Document` (an import,
   from any context), `scenePhase == .active` (`resume()`), every debounced store change, and the earlier of the next
-  expiry of another device's claim and the next backoff end that a run waited for (`ProcessingReport.nextWake`), while
+  expiry of another device's claim, the next backoff end that a run waited for and the own claim expiry of a document
+  waiting for the model (`ProcessingReport.nextWake`), while
   the app runs (on iOS also while a background task holds the work). No run starts while paused. One run at a time; requests during a run queue one more. The
   queue's own save is a store change; the run it triggers writes nothing, and the chain ends there. A document left in
   `processing` by a quit is processed again by the launch run.
@@ -459,7 +460,7 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   completes: the app's importer is wrapped (`BackgroundImportNotifying`), and every user import (files, photos, the
   share queue, #5's scans) goes through it, while a CloudKit import never does, so the system's progress ("Processing
   documents", "3 of 12 documents") never appears for documents of the other device. Its progress counts the user's
-  documents that are no longer open (`OpenDocuments`), updated after each store change; it completes when the runs
+  documents that are no longer open (`OpenDocuments`: `pending`, `processing` or `classify`, not trashed), updated after each store change; it completes when the runs
   drain (`ProcessingScheduler.didDrain`), with success only when none of the user's documents is open any more. If the system cannot start it now, the work waits for the
   foreground or the processing task. **The processing task** (`space.pklnx.Dokumentum.backgroundProcessing`,
   `BGProcessingTask`, no power or network needed) is asked for when the scene goes to the background with open
@@ -471,6 +472,62 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
   two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
   another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
+- **Classification** (#8, part 1; plan of #8, T1–T7, T10, T11). A second step after the text, one document at a time,
+  with the queue's claims, attempts, backoff, watchdog and interruptions. The queue runs it only with a classifier
+  (`DocumentClassifying`; the Foundation Models classifier and its wiring in `ProcessingScheduler.start` are part 2, so
+  until then the app's queue has none and every text write sets `done` as before). Tests use a stub
+  (`StubClassifier`); the model never runs in the queue's tests.
+  - **The state** `classify` (frozen enum, raw `"classify"`; no schema change). The text result write sets it instead of
+    `done` when the classifier is not `unavailable` on this device, the switch is on (`ClassificationSettings`,
+    per-device key `classification.enabled`, default on, read at each decision; its UI is part 3) and the document is
+    not older than the **cut-off** (P9): `classification.since`, written once at this device's first run with a
+    classifier; a document whose `createdAt` (the importing device's clock) is earlier, also one still waiting for its
+    text then or one of step 3's documents re-queued later, ends in `done` unclassified. An older build reads
+    `classify` as `unknown` and never touches it (`ProcessingClaimRules` skips `unknown` before every other rule);
+    `OpenDocuments` counts it as open (review N2). The rules treat `classify` like `pending` for claims, takeover,
+    trash and backoff; it needs the text record, not the file. After a text write that set `classify`, the same run
+    classifies that document next (T7). A document in `classify` always ends in `done`, never `failed`, so it is
+    classified at most once, on one device, and a field the user cleared later is never filled again.
+  - **Outcomes** (T4): no classifier, the switch off, or `unavailable` (`deviceNotEligible`,
+    `appleIntelligenceNotEnabled`) write `done` without a model call; `notReady` (also thrown as
+    `ClassificationFailure.notReady`) waits without an attempt until this device's own claim is 6 hours old, then
+    writes `done`: the staleness is checked before the claim renewal the rules would make (`ClassificationWait`, N4),
+    the report wakes the scheduler at the claim's expiry (`nextClaimEnd`), and without an own claim the step claims
+    first. A text with fewer than 50 non-whitespace characters writes `done` without a model call. An answer fills the
+    empty fields and writes `done`; a decline (refusal, guardrail, unsupported language) writes `done` with nothing
+    filled and is logged as a fixed code, never retried (P8: no note). `rateLimited` gives the attempt back and pauses
+    classification in this queue until its reset date, else 15 minutes (`nextRetry`). Every other error and the 300 s
+    watchdog count an attempt in **the classification counter** (`ProcessingFailures` under `classificationFailures`,
+    T5, forgotten with the text counter when the document is `done` or gone, N3), with the backoff of the text step; the
+    third writes `done`. `interruptNow()` gives the attempt back to the counter it was counted in (`StageTracker`
+    records it). Both kinds of stage share the one `StageTracker`, so one stage runs at a time (T6).
+  - **Checks** (Kit, `SuggestionRules`, T10): the title trimmed, a placeholder dropped, cut at a word within 80
+    characters; the correspondent within 80 characters and **found in the text** (folded as the search folds words);
+    the type within 40 characters and 3 words; at most 3 distinct tags; the date a valid Gregorian date from 1900 to
+    next year **found in the text** in one of the forms of `DateForms` (`14.01.2026`, `14.1.26`, `2026-01-14`,
+    `14. Januar 2026`, `Jänner`, `14 January 2026`, `January 14, 2026`). A checked answer is kept in the queue's memory,
+    keyed by document and text record, until its write saved (T3).
+  - **Empty fields** (`ClassificationFields`, T2, P2, P7): correspondent, type and tags when none is set; title and
+    date only while the document was never edited (`modifiedAt == createdAt`; the date also `documentDate ==
+    createdAt`; an empty title always). So a file-name title and the import date are replaced until the first edit,
+    and an edit of any field (also the inbox flag, a trash and restore, a repair change) keeps title and date.
+  - **The result write** (`writeClassification`, T3): one synchronous call under the write discipline above. A fresh
+    context fetches the document and re-checks `classify`, the exact claim, not trashed and the same text record; it
+    decides each field's emptiness on that row; it resolves names against the live records it fetches
+    (`MetadataMatcher`: an equal normalized name in keeper order, else the longest word prefix either way, a tie none;
+    without a match a new correspondent or type is inserted, P1; a tag only when exactly one live tag has the name,
+    review N7, and never a new one); it sets only the fields it fills and `done`, without `touch()`, so a later edit is
+    still the first; its check reads the document row and every metadata row it found linked or links again
+    (`RowState.read`: a linked record must still be live under the same name). On a mismatch it rolls back and the
+    next run decides again with the cached answer. The suggested date is stored as the detail's date picker stores a
+    day: the time of day of the current `documentDate`, in the current calendar.
+  - **Never overwriting an edit** holds on this store: an edit saved before the fetch makes its field non-empty (and
+    title and date edited); one saved between the fetch and the check makes the write back off; the residual window
+    is the queue's. An edit made on the other device that has not arrived cannot be seen: #31's two-device protocol
+    gets a case for it (M3 of #8), which decides whether more than the claims is needed.
+  - **Reads:** the step reads the text row by key and the metadata rows, never a file or thumbnail
+    (`ProcessingSQLTests`). The known records passed to the classifier are the live ones, most used first, at most 100
+    correspondents and types and 150 tags.
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 

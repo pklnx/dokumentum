@@ -53,6 +53,9 @@ public enum TextSource: Hashable, Sendable, CaseIterable {
 public enum ProcessingState: Hashable, Sendable, CaseIterable {
     case pending
     case processing
+    /// The text is written and the classification step (#8) has not run yet. Added after step 6: an older build
+    /// reads it as `.unknown` and never touches the document.
+    case classify
     case done
     case failed
     /// Read-only: a value from a newer build. It has no raw value, so it can never be written.
@@ -63,6 +66,7 @@ public enum ProcessingState: Hashable, Sendable, CaseIterable {
         switch storedValue {
         case "pending": self = .pending
         case "processing": self = .processing
+        case "classify": self = .classify
         case "done": self = .done
         case "failed": self = .failed
         default: self = .unknown
@@ -74,6 +78,7 @@ public enum ProcessingState: Hashable, Sendable, CaseIterable {
         switch self {
         case .pending: "pending"
         case .processing: "processing"
+        case .classify: "classify"
         case .done: "done"
         case .failed: "failed"
         case .unknown: nil

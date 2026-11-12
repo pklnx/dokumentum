@@ -204,4 +204,55 @@ struct ProcessingSQLTests {
         #expect(statements.contains { $0.contains("FROM ZDOCUMENT t0") }, "\(statements)")
         expectNoBlobTable(statements)
     }
+
+    // MARK: Classification (#8, part 1)
+
+    /// The classification step reads the text row once, by key, and the metadata rows; never a file or a thumbnail.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theClassificationReadsTheTextByKeyAndNoFileOrThumbnail() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try seed(store)
+        try store.insertMetadata(.correspondent, "Stadtwerke")
+        try store.insertMetadata(.tag, "Strom")
+
+        let recording = try SQLLog.Recording()
+        let input = ProcessingQueue.readClassificationInput(of: id, in: store.container)
+        let statements = try recording.statements()
+
+        #expect(input?.extractedText == "text 0")
+        #expect(input?.known.correspondents == ["Stadtwerke"])
+        let textReads = statements.filter { SQLLog.statement($0, names: "ZDOCUMENTTEXT") }
+        #expect(textReads.count == 1, "\(textReads)")
+        #expect(textReads.allSatisfy { $0.contains("WHERE  t0.Z_PK IN  (?)") }, "not by key: \(textReads)")
+        for statement in statements {
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
+        }
+    }
+
+    /// The classification's result write, with its fetch, re-check, metadata lookup, re-read and save, reads no
+    /// blob table (the text record is compared by the identifier on the document row).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theClassificationWriteReadsNoBlobTable() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insertClassify()
+        try store.insertMetadata(.tag, "Strom")
+        let text = try #require(
+            try ProcessingStore.fetch(id, in: ModelContext(store.container))?.text?.persistentModelID)
+        let held = ProcessingQueue.Held(
+            stateRaw: "classify", deviceID: deviceA, claimedAt: processingStart, file: nil, checksFile: false,
+            text: text)
+        let suggestion = SuggestionRules.check(billSuggestion, text: billText, now: processingStart)
+
+        let recording = try SQLLog.Recording()
+        let outcome = ProcessingQueue.writeClassification(
+            id, expecting: held, suggestion: suggestion, now: processingStart, calendar: testCalendar,
+            in: store.container, beforeCheck: nil)
+        let statements = try recording.statements()
+
+        #expect(outcome == .saved)
+        expectNoBlobTable(statements)
+    }
 }
