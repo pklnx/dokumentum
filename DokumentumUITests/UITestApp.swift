@@ -236,6 +236,71 @@ struct UITestApp {
     #endif
 }
 
+extension UITestApp {
+    /// How many pixels of two rows' leading `width` × `height` pt differ by more than 0.15 in relative luminance
+    /// (#6, part 4: a thumbnail against the placeholder), and the thumbnail's area in pixels at the screenshots'
+    /// scale. Each PNG is drawn 1:1 into sRGB; `pointWidths` are the elements' widths in points, for the scale.
+    static func leadingBandDifference(
+        _ first: XCUIScreenshot, _ second: XCUIScreenshot, width: CGFloat, height: CGFloat,
+        pointWidths: (CGFloat, CGFloat)
+    ) -> (differing: Int, thumbnailArea: Int)? {
+        guard let a = Pixels(png: first.pngRepresentation), let b = Pixels(png: second.pngRepresentation),
+            pointWidths.0 > 0, pointWidths.1 > 0
+        else { return nil }
+        let scale = CGFloat(a.width) / pointWidths.0
+        guard abs(CGFloat(b.width) / pointWidths.1 - scale) < 0.01 else { return nil }
+        let bandWidth = min(Int(width * scale), a.width, b.width)
+        let bandHeight = min(Int(height * scale), a.height, b.height)
+        var differing = 0
+        for y in 0..<bandHeight {
+            for x in 0..<bandWidth where abs(a.luminance(x, y) - b.luminance(x, y)) > 0.15 {
+                differing += 1
+            }
+        }
+        // The thumbnail is 40 × 56 pt.
+        return (differing, Int(40 * scale * 56 * scale))
+    }
+
+    /// A PNG's pixels in sRGB, top row first.
+    struct Pixels {
+        let width: Int
+        let height: Int
+        private let bytes: [UInt8]
+
+        init?(png: Data) {
+            guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+                let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                let sRGB = CGColorSpace(name: CGColorSpace.sRGB), image.width > 0, image.height > 0
+            else { return nil }
+            width = image.width
+            height = image.height
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+                guard
+                    let context = CGContext(
+                        data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                        bytesPerRow: image.width * 4, space: sRGB, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+                else { return false }
+                context.interpolationQuality = .none
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                return true
+            }
+            guard drawn else { return nil }
+            bytes = pixels
+        }
+
+        /// WCAG 2 relative luminance of the pixel at `x`, `y` (from the top left).
+        func luminance(_ x: Int, _ y: Int) -> Double {
+            let index = (y * width + x) * 4
+            func linear(_ component: UInt8) -> Double {
+                let value = Double(component) / 255
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(bytes[index]) + 0.7152 * linear(bytes[index + 1]) + 0.0722 * linear(bytes[index + 2])
+        }
+    }
+}
+
 #if os(macOS)
     /// The text contrast of a PNG of one text element (`UITestApp.assertTextContrast`).
     struct TextContrast: CustomStringConvertible {

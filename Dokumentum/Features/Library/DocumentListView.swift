@@ -19,10 +19,15 @@ struct DocumentListView: View {
     #endif
 
     var body: some View {
+        let source = model.source
+        // The rows' thumbnails (#6, part 4), looked for again at each read of the library.
+        let thumbnails = RowThumbnails(
+            load: { await source.loadThumbnail(instanceID: $0) }, revision: model.revision)
         List(selection: $model.selectedDocumentID) {
             ForEach(model.documents) { document in
                 let tagPaths = model.tagPaths(of: document)
                 row(document, tagPaths: tagPaths)
+                    .environment(\.rowThumbnails, thumbnails)
                     .accessibilityIdentifier(AccessibilityID.documentRow(document.instanceID))
                     .modifier(TrashRowActions(document: document))
                     #if os(macOS)
@@ -123,8 +128,11 @@ struct DocumentListView: View {
         /// A hidden copy of the row that measures the height the row needs at its current width, whatever height the
         /// table gave the row (#81). Not the row itself: it is laid out in the height the table gave it, and in the
         /// plan's probes a row that was too short kept its title on one line, so its height did not change.
+        /// Its thumbnail is the placeholder and loads nothing: the thumbnail has a fixed size, so the height is the
+        /// same with or without the image (#6, part 4).
         private func heightProbe(_ document: LibraryDocument, tagPaths: [String]) -> some View {
             DocumentRow(document: document, tagPaths: tagPaths)
+                .environment(\.rowThumbnails, nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .hidden()
                 .accessibilityHidden(true)

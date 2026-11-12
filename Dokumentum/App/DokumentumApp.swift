@@ -25,6 +25,10 @@ struct DokumentumApp: App {
     /// changes and at the next claim expiry or backoff end; paused in the background on iOS and when the Mac app
     /// quits (`ProcessingLifecycle`). `nil` for an in-memory store, as the repair.
     let processing: ProcessingScheduler?
+    /// "Try again" for a failed document (#6, P2): through the scheduler, which runs the queue after the write; for an
+    /// in-memory store, which has no scheduler, a queue of its own that only writes (the document then stays
+    /// `pending`, as every document of such a store does).
+    let retrier: any ProcessingRetrying
     /// The one search index of the app (plan of #7, part 2, T9), for every store, in-memory ones included; every
     /// window's library follows it. Built at launch off the main actor, then updated from saves and store changes.
     let search: SearchIndexer
@@ -90,8 +94,10 @@ struct DokumentumApp: App {
                 ProcessingLifecycle.pauseWhenTerminating(processing)
             #endif
             self.processing = processing
+            retrier = processing
         } else {
             processing = nil
+            retrier = ProcessingQueue(container: container, deviceID: deviceID, failures: ProcessingFailures())
         }
         #if os(iOS)
             shareQueue = ShareQueueImporter.forApp(importer: importer)
@@ -108,7 +114,7 @@ struct DokumentumApp: App {
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
                 source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
-                launchStore: launchStore, importer: importer, searcher: search
+                launchStore: launchStore, importer: importer, searcher: search, retrier: retrier
             )
             #if os(iOS)
                 .environment(shareQueue)
