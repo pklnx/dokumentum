@@ -97,7 +97,7 @@
                 tags: [], file: .pdf(pages: letterPages(musterbank.name, "Account statement Q3", pages: 3))),
             sample(
                 5, "", daysBefore: 20, inbox: true, correspondent: musterbank, type: letter, tags: [],
-                file: .pdf(pages: letterPages(musterbank.name, "A letter without a title"))),
+                file: .pdf(pages: letterPages(musterbank.name, "A letter without a title")), processing: .classify),
             sample(
                 6, longTitle, daysBefore: 31, inbox: true, correspondent: musterbank, type: letter, tags: [important],
                 file: .pdf(pages: letterPages(musterbank.name, "Annual statement 2025")), processing: .failed),

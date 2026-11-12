@@ -4,6 +4,7 @@ import DokumentumTestSupport
 import Foundation
 import FoundationModels
 import SwiftData
+import Synchronization
 import Testing
 
 @testable import DokumentumCore
@@ -159,22 +160,49 @@ struct FoundationModelsClassifierTests {
 
 /// The real model (#8, part 2, T12): the synthetic bill of the plan's P-b through the classification step. Runs
 /// where the model is available (the development Mac, also its iOS simulator on #138); skips wherever it is not
-/// (the plan's probe P-m found the simulator without it). The simulator of a GitHub Actions macOS runner reports
-/// the model as available but has no model assets (`ModelManagerError 1026`, "no underlying assets"), so the tests
-/// also ask the model one trivial question first and are cancelled with the reason when even that fails.
+/// (the plan's probe P-m found the simulator without it).
+///
+/// The simulator of a GitHub Actions macOS runner reports the model as available but has no model assets: a request
+/// can fail with `ModelManagerServices.ModelManagerError` 1026 (#170). The framework throws that as an `NSError` of
+/// the domain `FoundationModels.LanguageModelError`, code -1, with the 1026 error among its underlying errors; it is
+/// not a `LanguageModelError` value, so `catch let error as LanguageModelError` does not match it. The tests first
+/// ask the model one trivial question, and both that request and the classification are cancelled with the reason
+/// when they fail with 1026 (`missingAssets(_:)`), at any point. Every other error, and every wrong result, fails.
 struct FoundationModelsRealModelTests {
     static let availability = SystemLanguageModel.default.availability
     static let skipReason = Comment(rawValue: "The on-device model is not available here: \(availability)")
 
-    /// Cancels the test (a skip with the reason) when the model reports itself available but cannot answer at all.
-    /// Any error of this one trivial request cancels (as the Vision preflight does): on the runner's iOS simulator a
-    /// release run failed both tests with `ModelManagerError 1026` although the `LanguageModelError` catch was there.
-    /// A failure of the classification itself is not caught here.
-    static func requireAnsweringModel() async throws {
+    /// The model's `ModelManagerError` "assets not available".
+    static let missingAssetsDomain = "ModelManagerServices.ModelManagerError"
+    static let missingAssetsCode = 1026
+
+    /// Whether `error`, or any error under it (`NSError.underlyingErrors`, at any depth), is `ModelManagerError`
+    /// 1026. Read through `NSError`, which the thrown error is (#170); the framework has no public type for it.
+    static func missingAssets(_ error: any Error) -> Bool {
+        let error = error as NSError
+        if error.domain == missingAssetsDomain && error.code == missingAssetsCode { return true }
+        return error.underlyingErrors.contains(where: missingAssets)
+    }
+
+    /// Runs `body`; cancels the test (a skip with the reason) when it fails because the model has no assets here.
+    /// Every other error is thrown on, so it fails the test.
+    static func cancellingWithoutAssets<T>(_ body: () async throws -> T) async throws -> T {
         do {
-            _ = try await LanguageModelSession().respond(to: "Answer with the word yes.")
-        } catch {
-            try Test.cancel("The on-device model is available but cannot answer here (no assets?): \(error)")
+            return try await body()
+        } catch let error where missingAssets(error) {
+            try cancelWithoutAssets(error)
+        }
+    }
+
+    static func cancelWithoutAssets(_ error: any Error) throws -> Never {
+        try Test.cancel("The on-device model is available but has no assets here (ModelManagerError 1026): \(error)")
+    }
+
+    /// Cancels the test when the model reports itself available but cannot answer a trivial question for lack of
+    /// assets. Any other failure of that request fails the test.
+    static func requireAnsweringModel() async throws {
+        _ = try await cancellingWithoutAssets {
+            try await LanguageModelSession().respond(to: "Answer with the word yes.")
         }
     }
 
@@ -191,13 +219,16 @@ struct FoundationModelsRealModelTests {
         try store.insertMetadata(.tag, "Strom")
         try store.insertMetadata(.tag, "Versicherung")
         let failures = store.failures(deviceA)
+        let classifier = ErrorRecordingClassifier(FoundationModelsClassifier())
         let queue = ProcessingQueue(
             container: store.container, deviceID: deviceA, failures: failures, stage: textStage(),
-            classifier: FoundationModelsClassifier(), calendar: testCalendar,
+            classifier: classifier, calendar: testCalendar,
             watchdogSleep: ManualDebounce().sleep, now: clock.function)
 
         let report = await queue.run()
 
+        // The step counts a failed request as a failed attempt; one without assets cancels the test instead.
+        if let error = classifier.errors.first(where: Self.missingAssets) { try Self.cancelWithoutAssets(error) }
         #expect(report.classified == 1, "\(report)")
         let row = try store.classified(id)
         #expect(row.stateRaw == "done")
@@ -217,9 +248,65 @@ struct FoundationModelsRealModelTests {
         try await Self.requireAnsweringModel()
         let text = String(repeating: syntheticBill + "\n", count: 500_000 / (syntheticBill.utf8.count + 1))
         #expect(text.utf8.count > 490_000)
-        let suggestion = try await FoundationModelsClassifier().classify(
-            text: text, known: KnownMetadata(correspondents: ["Stadtwerke München GmbH"]))
+        let suggestion = try await Self.cancellingWithoutAssets {
+            try await FoundationModelsClassifier().classify(
+                text: text, known: KnownMetadata(correspondents: ["Stadtwerke München GmbH"]))
+        }
         #expect(SuggestionRules.check(suggestion, text: text, now: Date()).issueDate != nil, "\(suggestion)")
+    }
+
+    /// #170: the check matches 1026 in the shape the runner's simulator throws it, also nested deeper, and nothing
+    /// else: not another code or domain, not the framework's own errors. Runs everywhere, without the model.
+    @Test func onlyModelManagerError1026MeansMissingAssets() {
+        func error(_ domain: String, _ code: Int, under: [NSError] = []) -> NSError {
+            NSError(domain: domain, code: code, userInfo: under.isEmpty ? [:] : [NSMultipleUnderlyingErrorsKey: under])
+        }
+        let assets = error(Self.missingAssetsDomain, 1026)
+        let wrapper = "FoundationModels.LanguageModelError"
+        #expect(Self.missingAssets(error(wrapper, -1, under: [assets])), "as on the runner (#170)")
+        #expect(Self.missingAssets(assets))
+        #expect(Self.missingAssets(error(wrapper, -1, under: [error("Other", 1, under: [assets])])), "nested")
+        #expect(
+            Self.missingAssets(
+                NSError(domain: wrapper, code: -1, userInfo: [NSUnderlyingErrorKey: assets])), "single underlying")
+        let others: [any Error] = [
+            error(wrapper, -1),
+            error(wrapper, -1, under: [error(Self.missingAssetsDomain, 1025)]),
+            error(wrapper, -1, under: [error("com.apple.UnifiedAssetFramework", 1026)]),
+            LanguageModelError.guardrailViolation(.init(debugDescription: "guardrail")),
+            LanguageModelError.timeout(.init(debugDescription: "timeout")),
+            SystemLanguageModel.Error.assetsUnavailable(.init(debugDescription: "assets")),
+            CancellationError(),
+        ]
+        for other in others {
+            #expect(!Self.missingAssets(other), "\(other)")
+        }
+    }
+}
+
+/// The real classifier for the queue, recording each error its requests throw: the queue keeps them to itself.
+final class ErrorRecordingClassifier: DocumentClassifying {
+    private let base: FoundationModelsClassifier
+    private let recorded = Mutex<[any Error]>([])
+
+    init(_ base: FoundationModelsClassifier) {
+        self.base = base
+    }
+
+    var errors: [any Error] { recorded.withLock { $0 } }
+    var availability: ClassifierAvailability { base.availability }
+
+    func availabilityChanges() -> AsyncStream<ClassifierAvailability> {
+        base.availabilityChanges()
+    }
+
+    func classify(text: String, known: KnownMetadata) async throws -> ClassificationSuggestion {
+        do {
+            return try await base.classify(text: text, known: known)
+        } catch {
+            recorded.withLock { $0.append(error) }
+            throw error
+        }
     }
 }
 
