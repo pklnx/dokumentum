@@ -106,7 +106,7 @@ struct LibraryWindowTests {
         ]
         #expect(Set(expected.keys) == Set(StoreSyncOffReason.allCases))
         for (reason, (english, german)) in expected {
-            var resource = SyncOffLine.reasonText(reason)
+            var resource = SyncStatusText.storeReason(reason)
             #expect(resource.key == english, "\(reason)")
             resource.locale = Locale(identifier: "de")
             #expect(String(localized: resource) == german, "\(reason)")

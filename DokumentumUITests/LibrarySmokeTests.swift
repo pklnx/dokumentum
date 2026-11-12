@@ -2,8 +2,9 @@ import XCTest
 
 /// The library on the sample documents (`-UITestSeed`): the sidebar filters, the tag tree expands,
 /// and the detail shows a PDF or why there is none. Rows show their first page's thumbnail, and the detail of a
-/// document whose text recognition failed says so and offers "Try again" (#6, part 4). On the iPhone the split view
-/// is a navigation stack, on the Mac three columns.
+/// document whose text recognition failed says so and offers "Try again" (#6, part 4). The sidebar footer's sync line
+/// opens "iCloud Sync" (#31, with an injected status). On the iPhone the split view is a navigation stack, on the Mac
+/// three columns.
 final class LibrarySmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test
     // cannot see the app's code.
@@ -128,6 +129,60 @@ final class LibrarySmokeTests: XCTestCase {
         ui.activate(Self.documentRow(Self.annualStatement))
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
         assertFailedProcessingCanBeTriedAgain(ui)
+        ui.app.terminate()
+
+        // The sync status line of a CloudKit store, injected (`-UITestSyncStatus`, #31 T7): a problem and "on".
+        assertSyncStatusFooter(status: "storageFull", showsCode: true)
+        assertSyncStatusFooter(status: "on", showsCode: false)
+    }
+
+    /// With `-UITestSyncStatus <status>` the sidebar footer shows the CloudKit store's line (`sidebar.syncStatus`, not
+    /// the in-memory store's "Sync off"), primary text on the bar that reaches 4.5:1 on the Mac (light and dark through
+    /// `TEST_RUNNER_DOKUMENTUM_UI_APPEARANCE`), and activating it opens "iCloud Sync" (a popover on the Mac, a sheet on
+    /// the iPhone) with the line and, for a problem, its CloudKit code.
+    @MainActor
+    private func assertSyncStatusFooter(
+        status: String, showsCode: Bool, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let ui = UITestApp()
+        ui.launch(extraArguments: ["-UITestSyncStatus", status])
+        defer { ui.app.terminate() }
+        XCTAssertTrue(
+            ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch", file: file,
+            line: line)
+        #if os(iOS)
+            goBack(ui)
+        #endif
+        let footer = ui.element("sidebar.syncStatus")
+        XCTAssertTrue(footer.waitForExistence(timeout: 20), "no sync status line", file: file, line: line)
+        XCTAssertFalse(
+            ui.element("sidebar.syncOff").exists, "the store's line instead of the status", file: file, line: line)
+        ui.attachWindowScreenshot("10-sync-status-\(status)", to: self)
+        #if os(macOS)
+            ui.assertTextContrast("sidebar.syncStatus", in: self, file: file, line: line)
+        #endif
+        ui.activate("sidebar.syncStatus", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("syncStatus.detail.line").waitForExistence(timeout: 20), "“iCloud Sync” did not open",
+            file: file,
+            line: line)
+        XCTAssertEqual(
+            ui.element("syncStatus.detail.code").exists, showsCode, "the CloudKit code", file: file, line: line)
+        if showsCode {
+            // A static text reads its text as the label on the iPhone and as the value on the Mac.
+            let code = ui.element("syncStatus.detail.code")
+            XCTAssertTrue(
+                [code.label, code.value as? String ?? ""].contains("CKError 25"), "the code: \(code.label)", file: file,
+                line: line)
+        }
+        ui.attachWindowScreenshot("11-sync-detail-\(status)", to: self)
+        #if os(iOS)
+            ui.activate("syncStatus.detail.done", file: file, line: line)
+        #else
+            ui.app.typeKey(.escape, modifierFlags: [])
+        #endif
+        XCTAssertTrue(
+            footer.waitForExistence(timeout: 10), "the sidebar did not come back", file: file, line: line)
     }
 
     /// The annual statement is open: above its PDF the detail says that text recognition failed, with "Try again"

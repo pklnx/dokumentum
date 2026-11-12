@@ -286,6 +286,21 @@ changes. Deploying the schema to Production is the maintainer's.
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
 from tests or an unsigned build).
 
+**The sync status** (#31, part 1). The sidebar footer shows one line for every store, on the iPhone and the Mac,
+and activating it opens "iCloud Sync" (a popover on the Mac, a sheet on the iPhone: the line, the account, the
+last download and upload, and a problem's CloudKit code such as "CKError 25"). A store that does not sync shows
+its own "Sync off: <reason>" (`StoreSyncOffReason`, identifier `sidebar.syncOff`). A CloudKit store's line
+(`sidebar.syncStatus`) comes from `CloudSyncMonitor` (DokumentumCore), which feeds Kit's `SyncStatusReducer` with the
+mirroring's events (`CloudSyncEvents`, also the repair's source) and with the account
+(`AccountStatusProviding`; the `CKContainer` adapter is created only for a CloudKit store). Kit's `SyncStatusLine`
+picks the line by priority: storage full > account changed > sync off (no account, restricted, temporarily
+unavailable, could not determine) > "Checking iCloud…" (until the first account answer or ended event) > offline >
+reset > other problem > on, with the later of the last import and export. The account is asked at start, after
+`CKAccountChanged` and `NSUbiquityIdentityDidChange`, when the scene becomes active and after a failure with code 9 or
+36; an answer to an older request is dropped. "iCloud account changed" means a non-nil `userRecordID` that differs
+from the last non-nil one of this process, so a switch (A → no account → B) shows at the sign-in, and a switch while
+the app does not run is not shown. The monitor keeps the last 50 events in memory and changes no data.
+
 **The repair.** `RepairPlanner` (DokumentumKit) decides, `DokumentumCore/Repair/` carries it out on the store:
 re-point references to tombstones, merge same-name metadata into tombstones, break tag cycles, relink early
 blobs, revive tombstones; it never deletes (plan of #2, "Repair passes"). `RepairScheduler` runs it at launch,
@@ -632,7 +647,9 @@ description is a known false positive of the audit in light.
   nothing is saved. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
   store on disk in a temporary folder, removed when the app quits. `-UITestFailingSaves YES` (in-memory stores
   only): every save of the info panel's editor fails and is rolled back, for the "The title could not be saved."
-  line under the title field.
+  line under the title field. `-UITestSyncStatus <case>` (Debug builds): the sidebar footer shows an injected
+  sync status (`UITestSyncStatus.Case`: `checking`, `on`, `storageFull`, `noAccount`, `offline`, …) in place of the
+  store's own line, for the UI test and screenshots of the states real CloudKit cannot produce in a test.
 - The debug command "Add Sample Documents" (the Debug menu on the Mac, the sidebar's toolbar menu on the
   iPhone) writes the samples into the open store, with fresh `instanceID`s; a second run adds nothing. With a
   store on disk it asks first.
