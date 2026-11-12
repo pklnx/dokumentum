@@ -3,12 +3,13 @@ import DokumentumCoreTestSupport
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
+import PDFKit
 import Testing
 
 @testable import DokumentumCore
 
 /// Real Vision (#6, part 2, T17, N8): an image-only page rendered in the test, through `DocumentStage` with
-/// `VisionTextRecognizer`, as the app runs it. The first recognition in a process loads the model and took 24 s on
+/// `VisionTextRecognizer`, as the app runs it, and the text layer drawn from Vision's boxes (part 3). The first recognition in a process loads the model and took 24 s on
 /// the plan's Mac (P-b), 4 s on the simulator (P-k), so each wait has a safety net of 120 s (scaled) and never
 /// compares durations.
 ///
@@ -60,10 +61,17 @@ struct VisionRecognitionTests {
             return
         }
 
-        let text = try #require(try await stage.value.text)
+        let result = try await stage.value
+        let text = try #require(result.text)
         #expect(text.source == .vision)
         for word in ["Fälligkeit", "Straße", "München"] {
             #expect(text.joined.contains(word), "\(word) not in \(text.joined)")
+        }
+        // The text layer (#6, part 3) from Vision's own boxes: the file finds the words.
+        let layeredData = try #require(result.layeredPDF, "no text layer")
+        let layered = try #require(PDFDocument(data: layeredData))
+        for word in ["Fälligkeit", "Straße", "München"] {
+            #expect(layered.findString(word, withOptions: []).count == 1, "\(word) not found in the layered file")
         }
     }
 }

@@ -30,6 +30,8 @@ public struct ProcessingReport: Equatable, Sendable {
     public var textsCapped = 0
     /// Documents the one-time re-queue pass at the start of this run set back to `pending` (`ProcessingRequeue`).
     public var requeued = 0
+    /// Results that replaced the stored PDF with one with the invisible text layer (#6, part 3).
+    public var layered = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
@@ -71,8 +73,10 @@ public protocol ProcessingRunning: Sendable {
 ///    writes `.failed` without running the stage again, so such a PDF cannot crash every launch. `.failed` syncs,
 ///    but another device whose own counter is below 3 still tries it;
 /// 4. **result write**: `pageCount` and `textSource` if they differ, the text record's `extractedText` (capped at
-///    `ExtractedText.byteLimit` UTF-8 bytes) and `processingState = .done`, in one save. Its check before the save
-///    reads the document row and the text row (by key) again.
+///    `ExtractedText.byteLimit` UTF-8 bytes), with a text layer the file record's `pdfData` and the document's
+///    `fileSize` (#6, part 3), and `processingState = .done`, in one save. Its check before the save reads the
+///    document row, the text row and, with a layer, the file row (each by key) again. `contentHash` stays the hash of
+///    the imported bytes, so importing them again is still a duplicate.
 ///
 /// Before its scan, a run does this device's one-time re-queue pass (`ProcessingRequeue`) until it completed once.
 ///
@@ -308,7 +312,9 @@ public actor ProcessingQueue: ProcessingRunning {
                 return false
             }
             let text = result.text.map { ($0.source, $0.capped()) }
-            let outcome = write(.result, id, expecting: held, checksText: text != nil) { document in
+            let layered = result.layeredPDF
+            let outcome = write(.result, id, expecting: held, checksText: text != nil, checksFile: layered != nil) {
+                document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
                 if let (source, capped) = text {
                     if document.textSource != source { document.textSource = source }
@@ -316,10 +322,17 @@ public actor ProcessingQueue: ProcessingRunning {
                         record.extractedText = capped.text
                     }
                 }
+                // Only the result write changes a linked file's data, under the exact claim the work ran under, so
+                // the data is the one the layer was built from (T16).
+                if let layered, let file = document.file {
+                    file.pdfData = layered
+                    if document.fileSize != layered.count { document.fileSize = layered.count }
+                }
                 document.processingState = .done
             }
             if count(outcome, into: &report) {
                 report.done += 1
+                if layered != nil { report.layered += 1 }
                 if let (_, capped) = text, capped.isCapped {
                     report.textsCapped += 1
                     Log.processing.notice(
@@ -438,12 +451,12 @@ public actor ProcessingQueue: ProcessingRunning {
     }
 
     private func write(
-        _ kind: Write, _ instanceID: UUID, expecting held: Held, checksText: Bool = false,
+        _ kind: Write, _ instanceID: UUID, expecting held: Held, checksText: Bool = false, checksFile: Bool = false,
         change: (Document) -> Void
     ) -> WriteOutcome {
         Self.write(
-            kind, instanceID, expecting: held, in: container, checksText: checksText, beforeCheck: hooks.beforeCheck,
-            change: change)
+            kind, instanceID, expecting: held, in: container, checksText: checksText, checksFile: checksFile,
+            beforeCheck: hooks.beforeCheck, change: change)
     }
 
     private static func log(_ report: ProcessingReport) {
@@ -567,10 +580,12 @@ extension ProcessingQueue {
     }
 
     /// One write, steps 1 to 5 of the discipline, without a suspension. With `checksText` the write also changes the
-    /// document's text record, and step 4 reads that row again too, by key (`RowState.readText`).
+    /// document's text record, and step 4 reads that row again too, by key (`RowState.readText`); with `checksFile`
+    /// likewise its file record (`RowState.readFile`; `pdfData` is not compared, `RowState.excluded`).
     static func write(
         _ kind: Write, _ instanceID: UUID, expecting held: Held, in container: ModelContainer,
-        checksText: Bool = false, beforeCheck: (@Sendable (Write) throws -> Void)?, change: (Document) -> Void
+        checksText: Bool = false, checksFile: Bool = false, beforeCheck: (@Sendable (Write) throws -> Void)?,
+        change: (Document) -> Void
     ) -> WriteOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -583,6 +598,9 @@ extension ProcessingQueue {
             let read = RowState.capture(document)
             // The text record, by key, as this context read it (`held` made sure one is linked).
             let textRead = checksText ? document.text.map { ($0.persistentModelID, RowState.capture($0)) } : nil
+            // The file record, by key (`held` made sure it is the one processed).
+            let fileRead = checksFile ? document.file.map { ($0.persistentModelID, RowState.capture($0)) } : nil
+            if checksFile, fileRead == nil { return .changed }
             // 3. Only the fields that change.
             change(document)
             try beforeCheck?(kind)
@@ -593,7 +611,11 @@ extension ProcessingQueue {
             if let (textID, textState) = textRead {
                 textUnchanged = try RowState.readText(textID, in: container) == textState
             }
-            guard stored[key] == read, textUnchanged else {
+            var fileUnchanged = true
+            if let (fileID, fileState) = fileRead {
+                fileUnchanged = try RowState.readFile(fileID, in: container) == fileState
+            }
+            guard stored[key] == read, textUnchanged, fileUnchanged else {
                 context.rollback()
                 Log.processing.notice("A processing write met another save of its document and wrote nothing")
                 return .metAnotherSave
