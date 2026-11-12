@@ -179,7 +179,7 @@ struct UITestApp {
                     + "element for \"turned off\". LibrarySmokeTests measures its contrast in every run."),
         ]
     #else
-        /// The iPhone's accepted issues, on the cleanup sheet (#136) and the settings sheet's "Done" (#139). The
+        /// The iPhone's accepted issues, on the cleanup sheet (#136) and the settings sheet (#139). The
         /// toolbar's Cancel, Save and Done are the system's own toolbar buttons (a glass capsule; the sheets set no
         /// tint, font or background on them). `ScanSmokeTests` and `LibrarySmokeTests` measure their text contrast
         /// from their screenshots in every run (`assertTextContrast`), so a real contrast loss still fails.
@@ -223,6 +223,13 @@ struct UITestApp {
                         "the settings sheet's \"Done\", the system toolbar button in a glass capsule; the audit "
                         + "fails text on the capsule whatever its contrast (#136). LibrarySmokeTests measures it "
                         + "in every run (#139)."),
+                AcceptedAuditIssue(
+                    identifier: "settings.suggestions.availability", auditType: .textClipped,
+                    description: "Text clipped",
+                    reason:
+                        "the settings' availability note wraps in full at AccessibilityXXXL (checked on screenshots, #139); "
+                        + "the audit reports the same on the app's other wrapping texts without an identifier "
+                        + "(document titles, the status line, sidebar rows)."),
             ]
     #endif
 

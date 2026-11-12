@@ -733,9 +733,12 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac four issues are accepted, on the iPhone ten: eight on the cleanup sheet and
-the settings sheet's "Done" (`settings.done`, the same system toolbar button as the sheet's Cancel and Save, for
-Dynamic Type and contrast; `LibrarySmokeTests` measures its contrast, #139) (`UITestApp.acceptedAuditIssues`). Each matches the
+attachment of the run. On the Mac four issues are accepted, on the iPhone eleven: eight on the cleanup sheet, the
+settings sheet's "Done" (`settings.done`, the same system toolbar button as the cleanup sheet's Cancel and Save, for
+Dynamic Type and contrast; `LibrarySmokeTests` measures its contrast, #139) and "Text clipped" on the settings'
+availability note (`settings.suggestions.availability`: it wraps in full at AccessibilityXXXL, checked on
+screenshots; the audit reports the same on the app's wrapping texts without an identifier, #139)
+(`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
