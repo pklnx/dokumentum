@@ -20,9 +20,9 @@ enum SuggestionSettingsText {
     /// also not by the other device.
     static var perDevice: LocalizedStringResource {
         #if os(macOS)
-            "Documents added on this Mac while suggestions are off or not available get none later, also not on your other devices."
+            "Documents added on this Mac while suggestions are off or not available never get suggestions, not even later or on your other devices."
         #else
-            "Documents added on this iPhone while suggestions are off or not available get none later, also not on your other devices."
+            "Documents added on this iPhone while suggestions are off or not available never get suggestions, not even later or on your other devices."
         #endif
     }
 

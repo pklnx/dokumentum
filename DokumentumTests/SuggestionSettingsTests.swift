@@ -215,8 +215,8 @@ struct SuggestionSettingsTests {
             ),
             (
                 SuggestionSettingsText.perDevice,
-                "Documents added on \(device.0) while suggestions are off or not available get none later, also not on your other devices.",
-                "Dokumente, die auf \(device.1) hinzugefügt werden, während Vorschläge aus oder nicht verfügbar sind, bekommen auch später keine, auch nicht auf deinen anderen Geräten."
+                "Documents added on \(device.0) while suggestions are off or not available never get suggestions, not even later or on your other devices.",
+                "Dokumente, die auf \(device.1) hinzugefügt werden, während Vorschläge aus oder nicht verfügbar sind, bekommen nie Vorschläge, auch nicht später oder auf deinen anderen Geräten."
             ),
         ]
         for (resource, english, german) in expected {
