@@ -5,18 +5,29 @@ import Foundation
 /// (`FoundationModelsClassifier`, part 2), a stub in tests. Implementations never send anything off the device.
 ///
 /// - `availability` is read at each decision, synchronously.
+/// - `availabilityChanges()` yields each later change of `availability`; the scheduler runs the queue on each
+///   (T17), so documents waiting for a model that was not ready are classified once it is. None by default.
 /// - `classify` throws `ClassificationFailure` for the outcomes the step treats specially (declined, rate
 ///   limited, not ready); any other error counts as a failed attempt. It is cancelled after `interruptNow()` or
 ///   the stall timeout and may keep running until it returns; its answer is then dropped.
 public protocol DocumentClassifying: Sendable {
     var availability: ClassifierAvailability { get }
+    func availabilityChanges() -> AsyncStream<ClassifierAvailability>
     func classify(text: String, known: KnownMetadata) async throws -> ClassificationSuggestion
+}
+
+extension DocumentClassifying {
+    /// No changes: the stream ends at once.
+    public func availabilityChanges() -> AsyncStream<ClassifierAvailability> {
+        AsyncStream { $0.finish() }
+    }
 }
 
 /// This device's classification settings in the per-device defaults (`ProcessingEnvironment.defaultsSuite`), never
 /// synced (#8, T16, P3, P4, P9):
 /// - `classification.enabled`: the switch, **on** when it was never set. Read at each decision.
-/// - `classification.since`: when this device's queue first ran with a classifier. **The cut-off of P9:** a
+/// - `classification.since`: when this device's queue was first set up with a classifier (`ProcessingQueue.init`,
+///   which the app creates at launch before anything is imported; review A N-c of #146). **The cut-off of P9:** a
 ///   document is classified only if it was created (`Document.createdAt`, the importing device's clock) at or
 ///   after that moment; documents imported before, also those still waiting for their text and step 3's documents
 ///   that the re-queue sends through the text step again, finish in `done` as before. Written once, never moved.

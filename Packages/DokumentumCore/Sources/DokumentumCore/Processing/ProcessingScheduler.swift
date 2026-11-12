@@ -12,6 +12,8 @@ import SwiftData
 ///   finds nothing to write, so the chain ends there;
 /// - at the next expiry of another device's claim or the end of a backoff that a run waited for, while the app runs
 ///   (`ProcessingReport.nextWake`; the sleep is injected, so tests end it with `ManualDebounce`);
+/// - on each change of the classifier's availability (`DocumentClassifying.availabilityChanges()`, #8 T17): a model
+///   that becomes ready classifies the documents that waited for it, one that becomes unavailable finishes them;
 /// - on `resume()`.
 ///
 /// At most one run at a time: a request during a run queues exactly one more run, however many arrive (#56's
@@ -34,6 +36,7 @@ public final class ProcessingScheduler {
     private let runner: any ProcessingRunning
     private let observer: StoreChangeObserver
     private let insertions: AsyncStream<Void>
+    private let availabilityChanges: AsyncStream<ClassifierAvailability>?
     private let sleep: Sleep
     private let now: @Sendable () -> Date
     private let activity: any ProcessingActivityHolding
@@ -61,14 +64,17 @@ public final class ProcessingScheduler {
     /// on it; a timer for the next claim expiry or backoff end may still be set.
     public var didDrain: (@MainActor () -> Void)?
 
+    /// - Parameter availabilityChanges: the classifier's availability changes (#8, T17); each requests a run.
     public init(
         runner: any ProcessingRunning, observer: StoreChangeObserver, insertions: AsyncStream<Void>,
+        availabilityChanges: AsyncStream<ClassifierAvailability>? = nil,
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) }, now: @escaping @Sendable () -> Date = { Date() },
         activity: any ProcessingActivityHolding = NoProcessingActivity()
     ) {
         self.runner = runner
         self.observer = observer
         self.insertions = insertions
+        self.availabilityChanges = availabilityChanges
         self.sleep = sleep
         self.now = now
         self.activity = activity
@@ -79,16 +85,20 @@ public final class ProcessingScheduler {
     ///   - observer: the app's shared store observer (the repair and the library follow it too).
     ///   - deviceID: this device's `processingDeviceID`.
     ///   - takeoverInterval: 6 hours; Debug builds can pass `-ProcessingTakeoverSeconds` (M4).
+    ///   - classifier: the classification step's model (#8): the on-device model (`FoundationModelsClassifier`).
+    ///     The queue records the cut-off of P9 when it is created here, at launch, before the launch imports
+    ///     anything (review A N-c of #146).
     public static func start(
         for container: ModelContainer, observer: StoreChangeObserver, deviceID: String,
-        takeoverInterval: TimeInterval? = nil
+        takeoverInterval: TimeInterval? = nil, classifier: any DocumentClassifying
     ) -> ProcessingScheduler {
         let failures = ProcessingFailures()
-        // The text stage with Vision (#6, part 2), and this device's one-time re-queue of step 3's documents.
+        // The text stage with Vision (#6, part 2), this device's one-time re-queue of step 3's documents, and the
+        // classification step (#8).
         let queue = ProcessingQueue(
             container: container, deviceID: deviceID, failures: failures,
             stage: DocumentStage(recognizer: VisionTextRecognizer()),
-            requeue: ProcessingRequeue(defaultsSuite: failures.defaultsSuite),
+            requeue: ProcessingRequeue(defaultsSuite: failures.defaultsSuite), classifier: classifier,
             takeoverInterval: takeoverInterval ?? ProcessingClaimRules.takeoverInterval)
         #if os(macOS)
             // App Nap would slow a run down while the window is hidden (#130).
@@ -97,7 +107,8 @@ public final class ProcessingScheduler {
             let activity: any ProcessingActivityHolding = NoProcessingActivity()
         #endif
         let scheduler = ProcessingScheduler(
-            runner: queue, observer: observer, insertions: documentInsertions(of: container), activity: activity)
+            runner: queue, observer: observer, insertions: documentInsertions(of: container),
+            availabilityChanges: classifier.availabilityChanges(), activity: activity)
         scheduler.start()
         return scheduler
     }
@@ -115,6 +126,12 @@ public final class ProcessingScheduler {
             Task { [weak self] in
                 for await _ in insertions { self?.requestRun() }
             })
+        if let availabilityChanges {
+            subscriptions.append(
+                Task { [weak self] in
+                    for await _ in availabilityChanges { self?.requestRun() }
+                })
+        }
         requestRun()
     }
 

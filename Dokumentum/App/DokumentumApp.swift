@@ -96,8 +96,11 @@ struct DokumentumApp: App {
             #else
                 let takeoverInterval: TimeInterval? = nil
             #endif
+            // The classification step (#8) with the on-device model. Created here, before the share queue below
+            // imports anything, so the first launch's cut-off (P9) comes before those documents.
             let processing = ProcessingScheduler.start(
-                for: container, observer: storeChanges, deviceID: deviceID, takeoverInterval: takeoverInterval)
+                for: container, observer: storeChanges, deviceID: deviceID, takeoverInterval: takeoverInterval,
+                classifier: FoundationModelsClassifier())
             #if os(macOS)
                 // Quitting is a known interruption: the running attempt is given back (#97 point 4).
                 ProcessingLifecycle.pauseWhenTerminating(processing)

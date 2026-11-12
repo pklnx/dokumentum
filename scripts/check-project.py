@@ -28,6 +28,10 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   words, in code, strings or comments: the extension must never touch the store. On purpose a plain word
   search and no parser. It has no misses, where anything short of a real Swift lexer misreads raw strings,
   regex literals or interpolation above an import. A false failure is loud, and rewording fixes it.
+- The on-device model only (plan of #8, T13, review N6): no .swift file of the repository contains the word
+  PrivateCloudCompute (the framework's server model, which would send the text off the device; plan.md, section 1:
+  no external services), anywhere, also in comments; and only MODEL_IMPORT_FILES import FoundationModels, in any
+  form of import (an attribute, an access level, a kind). The same plain search as for the extension.
 - Signing: the team is the plan's, CODE_SIGN_IDENTITY = - does not stand next to it, SIGNING_OVERRIDES
   are not set in the project or a target, and Config/Unsigned.xcconfig holds exactly its three
   macOS-conditioned keys. Project.xcconfig includes only Local.xcconfig, which is never committed, and
@@ -159,6 +163,18 @@ SHARE_FOLDER = "DokumentumShare"
 SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
 # The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
 SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
+# The only Swift files that may import FoundationModels: the classifier, and its tests, which construct the
+# framework's errors (#8, part 2, review N6).
+MODEL_IMPORT_FILES = {
+    "Packages/DokumentumCore/Sources/DokumentumCore/Classification/FoundationModelsClassifier.swift",
+    "Packages/DokumentumCore/Tests/DokumentumCoreTests/FoundationModelsClassifierTests.swift",
+}
+SERVER_MODEL_WORD = "PrivateCloudCompute"
+MODEL_IMPORT = re.compile(
+    r"^\s*(?:@[\w()., ]+\s+)*(?:(?:public|package|internal|fileprivate|private)\s+)?import\s+"
+    r"(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?FoundationModels\b")
+# Folders that hold build output, never sources.
+SKIPPED_FOLDERS = {"build", ".build", "DerivedData"}
 # The app's whole iOS Info.plist file (plan of #6, part 5, T13 and N4): CloudKit's silent pushes, and the
 # processing task with the continued-processing tasks, whose identifiers do not overlap. A change of the rule is a
 # change here, on purpose.
@@ -587,6 +603,32 @@ def check_share_sources(root):
     return problems
 
 
+def swift_sources(root):
+    """Every .swift file under `root`, without build output and hidden folders, in a stable order."""
+    paths = []
+    for folder, folders, files in os.walk(root):
+        folders[:] = sorted(name for name in folders if name not in SKIPPED_FOLDERS and not name.startswith("."))
+        paths += [pathlib.Path(folder) / name for name in sorted(files) if name.endswith(".swift")]
+    return paths
+
+
+def check_model_sources(root):
+    """The server model's word anywhere, and imports of FoundationModels outside MODEL_IMPORT_FILES (see the
+    docstring)."""
+    problems = []
+    for path in swift_sources(root):
+        relative = path.relative_to(root).as_posix()
+        lines = path.read_bytes().decode("utf-8", errors="replace").splitlines()
+        for number, line in enumerate(lines, start=1):
+            if SERVER_MODEL_WORD in line:
+                problems.append(f"{relative}:{number}: contains {SERVER_MODEL_WORD}; the app uses only the on-device "
+                                "model, never the server model (plan of #8, T13). Reword it if it is only a comment")
+            if MODEL_IMPORT.search(line) and relative not in MODEL_IMPORT_FILES:
+                problems.append(f"{relative}:{number}: imports FoundationModels; only the classifier and its tests do "
+                                f"({', '.join(sorted(MODEL_IMPORT_FILES))})")
+    return problems
+
+
 def check_unsigned_xcconfig(root):
     path = root / UNSIGNED_XCCONFIG
     if not path.is_file():
@@ -754,6 +796,7 @@ def check(root):
         problems.append(f"{XCCONFIG}: {error}")
     problems += check_share_extension(objects, project)
     problems += check_share_sources(root)
+    problems += check_model_sources(root)
     problems += check_local_xcconfig(root)
     problems += check_entitlements(root)
     problems += check_info_plists(root)
@@ -988,6 +1031,12 @@ def self_test():
 
     def write(name, text):
         return lambda root: (root / name).write_text(text, encoding="utf-8")
+
+    def write_deep(name, text):
+        def apply(root):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text, encoding="utf-8")
+        return apply
 
     def remove(name):
         return lambda root: (root / name).unlink()
@@ -1334,6 +1383,35 @@ def self_test():
         ("a file that is not UTF-8", lambda root: (root / f"{SHARE_FOLDER}/Store.swift").write_bytes(b"// \xff\nimport SwiftData\n"),
          "Store.swift:2: contains the word SwiftData"),
         ("another kind of file is fine", write(f"{SHARE_FOLDER}/notes.txt", "SwiftData\n"), None),
+    ]
+    classifier, classifier_tests = sorted(MODEL_IMPORT_FILES)
+    for form in ("import FoundationModels", "@preconcurrency import FoundationModels", "public import FoundationModels",
+                 "@_exported public import FoundationModels", "  internal import FoundationModels",
+                 "import struct FoundationModels.SystemLanguageModel", "@testable import FoundationModels",
+                 "@_spi(Private) import FoundationModels"):
+        cases.append((f"the model imported in the app: {form!r}", write_deep("Dokumentum/App/Model.swift", f"{form}\n"),
+                      "Dokumentum/App/Model.swift:1: imports FoundationModels"))
+    cases += [
+        ("the model imported in a package", write_deep("Packages/DokumentumKit/Sources/DokumentumKit/A.swift",
+                                                         "import Foundation\nimport FoundationModels\n"),
+         "DokumentumKit/A.swift:2: imports FoundationModels"),
+        ("the model imported in another test", write_deep("Packages/DokumentumCore/Tests/DokumentumCoreTests/A.swift",
+                                                            "import FoundationModels\n"),
+         "DokumentumCoreTests/A.swift:1: imports FoundationModels"),
+        ("the classifier imports the model", write_deep(classifier, "import Foundation\nimport FoundationModels\n"), None),
+        ("its tests import the model", write_deep(classifier_tests, "@testable import DokumentumCore\nimport FoundationModels\n"),
+         None),
+        ("a comment that names the framework is fine", write_deep("Dokumentum/App/Model.swift",
+                                                                  "// FoundationModels is imported elsewhere\nimport FoundationModelsKit\n"),
+         None),
+        ("the server model in the classifier", write_deep(classifier, "let m = PrivateCloudComputeLanguageModel()\n"),
+         "FoundationModelsClassifier.swift:1: contains PrivateCloudCompute"),
+        ("the server model in its tests", write_deep(classifier_tests, "import FoundationModels\n\n_ = PrivateCloudComputeLanguageModel.self\n"),
+         "FoundationModelsClassifierTests.swift:3: contains PrivateCloudCompute"),
+        ("the server model in a comment", write_deep("Dokumentum/App/Model.swift", "/// not PrivateCloudCompute\n"),
+         "Dokumentum/App/Model.swift:1: contains PrivateCloudCompute"),
+        ("build output is not searched", write_deep("build/Gen/A.swift", "import FoundationModels\n"), None),
+        ("hidden folders are not searched", write_deep(".build/checkouts/A.swift", "import FoundationModels\n"), None),
         # Xcode reads a space inside the bracket as part of the pattern, so these conditions match no SDK.
         ("a space in a condition", in_xcconfig_last("DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx *] = Config/x.plist"),
          "[sdk=macosx *] uses a condition"),
@@ -1379,8 +1457,8 @@ def main():
     for problem in problems:
         print(f"error: {problem}")
     if not problems:
-        print(f"{PROJECT}, {XCCONFIG}, the targets, the entitlements, the scheme, the test plans and the Xcode Cloud "
-              "scripts are fine")
+        print(f"{PROJECT}, {XCCONFIG}, the targets, the entitlements, the scheme, the test plans, the Xcode Cloud "
+              "scripts and the model's imports are fine")
     return 1 if problems else 0
 
 

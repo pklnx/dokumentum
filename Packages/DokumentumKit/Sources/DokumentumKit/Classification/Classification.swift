@@ -114,6 +114,16 @@ public enum ClassificationLimits {
     public static let minimumRateLimitPause: TimeInterval = 60
     /// After a request threw "not ready", the next request waits this long (at most until the claim ends).
     public static let notReadyRetry: TimeInterval = 15 * 60
+    /// The most tokens of a document's text the model gets (T8): the head, where the sender, the date and the
+    /// subject are. About 3 s per request on the Mac (P-e).
+    public static let textTokens = 2000
+    /// The longest answer (`maximumResponseTokens`); also kept free of the context for it.
+    public static let responseTokens = 300
+    /// The first cut of the text is by bytes: fewer than measured for German and English (2.05 to 2.6, P-c), so
+    /// the first cut is rarely too long.
+    public static let bytesPerToken = 2.0
+    /// How often the text is counted at most before it is sent (`TextBudget.fit`).
+    public static let budgetRounds = 3
     /// Values a model writes for "unknown": dropped (compared after `MetadataName.normalized`).
     public static let placeholders: Set<String> = [
         "unbekannt", "unklar", "unknown", "n/a", "na", "none", "keine", "keiner", "kein", "-", "--", "?", "null",
