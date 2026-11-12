@@ -24,6 +24,12 @@ account-change check moved to the simulator (#31, P4).
 - The protocol writes **synthetic documents only** (#2, P2). The documents already in Development from #1 step 9 and
   #4 M1 (2026-11-11) stay and take part (R0); the Sync lab never writes to them directly.
 - No TestFlight build of Dokumentum is installed on either device during the protocol.
+- **Classification is switched back on before any sitting ends** (step Z). The Sync lab's **Classify on this device**
+  writes #8's per-device setting `classification.enabled` into the app's defaults. Debug and Release builds share the
+  bundle ID (`space.pklnx.Dokumentum`), so a TestFlight build installed on the same device later reads the value the
+  development build left. Release builds have no switch until #8 part 3 (#139), and no development build may go onto
+  the devices after the protocol (P3) to turn it back on: a switch left off would silently turn off classification
+  in the maintainer's TestFlight app.
 
 ## What the status shows
 
@@ -165,25 +171,31 @@ Sections:
   both dumps (Copy dump) into the results comment; the entity lines show where they differ.
 - Times come from the event log. Record per case: expected, what A showed, what B showed, the two dump hashes (first
   12 characters), and anything unexpected (a screenshot of the "iCloud Sync" detail if the footer shows a problem).
-- The protocol can stop between cases and continue another day; record which case was last.
+- The protocol can stop between cases and continue another day; record which case was last. **Every stop, planned
+  or early, first runs step Z** (classification on, both devices); the next sitting turns it off again on both, as
+  in R0, before its first case.
 
 ## Run 1 (merge gate of #31 part 2; about 3 hours, in two or three sittings)
 
 Order: **R0, 0, S1–S3, U1, Q** (DW1), then **C1–C6, T, K, L, R, C7** (DW2; C7 last because a stalled upload could
-hold up the cases after it), then **M1, M2**, then **U2, U3**. The classifier (#8 parts 1 and 2, #146 and #150) is in
+hold up the cases after it), then **M1, M2**, then **U2, U3**, and last **Z** (classification on, both devices).
+The classifier (#8 parts 1 and 2, #146 and #150) is in
 this build, so the cases of run 2 join run 1 (P5 of #31); they are described under "Run 2" below and belong to #8's
 Done-when, not to DW2.
 
 **Classification stays off until M1.** #8's classifier fills the title, date, correspondent, type and tags of a
 document nobody has edited yet. In the other cases it would write fields the case does not expect (L1–L3 measure the
 text layer against an edit, not a classification). So in R0 both devices turn **Classify on this device** off, and
-only M1/M2 turn it on, on A alone. Only M1/M2 use **Letter page**. After the protocol, turn it on again on both.
+only M1/M2 turn it on, on A alone. Only M1/M2 use **Letter page**. Step Z turns it on again on both, at the end and
+at every stop (see "Accounts and environments" for why).
 
 **R0 first, before anything else on a fresh launch:** open the Sync lab on both devices and, before creating
 anything, write down for each:
 - "Re-queue flag" (set or not set). The launch's pass runs before the lab opens, so this normally reads "set".
 - The "Last run" line, in particular `requeued N`: what this launch's pass re-queued. A later run replaces the line,
-  so read it first.
+  so read it first. Records that sync imported before the lab opened may already have started such a later run, so
+  the line can show `requeued 0` although the launch's pass re-queued documents; the expectation below (documents
+  end `done` with text) decides, not this line alone.
 - Then turn **Classify on this device** off on both (answer the question with **Write**). The line "Classification"
   reads `off`.
 - Let both apps run with the store loaded. Expected: every document a step-3 build imported before this run (the
@@ -195,8 +207,8 @@ anything, write down for each:
 2. The Sync lab's event log shows setup, import and export events. If it stays empty, the notification is not posted
    under SwiftData: record it ("last synced" cannot work then; a follow-up).
 3. The Mac syncs at all (a text document created on the Mac appears on the iPhone). If not, and the Console shows a
-   network denial, the sandboxed Mac needs `com.apple.security.network.client`: record it and stop; that is a
-   follow-up change with its own review.
+   network denial, the sandboxed Mac needs `com.apple.security.network.client`: record it, run step Z and stop; that
+   is a follow-up change with its own review.
 4. **Dates in the dump.** Once that document is `done` on both, **Export state** on both (Dates: *round to nearest
    ms*) and compare the first lines.
    - Equal: keep *round to nearest ms* for the whole run.
@@ -301,8 +313,8 @@ never the title, date or metadata)
 - **Recovery before M1:** wait until neither event log shows an event `running` (at most 15 minutes). Then change a
   title on A and check that B shows it, and the other way round. If an export keeps failing (the same failed event
   repeating), use **Delete directly** on the two C7 documents on the device that wrote them, wait for the event log
-  to settle and check both directions again. Record what was needed. If sync still does not recover, stop the run
-  here and record it: M1/M2 and U2/U3 then run in another sitting.
+  to settle and check both directions again. Record what was needed. If sync still does not recover, record it, run
+  step Z and stop the run here: M1/M2 and U2/U3 then run in another sitting.
 
 **U2, U3, the status under failure (last)**
 - **U2:** A offline; change a title on A. Record what A's footer shows (the mirroring may just wait without an error).
@@ -315,15 +327,24 @@ never the title, date or metadata)
      second Apple Account that is not the maintainer's own; without one, step 3 is recorded as not run.
   4. Record what happened to the local documents after each step (kept, removed, re-downloaded).
 
+**Z, classification on, both devices (closing step; also at every stop)**
+- On the Mac and on the iPhone: open the Sync lab, turn **Classify on this device** on (answer the question with
+  **Write**) and check that the line "Classification" reads `on`. Record it in the results row Z, for both devices.
+- Run it at the end of run 1 and before every stop: at the end of a sitting, after step 0 stops (entitlement), after
+  C7's recovery fails, when M1/M2 are stopped or skipped, and before closing the apps for any other reason (for
+  example a crash or the end of the day). A later sitting turns it off again on both before its first case.
+
 ## Run 2 (M1, M2; about 30 minutes, run within run 1 on this build)
 
 Classification against an edit on the other device (#8 M3, its review N1, Done-when item 3). It needs a build in
 which the processing queue classifies, which is #8 part 2 (#150); with #8 part 1 alone no document is ever
 classified. Both are on `main` and in the part-2 PR head, so M1 and M2 run within run 1, after R and before U2/U3 (P5
-of #31); if they are skipped there, they run before the first TestFlight build. No takeover, so no launch argument.
+of #31); if they are skipped there, run step Z anyway, and M1/M2 run before the first TestFlight build. No takeover,
+so no launch argument.
 That A classified shows in A's Sync lab: "Last run" reads `classified 1` right after that run, and the document's row
 gains the suggested correspondent or type. If the row stays without suggestions (the on-device model unavailable on
-A), record that and stop the case.
+A), record that, stop the case (also M2 if M1 stopped), turn the switch on again on B as below, and continue with
+U2/U3; step Z still closes the run.
 
 **Before M1:** on A only, turn **Classify on this device** on (the line reads `on`); B stays off, so B never
 classifies. After M2, turn it on again on B too, so both devices are back at the default.
@@ -357,7 +378,6 @@ Filled from the runs. One row per case; the dump columns hold the first 12 chara
 | C4 | | | | | | | | |
 | C5 | | | | | | | | |
 | C6 | | | | | | | | |
-| C7 | | | | | | | | |
 | T-A | | | | | | | | |
 | T-B | | | | | | | | |
 | T-C | | | | | | | | |
@@ -369,10 +389,12 @@ Filled from the runs. One row per case; the dump columns hold the first 12 chara
 | L3 | | | | | | | | |
 | R1 | | | | | | | | |
 | R2 | | | | | | | | |
-| U2 | | | | | | | | |
-| U3 | | | | | | | | |
+| C7 | | | | | | | | |
 | M1 | | | | | | | | |
 | M2 | | | | | | | | |
+| U2 | | | | | | | | |
+| U3 | | | | | | | | |
+| Z (classification on, both) | | | | | | | | |
 
 Where each result goes besides this table: K onto #4 (M4), R onto #6, Q onto #7, M onto #8, T-A–T-C onto #3; DW1 and
 DW2 onto #2 through #31's part-2 PR.
