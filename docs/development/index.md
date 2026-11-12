@@ -513,7 +513,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   `ProcessingScheduler.start`. Tests use a stub (`StubClassifier`); the model never runs in the queue's tests.
   - **The state** `classify` (frozen enum, raw `"classify"`; no schema change). The text result write sets it instead of
     `done` when the classifier is not `unavailable` on this device, the switch is on (`ClassificationSettings`,
-    per-device key `classification.enabled`, default on, read at each decision; its UI is part 3) and the document is
+    per-device key `classification.enabled`, default on, read at each decision; its UI is the settings' "Suggestions"
+    section, see "Settings" under "Library UI") and the document is
     not older than the **cut-off** (P9): `classification.since`, written once, when this device's queue is first set
     up with a classifier (`ProcessingQueue.init`; the app creates it at launch before the share queue or a drop
     imports anything, so a document of that first launch is classified, review A N-c of #146); a document whose
@@ -597,6 +598,12 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     the correspondent matched to the existing record, the date 14.01.2026). It is skipped, with the availability as
     the reason, where the model is not available (possibly Xcode Cloud). On the development Mac they ran in the macOS
     plan and, unlike the plan's probe P-m, also on the iOS 27.0 simulator (#138).
+  - **The switch's consequences** (#8 part 3; P3, P4, plan review N8): the text result write on the device that
+    recognised the text decides whether a document gets `classify`, so a document added while the switch is off or the
+    model unavailable there is never classified, also not by the other device, and a switch turned on later does not
+    reach documents already `done`. Turning the switch off finishes documents waiting in `classify` on this device in
+    `done` without suggestions at the next run (the settings request one); a request already running finishes and
+    writes its answer. The settings say so in their footer.
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 
@@ -630,16 +637,35 @@ store on disk every save, a local one too, posts `NSPersistentStoreRemoteChange`
 be forgotten at nearly every read anyway (review N3 of #135). The fixed size keeps the Mac's row
 heights (#81): the hidden measuring copy shows the placeholder and loads nothing, and measures the same height. The
 processing state is shown only in the detail (`ProcessingStatusBar`, above the PDF or its placeholder): "Text
-recognition pending", "Recognising text…" or "Text recognition failed", and for a failed document "Try again"
+recognition pending", "Recognising text…", "Suggesting metadata…" (`classify`, #8 part 3: the text is there and the
+classification step will suggest metadata, on this device or the other) or "Text recognition failed", and for a failed
+document "Try again"
 (`LibraryModel.retryProcessing`, which reads the library again at once); not for a trashed document, which is not
 processed until it is restored. Nothing for a processed document; the rows
 show no state. The line's text is primary on the window's background, not on a material, and its identifier names
-the state (`documentDetail.processing.pending|running|failed`, `documentDetail.processing.retry`).
+the state (`documentDetail.processing.pending|running|classify|failed`, `documentDetail.processing.retry`).
+
+**Settings** (#8, part 3; maintainer decisions P3–P6, plan review N8). The Mac's Settings window (⌘,, the `Settings`
+scene) and, on the iPhone, a sheet from the sidebar's toolbar (gear, `settings.open`, "Done" `settings.done`) show
+`SettingsView` with one section, "Suggestions": the switch (`settings.suggestions.switch`), under it a note on the
+model's availability (`settings.suggestions.availability`: getting ready, or "Not available:" with the reason: the
+device is not eligible, Apple Intelligence is off with where to turn it on, or another reason), and a footer with what
+suggestions do, the privacy statement (`settings.suggestions.privacy`) and the per-device consequence (N8). The app's
+one `SuggestionSettings` holds the switch (`ClassificationSettings`, the key the queue reads; a change requests a
+queue run) and the classifier's availability, the same value the queue decides on; a settings view follows its changes
+while it is shown and reads it again when it appears. While the model is unavailable the switch is disabled and keeps
+its stored value; while it is getting ready the switch works. The note and the footer are primary text, medium weight
+(the audit fails regular-weight and secondary text in light on the Mac). An in-memory launch (tests, UI tests) keeps
+the switch in a suite of its own (`DokumentumApp.inMemorySettingsSuite`) that each such launch empties, so a UI test
+never changes the device's real setting. `-UITestClassifierAvailability <case>` (Debug builds: `available`, `notReady`,
+`deviceNotEligible`, `appleIntelligenceNotEnabled`, `other`) fixes the classifier's availability for the queue and the
+settings; `LibrarySmokeTests` uses it for the disabled switch with its reason and for the working switch.
 
 **Fixtures.** `Dokumentum/Features/Fixtures/` is `#if DEBUG` only, so a Release build contains no sample data
 (checked with `strings` on its binary). `FixtureCatalog` has the sample documents, with fixed `id`s and
 `instanceID`s (`5EED…`), and `SyntheticPDF` draws their PDFs; no real document is read. Each PDF sample gets its
-thumbnail as the importer makes it; the samples are processed except "Medical invoice" (pending), the annual
+thumbnail as the importer makes it; the samples are processed except "Medical invoice" (pending), the letter without
+a title (`classify`, for "Suggesting metadata…"), the annual
 statement with the long title and "Scanned receipt" (failed; the receipt is not a PDF), for the detail's status
 line. `LibrarySmokeTests` audits the failed line over the annual statement's PDF, not over a placeholder, whose
 description is a known false positive of the audit in light.

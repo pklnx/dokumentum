@@ -3,7 +3,8 @@ import DokumentumKit
 import SwiftUI
 
 /// The open document's processing state, only in the detail (maintainer decision P2 on #6): one line for a document
-/// that is pending, being processed or failed, and for a failed one a "Try again" button
+/// that is pending, being processed, waiting for its suggestions (`classify`, #8 part 3) or failed, and for a failed
+/// one a "Try again" button
 /// (`LibraryModel.retryProcessing(of:)`). Nothing for a processed document or a state of a newer build; the list rows
 /// show none of it.
 ///
@@ -15,15 +16,16 @@ struct ProcessingStatusBar: View {
 
     /// What the line says for each state; `nil` shows no line.
     enum Status: Equatable {
-        case pending, processing, failed
+        case pending, processing, classify, failed
 
         init?(_ state: ProcessingState) {
             switch state {
             case .pending: self = .pending
             case .processing: self = .processing
             case .failed: self = .failed
-            // `classify` gets its own line in part 3 of #8 (#139); until then it shows none, like a processed one.
-            case .done, .classify, .unknown: return nil
+            // Its text is there; the classification step (#8) suggests metadata, on this device or the other one.
+            case .classify: self = .classify
+            case .done, .unknown: return nil
             }
         }
 
@@ -31,6 +33,7 @@ struct ProcessingStatusBar: View {
             switch self {
             case .pending: "Text recognition pending"
             case .processing: "Recognising text…"
+            case .classify: "Suggesting metadata…"
             case .failed: "Text recognition failed"
             }
         }
@@ -39,6 +42,7 @@ struct ProcessingStatusBar: View {
             switch self {
             case .pending: "clock"
             case .processing: "text.viewfinder"
+            case .classify: "sparkles"
             case .failed: "exclamationmark.triangle"
             }
         }
@@ -47,6 +51,7 @@ struct ProcessingStatusBar: View {
             switch self {
             case .pending: AccessibilityID.detailProcessingPending
             case .processing: AccessibilityID.detailProcessingRunning
+            case .classify: AccessibilityID.detailProcessingClassify
             case .failed: AccessibilityID.detailProcessingFailed
             }
         }

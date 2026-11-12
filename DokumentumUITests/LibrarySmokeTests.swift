@@ -2,9 +2,10 @@ import XCTest
 
 /// The library on the sample documents (`-UITestSeed`): the sidebar filters, the tag tree expands,
 /// and the detail shows a PDF or why there is none. Rows show their first page's thumbnail, and the detail of a
-/// document whose text recognition failed says so and offers "Try again" (#6, part 4). The sidebar footer's sync line
-/// opens "iCloud Sync" (#31, with an injected status). On the iPhone the split view is a navigation stack, on the Mac
-/// three columns.
+/// document whose text recognition failed says so and offers "Try again" (#6, part 4), one waiting for its
+/// suggestions says that (#8, part 3). The sidebar footer's sync line opens "iCloud Sync" (#31, with an injected
+/// status). The settings show the suggestions switch and the model's availability (#8, part 3, with an injected
+/// availability). On the iPhone the split view is a navigation stack, on the Mac three columns.
 final class LibrarySmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test
     // cannot see the app's code.
@@ -34,6 +35,8 @@ final class LibrarySmokeTests: XCTestCase {
     private static let scannedReceipt = 9
     /// The annual statement with the long title (Inbox, a PDF whose text recognition failed).
     private static let annualStatement = 6
+    /// The letter without a title (Inbox, a PDF waiting for its suggestions, `classify`).
+    private static let letterWithoutTitle = 5
 
     override func setUp() {
         continueAfterFailure = false
@@ -129,11 +132,128 @@ final class LibrarySmokeTests: XCTestCase {
         ui.activate(Self.documentRow(Self.annualStatement))
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
         assertFailedProcessingCanBeTriedAgain(ui)
+        #if os(iOS)
+            goBack(ui)
+        #endif
+        assertClassifyLine(ui)
         ui.app.terminate()
 
         // The sync status line of a CloudKit store, injected (`-UITestSyncStatus`, #31 T7): a problem and "on".
         assertSyncStatusFooter(status: "storageFull", showsCode: true)
         assertSyncStatusFooter(status: "on", showsCode: false)
+
+        // The suggestions settings with an injected availability (`-UITestClassifierAvailability`, #8 part 3): turned
+        // off in the system (the switch disabled, the reason shown) and getting ready (the switch works).
+        assertSuggestionsSettings(availability: "appleIntelligenceNotEnabled", switchIsEnabled: false)
+        assertSuggestionsSettings(availability: "notReady", switchIsEnabled: true)
+    }
+
+    /// The letter without a title waits for its suggestions (`classify`): the detail says "Suggesting metadata…" above
+    /// its PDF, without "Try again", and passes the audit; on the Mac the line's text reaches 4.5:1.
+    @MainActor
+    private func assertClassifyLine(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
+        ui.activate(Self.documentRow(Self.letterWithoutTitle), file: file, line: line)
+        XCTAssertTrue(
+            ui.element("documentDetail.processing.classify").waitForExistence(timeout: 20),
+            "no “Suggesting metadata…”", file: file, line: line)
+        XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        XCTAssertFalse(ui.element("documentDetail.processing.retry").exists, "“Try again” while classifying")
+        ui.attachWindowScreenshot("12-processing-classify", to: self)
+        #if os(macOS)
+            ui.assertTextContrast("documentDetail.processing.classify", in: self, file: file, line: line)
+        #endif
+        ui.auditAccessibility("processing-classify", in: self, file: file, line: line)
+    }
+
+    /// With `-UITestClassifierAvailability <availability>` the settings (the Mac's Settings window through ⌘,, the
+    /// iPhone's sheet from the sidebar's toolbar) show the switch, enabled or not, the availability's note and the
+    /// privacy statement, and pass the audit. An enabled switch turns off and on again (the in-memory launch keeps the
+    /// switch in a suite of its own, never this Mac's real setting).
+    @MainActor
+    private func assertSuggestionsSettings(
+        availability: String, switchIsEnabled: Bool, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let ui = UITestApp()
+        ui.launch(extraArguments: ["-UITestClassifierAvailability", availability])
+        defer { ui.app.terminate() }
+        XCTAssertTrue(
+            ui.element("documentList").waitForExistence(timeout: 60), "no document list after the launch", file: file,
+            line: line)
+        #if os(iOS)
+            goBack(ui)
+            ui.activate("settings.open", file: file, line: line)
+        #else
+            ui.app.typeKey(",", modifierFlags: .command)
+        #endif
+        let toggle = ui.element("settings.suggestions.switch")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20), "the settings did not open", file: file, line: line)
+        XCTAssertEqual(toggle.isEnabled, switchIsEnabled, "the switch's state", file: file, line: line)
+        XCTAssertEqual(Self.isOn(toggle), true, "the switch is on by default", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("settings.suggestions.availability").exists, "no availability note", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("settings.suggestions.privacy").exists, "no privacy statement", file: file, line: line)
+        attachSettingsScreenshot(ui, "13-settings-\(availability)")
+        #if os(macOS)
+            ui.assertTextContrast("settings.suggestions.availability", in: self, file: file, line: line)
+            ui.assertTextContrast("settings.suggestions.privacy", in: self, file: file, line: line)
+        #endif
+        ui.auditAccessibility("settings-\(availability)", in: self, file: file, line: line)
+
+        if switchIsEnabled {
+            Self.flip(toggle)
+            XCTAssertTrue(
+                Self.waitForValue(toggle, on: false), "the switch did not turn off", file: file, line: line)
+            Self.flip(toggle)
+            XCTAssertTrue(Self.waitForValue(toggle, on: true), "the switch did not turn on", file: file, line: line)
+        }
+        #if os(iOS)
+            ui.activate("settings.done", file: file, line: line)
+            XCTAssertTrue(
+                ui.element("sidebar").waitForExistence(timeout: 10), "the sheet did not close", file: file, line: line)
+        #endif
+    }
+
+    /// The settings' own pixels: on the Mac the Settings window is not the library's, so the view's screenshot.
+    @MainActor
+    private func attachSettingsScreenshot(_ ui: UITestApp, _ name: String) {
+        #if os(macOS)
+            let attachment = XCTAttachment(screenshot: ui.element("settings").screenshot())
+            attachment.name = UITestApp.attachmentName(name)
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        #else
+            ui.attachWindowScreenshot(name, to: self)
+        #endif
+    }
+
+    /// A switch's value: "1"/"0" on the iPhone, a number on the Mac.
+    @MainActor
+    private static func isOn(_ toggle: XCUIElement) -> Bool? {
+        switch toggle.value {
+        case let number as NSNumber: number.boolValue
+        case let text as String: text == "1"
+        default: nil
+        }
+    }
+
+    /// Flips a switch: a click on the Mac; on the iPhone a tap at its trailing end, where the control is (a tap on
+    /// the row's centre lands on the label).
+    @MainActor
+    private static func flip(_ toggle: XCUIElement) {
+        #if os(macOS)
+            toggle.click()
+        #else
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        #endif
+    }
+
+    /// Waits until the switch shows `on`, by its value (a number on the Mac, text on the iPhone), bounded.
+    @MainActor
+    private static func waitForValue(_ toggle: XCUIElement, on: Bool) -> Bool {
+        let format = on ? "value == 1 OR value == '1'" : "value == 0 OR value == '0'"
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: toggle)
+        return XCTWaiter().wait(for: [expectation], timeout: 10) == .completed
     }
 
     /// With `-UITestSyncStatus <status>` the sidebar footer shows the CloudKit store's line (`sidebar.syncStatus`, not
