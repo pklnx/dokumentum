@@ -193,6 +193,25 @@ struct CloudSyncMonitorTests {
         #expect(harness.monitor.status.accountState == .available)
     }
 
+    /// A stale answer leaves the remembered user alone: an old account's ID arriving after a newer answer must not
+    /// make the next answer look like a switch (review of #149, N2).
+    @Test func aStaleAnswerDoesNotStoreItsUserRecordID() async {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let harness = Harness([
+            .init(.available, "X", gate: gate), .init(.available, "A"), .init(.available, "A"),
+        ])
+        await gate.reached()
+        harness.monitor.sceneBecameActive()
+        await harness.applied.wait()
+        gate.release()
+        await harness.dropped.wait()
+        #expect(harness.monitor.lastKnownUserRecordID == "A")
+        await harness.accountChanged(answers: 2)
+        #expect(!harness.monitor.status.accountChanged)
+        #expect(harness.line == .on(lastSynced: nil))
+    }
+
     @Test func theSceneBecomingActiveAsksAgain() async {
         let harness = Harness([.init(.available, "A"), .init(.restricted, "A")])
         await harness.applied.wait()

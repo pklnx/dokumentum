@@ -118,8 +118,16 @@ struct SyncStatusFooter: View {
         .background(.bar)
         .accessibilityIdentifier(content.accessibilityIdentifier)
         #if os(macOS)
-            .popover(isPresented: $isDetailPresented, arrowEdge: .top) {
-                SyncStatusDetailView(source: source)
+            // Anchored at the footer's trailing end, not its centre: the detail is wider than the sidebar, and centred
+            // on the footer it ran past the window's left edge (review of #149, N1). A one-point view there carries
+            // the popover: with `attachmentAnchor: .point(.topTrailing)` on the footer, the UI test saw none open.
+            .overlay(alignment: .topTrailing) {
+                Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+                .popover(isPresented: $isDetailPresented, arrowEdge: .top) {
+                    SyncStatusDetailView(source: source)
+                }
             }
         #else
             .sheet(isPresented: $isDetailPresented) {

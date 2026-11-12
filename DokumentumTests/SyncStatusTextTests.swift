@@ -45,16 +45,16 @@ struct SyncStatusTextTests {
             ),
             (
                 .syncOff(.restricted), "Sync off: iCloud is restricted on this device",
-                "Synchronisierung aus: iCloud ist auf diesem Gerät eingeschränkt"
+                "Sync aus: iCloud ist auf diesem Gerät eingeschränkt"
             ),
             (
                 .syncOff(.couldNotDetermine), "Sync off: the iCloud account could not be checked",
-                "Synchronisierung aus: der iCloud-Account konnte nicht geprüft werden"
+                "Sync aus: der iCloud-Account konnte nicht geprüft werden"
             ),
             (
                 .syncOff(.temporarilyUnavailable),
                 "Sync off: iCloud is temporarily unavailable; check your Apple Account in \(settings.0)",
-                "Synchronisierung aus: iCloud ist vorübergehend nicht verfügbar; prüfe deinen Apple Account in den "
+                "Sync aus: iCloud ist vorübergehend nicht verfügbar; prüfe deinen Apple Account in den "
                     + settings.1
             ),
             (.checking, "Checking iCloud…", "iCloud wird geprüft …"),
@@ -106,7 +106,7 @@ struct SyncStatusTextTests {
         #expect(rendered(SyncStatusText.storeLine(.sampleData), english) == "Sync off: sample data, not saved")
         #expect(
             rendered(SyncStatusText.storeLine(.sampleData), german)
-                == "Synchronisierung aus: Beispieldaten, nicht gespeichert")
+                == "Sync aus: Beispieldaten, nicht gespeichert")
     }
 
     @Test func eachAccountStateHasItsText() {

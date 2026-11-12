@@ -1340,12 +1340,12 @@
       }
     },
     "Sync off: %@" : {
-      "comment" : "Sidebar footer while the store does not sync; the argument is the reason, e.g. “this build has no iCloud access”.",
+      "comment" : "Sidebar footer while sync is off; the argument is the reason: for a store that does not sync, e.g. “this build has no iCloud access”; for the iCloud account of a synced store, e.g. “iCloud is restricted on this device”.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Synchronisierung aus: %@"
+            "value" : "Sync aus: %@"
           }
         }
       }
