@@ -338,6 +338,7 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
    program; to verify in App Store Connect, Xcode Cloud, Usage), and GitHub
    Actions on Linux runners for lint, the localisation check, the
    `DokumentumKit` tests and the secret scan. Section 4 lists the checks.
+   The repository is public since 2026-11-12; the split stays as decided.
 
 To settle inside the steps: the minimum OS against the CI runners' Xcode (step 0), what
 `pklnx/design-system` offers for a native app (step 8; it may only have web

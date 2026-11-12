@@ -1171,7 +1171,7 @@ CI_XCODEBUILD_ACTION=build-for-testing CI_XCODEBUILD_EXIT_CODE=0 CI_DERIVED_DATA
 
 ### Secret scan
 
-This repository is private, but credentials must still never be committed.
+This repository is public (since 2026-11-12), so credentials must never be committed.
 Three layers check for them:
 
 - **Pre-commit hook** (local, opt-in, see Setup): runs gitleaks on the staged

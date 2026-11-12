@@ -1,7 +1,7 @@
 # Handover
 
 ## State (2026-11-11)
-- Dokumentum (`pklnx/dokumentum`, private) replaces pklnx/document-archive and pklnx/paperless-go. Both are frozen, and there is no data migration. Plan: `docs/development/plan.md`.
+- Dokumentum (`pklnx/dokumentum`, public since 2026-11-12) replaces pklnx/document-archive and pklnx/paperless-go. Both are frozen, and there is no data migration. Plan: `docs/development/plan.md`.
 - Coordinator state, open tickets in order, and maintainer actions: the latest handover comment on issue #76 (https://github.com/pklnx/dokumentum/issues/76#issuecomment-6798451358). Read it first.
 - Issue #1 (repository and skeleton, `ready`): the parts are merged. On 2026-11-11 steps 3 and 9 passed for the Mac (signed, sandboxed build on the MacBook Air; results on #1). Open: steps 3 and 9 for the iPhone (with #4's M2/M3) and step 7.
 - Issue #2 (data model and sync): parts merged up to #30 (PR #56); #31 is open.
@@ -12,8 +12,8 @@
 
 ## Development machine
 - Signed builds and device runs: the maintainer's MacBook Air (M5), which replaced the MacBook Pro permanently on 2026-11-11 (maintainer decision on #1).
-- The maintainer's Mac mini (since 2026-11-10). Sessions, the coordinator's included, run through one Remote Control server for the workspace `/Users/robert/Mac Mini` (since 2026-11-11), which holds this repository, `dev-process`, `.coordination/reports/` and `evidence/`. Agent worktrees live in the session scratchpad.
-- Main working trees: dev-process's `/home/user/<repo>` (`briefs.md`, `decisions.md` Never 5) is `/Users/robert/Mac Mini/<repo>` on this machine; the workspace's `CLAUDE.md` says so.
+- The maintainer's Mac mini (since 2026-11-10). Sessions, the coordinator's included, run through one Remote Control server for the workspace folder (since 2026-11-11), which holds this repository, `dev-process`, `.coordination/reports/` and `evidence/`. Agent worktrees live in the session scratchpad.
+- Main working trees: dev-process's `/home/user/<repo>` (`briefs.md`, `decisions.md` Never 5) is `<workspace>/<repo>` on this machine; the workspace's own `CLAUDE.md` (outside this repository) names the paths.
 - `gh` runs as the bot account `robert-dot-pklnx-bot` (write access, no admin). Reviews stay COMMENT reviews with a verdict line (maintainer decision 2026-11-10).
 - Agents build unsigned and never touch signing. Setup and Mac pitfalls: `docs/development/index.md`, "Setup on the development Mac".
 - Agents and sessions share the Mac. Every `xcodebuild` run takes a shared lock directory (with several sessions, one fixed path outside any scratchpad; see #76), and long runs go to the background. macOS UI tests need an unlocked screen with no system dialog over the app.
