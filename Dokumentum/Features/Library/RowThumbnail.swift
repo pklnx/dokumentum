@@ -11,6 +11,9 @@ struct RowThumbnails {
 
 extension EnvironmentValues {
     @Entry var rowThumbnails: RowThumbnails?
+    /// The thumbnail's fixed size; the app's is `RowThumbnail.size`. `DocumentListViewTests` pass a smaller one, so
+    /// their rows' heights are their text's (#124's fixtures).
+    @Entry var rowThumbnailSize = RowThumbnail.size
 }
 
 /// The miniature of a document's first page at the leading edge of its list row (maintainer decision P1 on #6), on
@@ -18,11 +21,12 @@ extension EnvironmentValues {
 /// arrived (the Mac list measures rows by a hidden copy, #81). A neutral placeholder until the thumbnail is there.
 /// Decorative: hidden from VoiceOver, the row reads its sentence as before.
 struct RowThumbnail: View {
-    static let size = CGSize(width: 40, height: 56)
+    nonisolated static let size = CGSize(width: 40, height: 56)
 
     let instanceID: UUID
     @Environment(\.rowThumbnails) private var thumbnails
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.rowThumbnailSize) private var size
     @State private var loaded: (instanceID: UUID, image: CGImage)?
 
     private struct LoadKey: Hashable {
@@ -45,7 +49,7 @@ struct RowThumbnail: View {
                     .fill(Color.gray.opacity(0.25))
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(width: size.width, height: size.height)
         .accessibilityHidden(true)
         .task(id: LoadKey(instanceID: instanceID, revision: thumbnails?.revision)) {
             guard let thumbnails else { return }

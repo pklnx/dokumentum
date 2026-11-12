@@ -65,7 +65,8 @@ struct ProcessingStatusBar: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier(status.identifier)
                     Spacer(minLength: 8)
-                    if status == .failed, model.canRetryProcessing {
+                    // Not in the trash: a trashed document is not processed until it is restored (review N2 of #135).
+                    if status == .failed, document.deletedAt == nil, model.canRetryProcessing {
                         Button("Try again") {
                             Task { await model.retryProcessing(of: document.instanceID) }
                         }

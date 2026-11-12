@@ -122,14 +122,12 @@
             ) { window.occlusionState.contains(.visible) }
             try #require(visible)
 
-            // Document 1 is the oldest, so the list shows Document 3, 2, 1 from the top. Each title wraps, so a row is
-            // taller than its thumbnail (56 pt, #6 part 4) with and without the tag line, and the tag line changes its
-            // height.
+            // Document 1 is the oldest, so the list shows Document 3, 2, 1 from the top.
             let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
             let documents = (0..<3).map { index in
                 let date = start.addingTimeInterval(Double(index) * 60)
                 return LibraryDocument(
-                    instanceID: UUID(), title: "\(Self.longTitle) \(index + 1)", documentDate: date, createdAt: date,
+                    instanceID: UUID(), title: "Document \(index + 1)", documentDate: date, createdAt: date,
                     isInbox: arrival == .insertedOnTop || index == 0, tagIDs: tagRemoved ? [tag.instanceID] : [])
             }
             try await show(documents, arrival: arrival, source: source, model: model, window: window)
@@ -184,12 +182,11 @@
             }
         }
 
+        /// `RowHeights.rowsPerUpdate` of the list: the many-rows test needs more shown rows than one update replaces.
+        private static let rowsPerUpdate = 5
+
         /// A title that wraps at 270 and 320 pt and fits on one line at 700 pt.
         private static let longTitle = "Annual statement of the company pension fund for 2026"
-
-        /// The tag of the width tests' rows: its line makes a row with a one-line title taller than the row's
-        /// thumbnail (a fixed 56 pt, #6 part 4), so a title that wraps or unwraps changes the row's height.
-        private static let tag = TagRecord(instanceID: UUID(), parentInstanceID: nil, name: "Tax")
 
         /// A row inserted while the list is shown takes the height its content needs when the list column gets wider
         /// or narrower. Before #81 the table kept the height the row had when it was inserted: wider left a gap
@@ -214,13 +211,12 @@
             try #require(try await setListWidth(change.start, in: window))
 
             // The list shows the titles from the top: "Insurance policy renewal", the long one, "Lease".
-            source.tags = [Self.tag]
             let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
             let documents = ["Lease", Self.longTitle, "Insurance policy renewal"].enumerated().map { index, title in
                 let date = start.addingTimeInterval(Double(index) * 60)
                 return LibraryDocument(
                     instanceID: UUID(), title: title, documentDate: date, createdAt: date,
-                    isInbox: arrival == .insertedOnTop || index == 0, tagIDs: [Self.tag.instanceID])
+                    isInbox: arrival == .insertedOnTop || index == 0)
             }
             try await show(documents, arrival: arrival, source: source, model: model, window: window)
             // Every row laid out at its real height, and the long title on two lines at the start width when the
@@ -279,15 +275,14 @@
             try #require(try await setListWidth(320, in: window))
 
             // 60 documents, inserted on top one per update; every third has the long title. Row r shows document
-            // index 59 - r, so rows 0, 3, …, 39, … have the long title. Each has the tag line (`tag`).
-            source.tags = [Self.tag]
+            // index 59 - r, so rows 0, 3, …, 39, … have the long title.
             let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
             for index in 0..<60 {
                 let date = start.addingTimeInterval(Double(index) * 60)
                 source.documents.append(
                     LibraryDocument(
                         instanceID: UUID(), title: index % 3 == 2 ? Self.longTitle : "Document \(index + 1)",
-                        documentDate: date, createdAt: date, isInbox: true, tagIDs: [Self.tag.instanceID]))
+                        documentDate: date, createdAt: date, isInbox: true))
                 model.reload()
                 try await TestSupport.waitUntil("the list does not have \(index + 1) rows") {
                     Self.table(in: window)?.numberOfRows == index + 1
@@ -364,15 +359,14 @@
             try #require(try await setListWidth(320, in: window))
 
             // 3000 older documents loaded at once, every third with the long title, so the new rows go in above shown
-            // ones. Each has the tag line (`tag`).
-            source.tags = [Self.tag]
+            // ones.
             let base = 3000
             let older = Date(timeIntervalSinceReferenceDate: 700_000_000)
             source.documents = (0..<base).map { index in
                 let date = older.addingTimeInterval(Double(index) * 60)
                 return LibraryDocument(
                     instanceID: UUID(), title: index % 3 == 0 ? Self.longTitle : "Document \(index + 1)",
-                    documentDate: date, createdAt: date, isInbox: true, tagIDs: [Self.tag.instanceID])
+                    documentDate: date, createdAt: date, isInbox: true)
             }
             model.reload()
             try await TestSupport.waitUntil("the list does not have \(base) rows") {
@@ -383,8 +377,7 @@
                 let date = start.addingTimeInterval(Double(index) * 60)
                 source.documents.append(
                     LibraryDocument(
-                        instanceID: UUID(), title: Self.longTitle, documentDate: date, createdAt: date, isInbox: true,
-                        tagIDs: [Self.tag.instanceID]))
+                        instanceID: UUID(), title: Self.longTitle, documentDate: date, createdAt: date, isInbox: true))
                 model.reload()
                 try await TestSupport.waitUntil("the list does not have \(base + index + 1) rows") {
                     Self.table(in: window)?.numberOfRows == base + index + 1
@@ -394,8 +387,13 @@
             // The new rows (all shown rows of a 900 pt window) laid out with the title on two lines.
             let settled = try await TestSupport.waitUntil("the new rows do not settle at their two-line height") {
                 let rows = Self.rows(in: window)
-                return rows.count > 10 && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
-                    && rows.prefix(10).allSatisfy { $0.content.frame.height > 50 }
+                // As many rows as the host realizes, more than one update replaces (`RowHeights.rowsPerUpdate`, 5); all
+                // shown rows are new ones with the long title (review B1 of #135: the CI host realized 10 rows of a
+                // fixture, the Mac mini 23, and `> 10` failed there).
+                return rows.count > Self.rowsPerUpdate
+                    && rows.allSatisfy { row, content in
+                        row.frame.height == content.frame.height && content.frame.height > 50
+                    }
             }
             try #require(settled)
             let before = Self.rows(in: window)[0].content.frame.height
@@ -413,7 +411,8 @@
             try #require(changed)
             let fits = try await TestSupport.waitUntil("a shown row is not as tall as its content") {
                 let rows = Self.rows(in: window)
-                return rows.count > 10 && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
+                return rows.count > Self.rowsPerUpdate
+                    && rows.allSatisfy { $0.row.frame.height == $0.content.frame.height }
             }
             if !fits {
                 let heights = Self.rows(in: window).map { "\($0.row.frame.height)/\($0.content.frame.height)" }
@@ -448,6 +447,14 @@
 
         // MARK: Hosting
 
+        /// The rows' thumbnail in these tests (#6, part 4): smaller than a one-line row (45 pt), so a row's height is its
+        /// text's, as in #124's measurements, and every content and width change below changes it. At the app's
+        /// 40 × 56 pt a short row is as tall as its thumbnail and a title that wraps changes nothing. Only lines with
+        /// an icon (tags) could make it taller, and with them the table measured the rows a sidebar switch brings in
+        /// again by itself, so #124's counter-proof (no generation in the row's identity) no longer failed for them
+        /// (review B2 of #135). The thumbnail's size is fixed either way; the row-height logic does not depend on it.
+        static let thumbnailSize = CGSize(width: 12, height: 16)
+
         /// A window on the first screen (the one with the menu bar), in front, so its table lays out as a shown one.
         private func hostedWindow(_ view: some View, width: CGFloat = 900, height: CGFloat = 500) throws -> NSWindow {
             let screen = try #require(NSScreen.screens.first, "the test host has a screen")
@@ -456,7 +463,7 @@
                 styleMask: [.titled, .closable, .resizable],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: view)
+            window.contentView = NSHostingView(rootView: view.environment(\.rowThumbnailSize, Self.thumbnailSize))
             window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 40))
             window.orderFrontRegardless()
             return window

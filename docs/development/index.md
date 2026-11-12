@@ -435,8 +435,9 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   after it. A `failed` document goes back to `pending` with this device's claim in one write under the discipline
   below (re-check `failed`, `RowState` check, one save), and this device's failure counter and claim sighting are
   cleared after the save, so the next run starts again at attempt 1 without a backoff. It writes nothing for a
-  document that is not `failed`, on an edit in the window (the counter stays), and while a stage of that document
-  runs on this device (`busy`: the other device's `failed` can arrive during this device's own retry). An in-memory
+  document that is not `failed`, on an edit in the window (the counter stays), and while the queue holds a stage of
+  that document on this device, from its start until the queue has handled its outcome (`busy`: the other device's
+  `failed` can arrive during this device's own retry). An in-memory
   store has no scheduler; its "Try again" writes through a queue that no scheduler runs.
 - **Reads.** The scan reads only `Document` rows that are not `done`; the PDF is read once per processed document, by
   key, in a context that ends with the load, before anything is written (a file whose data has not arrived causes no
@@ -495,11 +496,14 @@ grey placeholder until it is there; it is decorative and hidden from VoiceOver, 
 The source loads it (`LibrarySource.loadThumbnail`, `ThumbnailLoader` in Core: the document by key and its
 thumbnail by key in a short-lived context, decoded off the main actor at 168 px, the decoded images kept by
 `instanceID`, at most 300; `ThumbnailLoaderSQLTests`). A document without a thumbnail is looked for again at each
-read of the library (`LibraryModel.revision`), so one that arrives by sync shows. The fixed size keeps the Mac's row
+read of the library (`LibraryModel.revision`), so one that arrives by sync shows. Misses are not remembered: on a
+store on disk every save, a local one too, posts `NSPersistentStoreRemoteChange`, so a remembered miss would have to
+be forgotten at nearly every read anyway (review N3 of #135). The fixed size keeps the Mac's row
 heights (#81): the hidden measuring copy shows the placeholder and loads nothing, and measures the same height. The
 processing state is shown only in the detail (`ProcessingStatusBar`, above the PDF or its placeholder): "Text
 recognition pending", "Recognising text…" or "Text recognition failed", and for a failed document "Try again"
-(`LibraryModel.retryProcessing`, which reads the library again at once). Nothing for a processed document; the rows
+(`LibraryModel.retryProcessing`, which reads the library again at once); not for a trashed document, which is not
+processed until it is restored. Nothing for a processed document; the rows
 show no state. The line's text is primary on the window's background, not on a material, and its identifier names
 the state (`documentDetail.processing.pending|running|failed`, `documentDetail.processing.retry`).
 

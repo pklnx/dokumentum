@@ -57,10 +57,11 @@ public final class ThumbnailLoader: Sendable {
     static func data(for instanceID: UUID, in container: ModelContainer) -> Data? {
         let context = ModelContext(container)
         context.autosaveEnabled = false
-        var descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == instanceID })
-        descriptor.fetchLimit = 1
+        // Copies sharing an `instanceID` are read by the one rule, `RowRecords.oldestFirst` (review N4 of #135).
+        let descriptor = FetchDescriptor<Document>(predicate: #Predicate { $0.instanceID == instanceID })
         do {
-            guard let data = try context.fetch(descriptor).first?.thumbnail?.imageData, !data.isEmpty else {
+            let document = RowRecords.oldestFirst(try context.fetch(descriptor)).first
+            guard let data = document?.thumbnail?.imageData, !data.isEmpty else {
                 return nil
             }
             return data

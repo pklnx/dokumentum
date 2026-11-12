@@ -146,6 +146,24 @@ struct ProcessingRetryTests {
         #expect(await processing.retry(id) == .queued)
     }
 
+    /// The busy check covers the gap after the stage's task ended and before the queue handled its outcome (review N1
+    /// of #135): the queue still writes that stage's result then, so "Try again" must still be refused.
+    @Test func aStageThatEndedButIsNotHandledYetStillCountsAsRunning() {
+        let store = ProcessingFailures(defaultsSuite: "DokumentumTests-StageTracker-\(UUID().uuidString)")
+        defer { UserDefaults().removePersistentDomain(forName: store.defaultsSuite ?? "") }
+        let document = UUID()
+        let tracker = StageTracker()
+        let id = tracker.begin(attempt: store.begin(document, at: processingStart), outcome: FirstOutcome())
+        #expect(tracker.isRunning(document: document))
+        #expect(!tracker.isRunning(document: UUID()))
+
+        tracker.ended(id)
+        #expect(tracker.isRunning(document: document), "ended, not handled yet")
+
+        tracker.finish(id)
+        #expect(!tracker.isRunning(document: document))
+    }
+
     /// The scheduler's "Try again" writes through its queue and then runs it, which processes the document.
     @MainActor
     @Test func theSchedulersTryAgainRunsTheQueue() async throws {

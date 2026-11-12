@@ -239,8 +239,9 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     /// "Try again" for a `failed` document (#6, P2): sets it back to `pending` with this device's claim, so this
     /// device processes it at once, in one write under the discipline (re-check `failed`, `RowState` check, one save,
     /// nothing written on a mismatch), then clears this device's failure counter (and its claim sighting), so the
-    /// next run starts again from attempt 1 without a backoff. Refused (`busy`) while a stage of this document runs:
-    /// this device can be retrying a `failed` document itself when its own counter is below the limit. The method
+    /// next run starts again from attempt 1 without a backoff. Refused (`busy`) while the queue holds a stage of this
+    /// document, from its start until the queue has handled its outcome (`StageTracker.isRunning`): this device can be
+    /// retrying a `failed` document itself when its own counter is below the limit. The method
     /// has no suspension, so no run of this queue interleaves with it; a run that decided on the document before and
     /// has not written its claim yet finds the state changed and writes nothing. The caller asks for a run.
     public func retry(_ instanceID: UUID) -> ProcessingRetryOutcome {
