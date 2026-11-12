@@ -35,18 +35,19 @@ struct SettingsView: View {
             } header: {
                 Text(SuggestionSettingsText.section)
             } footer: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(SuggestionSettingsText.explanation)
-                    Text(SuggestionSettingsText.privacy)
-                        .accessibilityIdentifier(AccessibilityID.settingsSuggestionsPrivacy)
-                    Text(SuggestionSettingsText.perDevice)
-                }
-                // Callout, not footnote: the Mac audit reported "Contrast failed" on the footnote at 14.94:1
-                // (measured from its pixels), and passes the callout medium of the note above.
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                #if os(macOS)
+                    about
+                #endif
             }
+            #if os(iOS)
+                // On the iPhone the same texts are a row without a background, below the section: in the section's
+                // footer the audit reported "Dynamic Type font sizes are partially unsupported" on them (#139), while
+                // the availability note, a row in the same font, passes.
+                Section {
+                    about
+                        .listRowBackground(Color.clear)
+                }
+            #endif
         }
         .formStyle(.grouped)
         // Read again on each appearance: the observation runs only while the view is shown.
@@ -59,6 +60,21 @@ struct SettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
         #endif
         .accessibilityIdentifier(AccessibilityID.settings)
+    }
+
+    /// What suggestions do, the privacy statement (P6) and the per-device consequence (N8).
+    private var about: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(SuggestionSettingsText.explanation)
+            Text(SuggestionSettingsText.privacy)
+                .accessibilityIdentifier(AccessibilityID.settingsSuggestionsPrivacy)
+            Text(SuggestionSettingsText.perDevice)
+        }
+        // Callout, not footnote: the Mac audit reported "Contrast failed" on the footnote at 14.94:1
+        // (measured from its pixels), and passes the callout medium of the note above.
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.primary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
