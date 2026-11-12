@@ -23,7 +23,8 @@ struct FrozenEnumTests {
 
     @Test func processingStateRawValuesAreFrozen() {
         let table: [(ProcessingState, String)] = [
-            (.pending, "pending"), (.processing, "processing"), (.done, "done"), (.failed, "failed"),
+            (.pending, "pending"), (.processing, "processing"), (.classify, "classify"), (.done, "done"),
+            (.failed, "failed"),
         ]
         #expect(table.count == ProcessingState.allCases.count - 1)
         for (value, raw) in table {

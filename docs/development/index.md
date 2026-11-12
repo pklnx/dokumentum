@@ -484,7 +484,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   (`ProcessingConcurrentEditTests`, including #56's repair as the other writer, in both orders).
 - **Triggers** (`ProcessingScheduler`, stores on disk only): launch, every save that inserts a `Document` (an import,
   from any context), `scenePhase == .active` (`resume()`), every debounced store change, and the earlier of the next
-  expiry of another device's claim and the next backoff end that a run waited for (`ProcessingReport.nextWake`), while
+  expiry of another device's claim, the next backoff end that a run waited for and the own claim expiry of a document
+  waiting for the model (`ProcessingReport.nextWake`), while
   the app runs (on iOS also while a background task holds the work). No run starts while paused. One run at a time; requests during a run queue one more. The
   queue's own save is a store change; the run it triggers writes nothing, and the chain ends there. A document left in
   `processing` by a quit is processed again by the launch run.
@@ -494,7 +495,7 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   completes: the app's importer is wrapped (`BackgroundImportNotifying`), and every user import (files, photos, the
   share queue, #5's scans) goes through it, while a CloudKit import never does, so the system's progress ("Processing
   documents", "3 of 12 documents") never appears for documents of the other device. Its progress counts the user's
-  documents that are no longer open (`OpenDocuments`), updated after each store change; it completes when the runs
+  documents that are no longer open (`OpenDocuments`: `pending`, `processing` or `classify`, not trashed), updated after each store change; it completes when the runs
   drain (`ProcessingScheduler.didDrain`), with success only when none of the user's documents is open any more. If the system cannot start it now, the work waits for the
   foreground or the processing task. **The processing task** (`space.pklnx.Dokumentum.backgroundProcessing`,
   `BGProcessingTask`, no power or network needed) is asked for when the scene goes to the background with open
@@ -506,6 +507,68 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
   two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
   another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
+- **Classification** (#8, part 1; plan of #8, T1–T7, T10, T11). A second step after the text, one document at a time,
+  with the queue's claims, attempts, backoff, watchdog and interruptions. The queue runs it only with a classifier
+  (`DocumentClassifying`; the Foundation Models classifier and its wiring in `ProcessingScheduler.start` are part 2, so
+  until then the app's queue has none and every text write sets `done` as before). Tests use a stub
+  (`StubClassifier`); the model never runs in the queue's tests.
+  - **The state** `classify` (frozen enum, raw `"classify"`; no schema change). The text result write sets it instead of
+    `done` when the classifier is not `unavailable` on this device, the switch is on (`ClassificationSettings`,
+    per-device key `classification.enabled`, default on, read at each decision; its UI is part 3) and the document is
+    not older than the **cut-off** (P9): `classification.since`, written once at this device's first run with a
+    classifier; a document whose `createdAt` (the importing device's clock) is earlier, also one still waiting for its
+    text then or one of step 3's documents re-queued later, ends in `done` unclassified. An older build reads
+    `classify` as `unknown` and never touches it (`ProcessingClaimRules` skips `unknown` before every other rule);
+    `OpenDocuments` counts it as open (review N2). The rules treat `classify` like `pending` for claims, takeover,
+    trash and backoff; it needs the text record, not the file. After a text write that set `classify`, the same run
+    classifies that document next (T7). A document in `classify` always ends in `done`, never `failed`, so it is
+    classified at most once, on one device, and a field the user cleared later is never filled again.
+  - **Outcomes** (T4): no classifier, the switch off, or `unavailable` (`deviceNotEligible`,
+    `appleIntelligenceNotEnabled`) write `done` without a model call; `notReady` waits without an attempt until this
+    device's own claim is 6 hours old, then writes `done`: the staleness is checked before the claim renewal the rules
+    would make (`ClassificationWait`, N4), the report wakes the scheduler at the claim's expiry (`nextClaimEnd`), and
+    without an own claim the step claims first. A request that **throws** `ClassificationFailure.notReady` (the
+    availability said `available`) is decided on the claim as it was before this run renewed it, so a stale own claim
+    ends the wait there too (review B1 of #146); the queue then remembers it in memory, asks again at most every 15
+    minutes (`notReadyRetry`) and finishes the document at the claim's end without another request.
+    A text with fewer than 50 non-whitespace characters writes `done` without a model call. An answer fills the
+    empty fields and writes `done`; a decline (refusal, guardrail, unsupported language) writes `done` with nothing
+    filled and is logged as a fixed code, never retried (P8: no note; a decline whose `done` write meets another save
+    is kept in memory like an answer, so the next run finishes without asking). `rateLimited` gives the attempt back
+    and pauses classification in this queue until its reset date, else 15 minutes, and at least 1 minute, also for a
+    reset date in the past (`nextRetry`). Every other error and the 300 s
+    watchdog count an attempt in **the classification counter** (`ProcessingFailures` under `classificationFailures`,
+    T5, forgotten with the text counter when the document is `done` or gone, N3), with the backoff of the text step; the
+    third writes `done`. `interruptNow()` gives the attempt back to the counter it was counted in (`StageTracker`
+    records it). Both kinds of stage share the one `StageTracker`, so one stage runs at a time (T6).
+  - **Checks** (Kit, `SuggestionRules`, T10): the title trimmed, a placeholder dropped, cut at a word within 80
+    characters; the correspondent within 80 characters and **found in the text** (folded as the search folds words);
+    the type within 40 characters and 3 words; at most 3 distinct tags; the date a valid Gregorian date from 1900 to
+    next year **found in the text** in one of the forms of `DateForms` (`14.01.2026`, `14.1.26`, `2026-01-14`,
+    `14. Januar 2026`, `Jänner`, `14 January 2026`, `January 14, 2026`). A checked answer is kept in the queue's memory,
+    keyed by document and text record, until its write saved (T3); after a text record swap the model is asked again.
+    The memory (answers and waits) is dropped for a document that left `classify` another way.
+  - **Empty fields** (`ClassificationFields`, T2, P2, P7): correspondent, type and tags when none is set; title and
+    date only while the document was never edited (`modifiedAt == createdAt`; the date also `documentDate ==
+    createdAt`; an empty title always). So a file-name title and the import date are replaced until the first edit,
+    and an edit of any field (also the inbox flag, a trash and restore, a repair change) keeps title and date.
+  - **The result write** (`writeClassification`, T3): one synchronous call under the write discipline above. A fresh
+    context fetches the document and re-checks `classify`, the exact claim, not trashed and the same text record; it
+    decides each field's emptiness on that row; it resolves names against the live records it fetches
+    (`MetadataMatcher`: an equal normalized name in keeper order, else the longest word prefix either way, a tie none;
+    without a match a new correspondent or type is inserted, P1; a tag only when exactly one live tag has the name,
+    review N7, and never a new one); it sets only the fields it fills and `done`, without `touch()`, so a later edit is
+    still the first; its check reads the document row and every metadata row it found linked or links again
+    (`RowState.read`: a linked record must still be live under the same name). On a mismatch it rolls back and the
+    next run decides again with the cached answer. The suggested date is stored as the detail's date picker stores a
+    day: the time of day of the current `documentDate`, in the current calendar.
+  - **Never overwriting an edit** holds on this store: an edit saved before the fetch makes its field non-empty (and
+    title and date edited); one saved between the fetch and the check makes the write back off; the residual window
+    is the queue's. An edit made on the other device that has not arrived cannot be seen: #31's two-device protocol
+    gets a case for it (M3 of #8), which decides whether more than the claims is needed.
+  - **Reads:** the step reads the text row by key and the metadata rows, never a file or thumbnail
+    (`ProcessingSQLTests`). The known records passed to the classifier are the live ones, most used first, at most 100
+    correspondents and types and 150 tags.
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
 
@@ -612,7 +675,7 @@ states would fail in light on that false positive instead of only listing it.
 
 `LibrarySmokeTests` runs `performAccessibilityAudit(for: .all)` (`UITestApp.auditAccessibility`): an issue on
 an element with one of the app's identifiers fails the test, the others are listed in an `audit-…` text
-attachment of the run. On the Mac two issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
+attachment of the run. On the Mac three issues are accepted (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
@@ -622,6 +685,9 @@ issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit di
   stays (#74, maintainer decision 4).
 - `import.menu`, action, "Action is missing": the AppKit toolbar menu button that a SwiftUI `Menu` becomes.
   None of the 13 SwiftUI variants tried passes (#82). VoiceOver opening the menu: not verified, #3 Done-when.
+- `cleanup.filter`, action, "Action is missing": the cleanup sheet's Filter menu, also a SwiftUI `Menu`; a
+  pop-up `Picker` in its place is reported the same (#112). `ScanSmokeTests` audits the sheet; its corner
+  handles are steppers and its page an image for VoiceOver, so they have known roles.
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show
@@ -717,8 +783,8 @@ the group's queue folder and closes, and the app imports the items at launch and
 
 ## Page cleanup engine
 
-Step 4 (#5, part 1, #110) adds the engine in `DokumentumCore/Cleanup`; the cleanup sheet (part 3) and the
-scanner (part 2) build on it.
+Step 4 (#5, part 1, #110) adds the engine in `DokumentumCore/Cleanup`; the cleanup sheet (part 3, #112) builds
+on it (see "Scan and cleanup").
 
 - **An edit** (`PageEdit`) is applied in the photo's displayed orientation (EXIF applied when decoding), in
   this order: the perspective crop to four corners (`PageQuad`, normalised 0…1 from the top left,
@@ -736,8 +802,14 @@ scanner (part 2) build on it.
 - **The edited import** (`DocumentImporter.importEditedImages`): an `EditedImage` is one picked image with
   the pages it keeps (`EditedPage`: frame and edit; a multi-page TIFF can keep a page per frame). Pages are
   decoded, cleaned and drawn one at a time. A photo is decoded at `min(original, 2400 / longer side of the
-  corners' bounding box)`, so a cropped page keeps up to 2400 px on its longer side, then scaled to at most
-  2400 px. **The duplicate hash is the photo import's:** the original bytes of each image that keeps a page,
+  straightened page)`, so a cropped page keeps up to 2400 px on its longer side, then scaled to at most
+  2400 px. The straightened page's size is the longer of the corners' opposite edges, not their bounding box,
+  which is larger for a tilted page (#112, N2). ImageIO decodes a JPEG or HEIC at its full
+  size, a half, a quarter or an eighth and scales from there, so a decode just above half a photo costs a full
+  decode. A photo above 25 MP is therefore decoded at most at the largest of these fractions with at most 25 MP
+  (a 48 MP photo at half, 4000 × 3000 px), and its small crops have fewer than 2400 px (#112, N1). Peak footprint
+  of one page from a small crop of a 48 MP photo, measured on the Mac mini: JPEG 139 MiB, HEIC 169 MiB (decoding
+  in full: 551 MiB for the JPEG); a 24 MP iPhone photo is decoded in full (JPEG 282 MiB, HEIC 106 MiB). **The duplicate hash is the photo import's:** the original bytes of each image that keeps a page,
   once per image, in order; the edits do not enter it. So the same photos are a duplicate whatever the edits,
   and a TIFF split into frames hashes like `importImages` of the file. An image whose pages were all removed
   leaves the hash.
@@ -745,6 +817,53 @@ scanner (part 2) build on it.
   top left, a red band at the top right and grey text bars, optionally on tinted paper with a shadow gradient,
   and `TestPage.photographed`, the page warped onto a dark desk at known corners (optionally with EXIF
   orientation 6). `TestPixels.rgb` samples a `CGImage`.
+
+## Scan and cleanup
+
+Step 4 (#5): the document scanner on the iPhone (part 2, #111) and the photo cleanup on both devices (part 3,
+#112), both on the engine above and the one `DocumentImporter`.
+
+- **Scanner (iPhone).** "+" → **Scan…** opens VisionKit's `VNDocumentCameraViewController` full screen; it is
+  in the menu only where `VNDocumentCameraViewController.isSupported` (`ScanAvailability`; never the simulator
+  or the Mac). VisionKit does its own edges, filters, retake and page delete, so a scan has no cleanup of ours.
+  `DocumentScannerView` only forwards the camera's three ends; `CameraScan` wraps the scan behind the
+  `ScannedPages` seam; `ScanEncoder` encodes the pages (JPEG 0.9, at most 2400 px) one at a time off the main
+  actor; `ImportController.importScan` imports them as one `.scan` document, "Scan <date, time>", which opens.
+  The camera text is `NSCameraUsageDescription` in `Config/Info-iOS.plist`, German in
+  `Dokumentum/InfoPlist.xcstrings` (`check-project.py` requires it there and refuses it as a build setting).
+- **Cleanup (iPhone and Mac).** Photos picked with "+" → **Photos…** open the cleanup sheet
+  (`PhotoCleanupView`, `PhotoCleanupModel`) instead of importing at once; files, drops, the share extension and
+  scans have none (maintainer decision P2). A page per photo, a page per frame of a multi-page TIFF. Each page
+  starts with the full photo and the **Enhanced** filter; the detected edges replace the full photo when they
+  arrive, unless the user set the corners first (P3). Rotate turns clockwise only; there is no reordering.
+  *Save* imports the kept pages through `importEditedImages` ("Photo <date, time>", opened; duplicates by the
+  original bytes, P7); *Cancel* imports nothing. Only these two buttons close the sheet.
+- **One detection at a time.** One task decodes a page at 1600 px, makes its 240 px thumbnail, detects
+  (`VisionPageCornerDetector`) and lets the image go, the selected page first, then the others in order. Save
+  and Cancel cancel it; a page still waiting for its detection is saved with the edit it has then (the full
+  page), so Save never waits for Vision. Previews (1600 px) are kept only for the selected page and its
+  neighbours, plus the selected one with its filter.
+- **Geometry.** The large page shows the whole photo **turned by the edit's quarter turns**, as Save gives it,
+  with the outline and four handles (44 pt hit areas; VoiceOver: "Top left corner" and so on, named by where
+  they show, with an adjustable action that moves the corner by 2 % outwards or inwards). The corners stay in
+  the unturned photo's normalised coordinates; `QuadGeometry` maps a view point through the aspect fit and the
+  turns. A corner move goes through `PageQuad`'s `init` (clamped to the photo) and is refused when the page
+  would not be convex.
+- **Launch arguments** (Debug builds, in-memory store only): `-UITestScanSynthetic YES` puts **Scan…** in the
+  menu also in the simulator and imports two rendered pages instead of opening the camera;
+  `-UITestCleanupSynthetic YES` makes **Photos…** open the cleanup with two rendered photographed pages
+  (`SyntheticPhotographedPage`) instead of the Photos picker.
+- **What the tests cover.** `PhotoCleanupModelTests` (stub detector, rendered pages: one detection at a time,
+  selected first, Save with a pending detection, Cancel, user corners kept, previews), `QuadGeometryTests`
+  (fit, letterbox, quarter turns, clamping, convexity), `ImportControllerTests` (photos open the cleanup; Save
+  imports; left-out counting), `ScanImportTests` (the scanner behind its seam), and the UI test
+  `ScanSmokeTests.testScanAndCleanupLandInInbox`: on the iPhone "+" → Scan… → Inbox, then on both devices
+  "+" → Photos… → the sheet with two pages and handles, rotate page 1, remove page 2, Save → one "Photo …"
+  document. `ImportSmokeTests` on the iPhone picks two simulator sample photos and saves them through the
+  sheet.
+- **Only the device check covers** (#5, M2): the real camera, its permission prompt and denied access, a real
+  multi-page scan; the cleanup on a real photo of a letter (detection with glare, folds, a white table),
+  dragging the handles with a finger and with the Mac's pointer, and VoiceOver on the handles.
 
 ## Search
 
@@ -831,6 +950,14 @@ below).
 - **History errors:** an expired token (`SwiftDataError.historyTokenExpired`) rebuilds. Any other error
   is logged once per code; the first one of a launch rebuilds, later ones keep the index and the token,
   and the next event reads the history again.
+- **Failed text reads** (#132, N-c): a text row whose read fails keeps what is indexed for it and goes into a
+  retry set (held with the index, so a rebuild starts without it); the token still advances, since re-reading
+  the history would repeat every other change. The next history read reads the set's rows again by key, before
+  the new changes. A group of 25 whose read fails is read again row by row, so only the rows that really fail
+  stay; a row leaves the set when it is read, gone or deleted (a deleted row is not read). Documents whose relinked text could not be read
+  are kept and retried the same way, and the build's failed groups are read again in its last history read.
+  Each error code is logged once. A row that keeps failing costs one failed read per event; with no further
+  event (a save or a remote change) the retry waits, as the history does.
 - **Rebuild:** a fresh index is built aside through the same steps while the old one answers queries
   (state `.building`), then replaces it in one assignment. Until then both are in memory: about 2 × 66 MB
   for 5,000 documents (the plan review's measurement R-b on the Mac).
@@ -843,7 +970,9 @@ below).
   `phys_footprint` on the Mac (R-b); the benchmark reports the figure of the device it runs on.
 - **Tests:** `SearchIndexerTests` (build, a later text write, metadata edits, an early text linked later,
   a change during the build, two subscribers, a persistent history error, a query answered while an update's
-  history read is held), `SearchIndexerRemoteTests`
+  history read is held), `SearchIndexerRetryTests` (a failed text read found after the next event, a failing
+  row that does not hold its group, a failed read during the build, a failed relink read, a deleted retry row),
+  `SearchIndexerRemoteTests`
   (another container's write with the remote change, an expired history with the rebuild swap) and
   `SearchIndexerSQLTests` (`swift test` only: the metadata read names no large table; an update reads the
   changed text row by key).
@@ -935,7 +1064,7 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 | Check | Where | What it does |
 |---|---|---|
 | `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
-| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings` and of the share extension's `DokumentumShare/Localizable.xcstrings` has a finished German translation (a plural `one` and `other`), and none is stale. |
+| `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
 | Xcode Cloud `PR` | Xcode Cloud | Build and tests, see below. Checks: `Dokumentum \| PR \| Default - iOS`, `Dokumentum \| PR \| Default - macOS`, `Dokumentum \| PR`. |

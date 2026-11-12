@@ -295,6 +295,39 @@
         }
       }
     },
+    "Black & White" : {
+      "comment" : "Photo cleanup filter: only black and white.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schwarzweiß"
+          }
+        }
+      }
+    },
+    "Bottom left corner" : {
+      "comment" : "VoiceOver label of a corner handle in the photo cleanup sheet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ecke unten links"
+          }
+        }
+      }
+    },
+    "Bottom right corner" : {
+      "comment" : "VoiceOver label of a corner handle in the photo cleanup sheet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ecke unten rechts"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "comment" : "Button of the dialog that names a new correspondent, document type or tag.",
       "localizations" : {
@@ -405,6 +438,17 @@
         }
       }
     },
+    "Detected Edges" : {
+      "comment" : "Photo cleanup sheet: uses the page edges found in the photo again.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkannte Kanten"
+          }
+        }
+      }
+    },
     "Document" : {
       "comment" : "Mac menu with the commands for the open document.",
       "localizations" : {
@@ -482,6 +526,17 @@
         }
       }
     },
+    "Enhanced" : {
+      "comment" : "Photo cleanup filter: whitened paper, colours kept (the default).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optimiert"
+          }
+        }
+      }
+    },
     "Expand" : {
       "comment" : "VoiceOver action on a tag with nested tags.",
       "localizations" : {
@@ -521,6 +576,17 @@
         }
       }
     },
+    "Filter" : {
+      "comment" : "Photo cleanup sheet: the menu with the page's look (Original, Enhanced, Grayscale, Black & White).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter"
+          }
+        }
+      }
+    },
     "Find…" : {
       "comment" : "Mac Edit menu item (⌘F): puts the focus into the library's search field.",
       "localizations" : {
@@ -532,6 +598,17 @@
         }
       }
     },
+    "Full Page" : {
+      "comment" : "Photo cleanup sheet: uses the whole photo instead of the page's edges.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ganze Seite"
+          }
+        }
+      }
+    },
     "Go" : {
       "comment" : "Mac menu with Inbox and All Documents.",
       "localizations" : {
@@ -539,6 +616,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gehe zu"
+          }
+        }
+      }
+    },
+    "Grayscale" : {
+      "comment" : "Photo cleanup filter: no colours.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Graustufen"
           }
         }
       }
@@ -965,6 +1053,28 @@
         }
       }
     },
+    "Original" : {
+      "comment" : "Photo cleanup filter: the photo's pixels as they are.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        }
+      }
+    },
+    "Page %lld" : {
+      "comment" : "VoiceOver label of a page in the photo cleanup sheet; %lld is its number.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seite %lld"
+          }
+        }
+      }
+    },
     "Permanently delete %lld documents?" : {
       "comment" : "Title of the Empty Trash confirmation: how many documents it deletes.",
       "localizations" : {
@@ -1062,6 +1172,17 @@
         }
       }
     },
+    "Remove Page" : {
+      "comment" : "Photo cleanup sheet: leaves the selected page out of the document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seite entfernen"
+          }
+        }
+      }
+    },
     "Restore" : {
       "comment" : "Context menu, swipe action and detail button: takes the document out of the trash.",
       "localizations" : {
@@ -1080,6 +1201,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Eingeschränkt"
+          }
+        }
+      }
+    },
+    "Rotate" : {
+      "comment" : "Photo cleanup sheet: turns the selected page a quarter clockwise.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drehen"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "comment" : "Photo cleanup sheet: imports the kept pages as one document.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speichern"
+          }
+        }
+      }
+    },
+    "Saving photos…" : {
+      "comment" : "Shown at the bottom of the window while the cleaned photos are imported after Save.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos werden gespeichert …"
           }
         }
       }
@@ -1330,6 +1484,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Titel"
+          }
+        }
+      }
+    },
+    "Top left corner" : {
+      "comment" : "VoiceOver label of a corner handle in the photo cleanup sheet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ecke oben links"
+          }
+        }
+      }
+    },
+    "Top right corner" : {
+      "comment" : "VoiceOver label of a corner handle in the photo cleanup sheet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ecke oben rechts"
           }
         }
       }

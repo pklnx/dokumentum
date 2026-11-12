@@ -102,17 +102,48 @@ public enum PDFBuilder {
         return ImageCoding.scaled(edited, maxPixelSize: maxPixelSize)
     }
 
-    /// The longer side to decode an image of `size` (displayed) at, so that the part inside `quad` keeps
-    /// `maxPixelSize` on the longer side of its bounding box: `min(original, maxPixelSize / extent)`. The full
-    /// page gives `maxPixelSize`, as `makePDF(fromImageData:)`; an unknown size too.
+    /// The most pixels a photo is decoded at in full for its crop (finding N1 of review 5865079459 on #118): about a
+    /// 24 MP photo (5712 × 4284 px, 24.5 MP). ImageIO decodes a JPEG or HEIC at its full size, a half, a quarter or an
+    /// eighth and scales from there, so a decode just above half the photo costs a full decode. Measured on the Mac
+    /// mini (macOS 27, #112), peak footprint for a small crop of a 48 MP (8000 × 6000) JPEG: 551 MiB at full size,
+    /// 460 MiB at 5656 px (24 MP), 139 MiB at 4000 px (half); HEIC 200, 189 and 56 MiB. A 24.5 MP JPEG at full size:
+    /// 282 MiB, HEIC 106 MiB. So a larger photo is decoded at most at the largest of these fractions with at most
+    /// this many pixels, and its small crops have fewer than 2400 px.
+    static let maxDecodePixels: CGFloat = 25_000_000
+
+    /// The longer side to decode an image of `size` (displayed) at, so that the page inside `quad` keeps
+    /// `maxPixelSize` on its longer side once it is straightened: `min(original, maxPixelSize / extent)`, capped at
+    /// `decodeCap`. The extent is the straightened page's, the longer of the quad's opposite edges
+    /// (`CIPerspectiveCorrection` gives about that size), not its bounding box: a tilted page's box is larger than
+    /// the page (finding N2 of review 5865079459). The full page gives `maxPixelSize`, as `makePDF(fromImageData:)`;
+    /// an unknown size too.
     static func decodeSize(for quad: PageQuad, of size: CGSize?) -> Int {
         guard let size, size.width >= 1, size.height >= 1 else { return maxPixelSize }
         let longer = max(size.width, size.height)
-        let box = quad.boundingBox
-        let extent = max(box.width * size.width, box.height * size.height)
-        guard extent >= 1 else { return min(Int(longer), maxPixelSize) }
-        let needed = (CGFloat(maxPixelSize) * longer / extent).rounded(.up)
-        return Int(min(longer, max(needed, CGFloat(maxPixelSize))).rounded(.up))
+        let extent = straightenedExtent(of: quad, in: size)
+        let needed = extent >= 1 ? (CGFloat(maxPixelSize) * longer / extent).rounded(.up) : longer
+        let decode = min(longer, max(min(needed, decodeCap(for: size)), CGFloat(maxPixelSize)))
+        return Int(decode.rounded(.up))
+    }
+
+    /// The longer side of the largest of the photo's full size, half, quarter or eighth (ImageIO's decode steps)
+    /// with at most `maxDecodePixels`; an eighth at least.
+    static func decodeCap(for size: CGSize) -> CGFloat {
+        let longer = max(size.width, size.height)
+        var divisor: CGFloat = 1
+        while divisor < 8, size.width * size.height / (divisor * divisor) > maxDecodePixels { divisor *= 2 }
+        return (longer / divisor).rounded(.down)
+    }
+
+    /// The longer side, in pixels of an image of `size`, of the page `quad` straightens to: the longest of its four
+    /// edges' horizontal and vertical counterparts (top and bottom for the width, left and right for the height).
+    static func straightenedExtent(of quad: PageQuad, in size: CGSize) -> CGFloat {
+        func length(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            hypot((b.x - a.x) * size.width, (b.y - a.y) * size.height)
+        }
+        let width = max(length(quad.topLeft, quad.topRight), length(quad.bottomLeft, quad.bottomRight))
+        let height = max(length(quad.topLeft, quad.bottomLeft), length(quad.topRight, quad.bottomRight))
+        return max(width, height)
     }
 
     /// Builds the PDF one page at a time: `page(i)` is asked for each page just before it is drawn. Pages for

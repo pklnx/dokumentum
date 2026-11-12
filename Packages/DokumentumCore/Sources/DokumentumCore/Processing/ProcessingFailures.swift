@@ -12,7 +12,8 @@ import Synchronization
 /// Kept in the per-device `UserDefaults` (`ProcessingEnvironment.defaultsSuite`), never synced: a synced counter
 /// would be one more field both devices write. One dictionary under `defaultsKey`, keyed by the document's
 /// `instanceID`, each value `attempts` and `lastAttemptAt` (a plain number, step 3's form, reads as attempts without
-/// a time). A key is removed when a stage returns, and when the queue sees the document `done` or gone, so the keys
+/// a time). The classification step (#8) keeps its own counter, the same kind under `classificationDefaultsKey`
+/// (T5), so text and classification attempts never mix. A key is removed when a stage returns, and when the queue sees the document `done` or gone, so the keys
 /// do not grow.
 ///
 /// **Two callers, one lock (N2):** the queue (`begin`, `succeed`, `fail`, `remove`, `forget`) and
@@ -20,10 +21,14 @@ import Synchronization
 /// state of each attempt (running, then finished or interrupted) sit behind the same `Mutex`, so no update is
 /// lost. A refund happens only while its attempt is running; `succeed` marks the attempt finished and removes the
 /// counter in one step, so a late interruption neither refunds a finished attempt nor brings a counter back. One
-/// instance per defaults suite: the lock is the instance's.
+/// instance per defaults suite **and key**: the lock is the instance's and guards only its own key, so the text
+/// step's counter and the classification step's counter (#8, T5) are two instances on one suite, each the only
+/// writer of its key.
 public final class ProcessingFailures: Sendable {
-    /// The key in the per-device defaults.
+    /// The key of the text step's counter in the per-device defaults.
     public static let defaultsKey = "processingFailures"
+    /// The key of the classification step's counter (#8, T5).
+    public static let classificationDefaultsKey = "classificationFailures"
 
     /// One document's counter.
     public struct Entry: Equatable, Sendable {
@@ -59,16 +64,22 @@ public final class ProcessingFailures: Sendable {
 
     /// The `UserDefaults` suite; `nil` is `UserDefaults.standard`. A name, because `UserDefaults` is not `Sendable`.
     public let defaultsSuite: String?
+    /// The key of this counter in the suite.
+    public let key: String
     private let state = Mutex(State())
     /// Tests only: runs inside the lock, after the dictionary was read and before it is written.
     private let whileLocked: (@Sendable (Operation) -> Void)?
 
-    public convenience init(defaultsSuite: String?) {
-        self.init(defaultsSuite: defaultsSuite, whileLocked: nil)
+    public convenience init(defaultsSuite: String?, key: String = ProcessingFailures.defaultsKey) {
+        self.init(defaultsSuite: defaultsSuite, key: key, whileLocked: nil)
     }
 
-    init(defaultsSuite: String?, whileLocked: (@Sendable (Operation) -> Void)?) {
+    init(
+        defaultsSuite: String?, key: String = ProcessingFailures.defaultsKey,
+        whileLocked: (@Sendable (Operation) -> Void)?
+    ) {
         self.defaultsSuite = defaultsSuite
+        self.key = key
         self.whileLocked = whileLocked
     }
 
@@ -216,7 +227,7 @@ public final class ProcessingFailures: Sendable {
 
     private var entries: [String: Entry] {
         get {
-            let stored = defaults.dictionary(forKey: Self.defaultsKey) ?? [:]
+            let stored = defaults.dictionary(forKey: key) ?? [:]
             return stored.compactMapValues { value in
                 if let attempts = value as? Int { return Entry(attempts: attempts, lastAttemptAt: nil) }
                 guard let fields = value as? [String: Any], let attempts = fields[Self.attemptsKey] as? Int else {
@@ -227,7 +238,7 @@ public final class ProcessingFailures: Sendable {
         }
         set {
             if newValue.isEmpty {
-                defaults.removeObject(forKey: Self.defaultsKey)
+                defaults.removeObject(forKey: key)
                 return
             }
             let stored = newValue.mapValues { entry -> [String: Any] in
@@ -235,7 +246,7 @@ public final class ProcessingFailures: Sendable {
                 if let last = entry.lastAttemptAt { fields[Self.lastAttemptKey] = last }
                 return fields
             }
-            defaults.set(stored, forKey: Self.defaultsKey)
+            defaults.set(stored, forKey: key)
         }
     }
 }
