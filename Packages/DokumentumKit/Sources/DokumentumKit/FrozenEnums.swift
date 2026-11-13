@@ -1,4 +1,4 @@
-// Frozen enums: values that sync as raw strings (the `*Raw` fields on `Document`).
+// Frozen enums: values that sync as raw strings (the `*Raw` fields on the models).
 //
 // **The rule: raw values never change; new cases may be added.** Another device may run an older or a
 // newer build, so a value this build does not know is normal. Reading maps it to a fallback case; the
@@ -81,6 +81,48 @@ public enum ProcessingState: Hashable, Sendable, CaseIterable {
         case .classify: "classify"
         case .done: "done"
         case .failed: "failed"
+        case .unknown: nil
+        }
+    }
+}
+
+/// How a tag's, correspondent's or document type's matching rule compares its pattern with a document's text
+/// (#10). Stored on the record (`matchModeRaw`), synced. Unknown values read as `.unknown`, which has no stored
+/// value and never matches, so an older build leaves a newer mode alone.
+public enum MatchMode: Hashable, Sendable, CaseIterable {
+    /// No rule: the default of every record.
+    case none
+    /// One of the pattern's words or quoted phrases occurs.
+    case any
+    /// Every one of the pattern's words or quoted phrases occurs, in any order.
+    case all
+    /// The whole pattern occurs as consecutive words.
+    case exact
+    /// The pattern is a regular expression, case-insensitive.
+    case regex
+    /// Read-only: a value from a newer build. It has no raw value, so it can never be written.
+    case unknown
+
+    /// Never fails: an unknown value from a newer build reads as `.unknown`.
+    public init(storedValue: String) {
+        switch storedValue {
+        case "": self = .none
+        case "any": self = .any
+        case "all": self = .all
+        case "exact": self = .exact
+        case "regex": self = .regex
+        default: self = .unknown
+        }
+    }
+
+    /// The string to store for this case; `nil` for `.unknown`, which a setter must leave out.
+    public var storedValue: String? {
+        switch self {
+        case .none: ""
+        case .any: "any"
+        case .all: "all"
+        case .exact: "exact"
+        case .regex: "regex"
         case .unknown: nil
         }
     }

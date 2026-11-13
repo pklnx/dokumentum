@@ -165,9 +165,9 @@ extension imports neither store nor model (see 3.4).
 | `DocumentFile` | id, instanceID, createdAt, documentID, pdfData (external storage), document |
 | `DocumentThumbnail` | id, instanceID, createdAt, documentID, imageData (external storage), document |
 | `DocumentText` | id, instanceID, createdAt, documentID, extractedText, document |
-| `Tag` | id, instanceID, name, colorHex, createdAt, mergedIntoID, mergedAt, parent (nested tags), children, documents |
-| `Correspondent` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, documents |
-| `DocumentType` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, documents |
+| `Tag` | id, instanceID, name, colorHex, createdAt, mergedIntoID, mergedAt, matchModeRaw, matchPattern, parent (nested tags), children, documents |
+| `Correspondent` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, matchModeRaw, matchPattern, documents |
+| `DocumentType` | id, instanceID, name, createdAt, mergedIntoID, mergedAt, matchModeRaw, matchPattern, documents |
 
 Built in step 1 as `DokumentumSchemaV1` (#29). Names beyond the first draft:
 - `instanceID` on every entity: set at insert, never changed or copied. It is
@@ -184,10 +184,16 @@ Built in step 1 as `DokumentumSchemaV1` (#29). Names beyond the first draft:
 - `DocumentText` instead of `Document.extractedText` (see 3.2). A document's
   file and text are created once, at import, in the importer's save; later
   steps write them in place.
+- `matchModeRaw` and `matchPattern` on tags, correspondents and types (step 9,
+  #10): the record's matching rule, as in paperless-ngx; `""` is no rule. The
+  mode is the frozen enum `MatchMode` (none, any, all, exact, regex), always
+  case-insensitive. Added additively as `DokumentumSchemaV2` (#10, part 1a),
+  so V1 stores open through one lightweight stage.
 
-Later steps add fields additively (notes, favorite, ASN, deadlines, matching
-rules, saved views, trash retention). Names follow the old app where they fit, so the
-archive folder format (step 16) can stay compatible with its version 1.x.
+Later steps add fields additively (notes, favorite, ASN, deadlines, saved
+views, trash retention; matching rules are the first, in V2). Names follow
+the old app where they fit, so the archive folder format (step 16) can stay
+compatible with its version 1.x.
 
 ### 3.4 Processing pipeline
 Import → PDF (images become PDF pages) → store → background processing:

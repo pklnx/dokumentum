@@ -61,6 +61,9 @@ enum RowState: Equatable, Sendable {
         var createdAt: Date
         var mergedIntoID: UUID?
         var mergedAt: Date?
+        /// The matching rule (#10): a rule edited in a writer's window makes it back off.
+        var matchModeRaw: String
+        var matchPattern: String
         var parent: UUID?
     }
 
@@ -72,6 +75,9 @@ enum RowState: Equatable, Sendable {
         var createdAt: Date
         var mergedIntoID: UUID?
         var mergedAt: Date?
+        /// The matching rule (#10), as on `TagRow`.
+        var matchModeRaw: String
+        var matchPattern: String
     }
 
     /// A file, thumbnail or text; `extractedText` only for a text.
@@ -126,22 +132,24 @@ enum RowState: Equatable, Sendable {
         .tag(
             TagRow(
                 id: tag.id, instanceID: tag.instanceID, name: tag.name, colorHex: tag.colorHex,
-                createdAt: tag.createdAt,
-                mergedIntoID: tag.mergedIntoID, mergedAt: tag.mergedAt, parent: tag.parent?.instanceID))
+                createdAt: tag.createdAt, mergedIntoID: tag.mergedIntoID, mergedAt: tag.mergedAt,
+                matchModeRaw: tag.matchModeRaw, matchPattern: tag.matchPattern, parent: tag.parent?.instanceID))
     }
 
     static func capture(_ record: Correspondent) -> RowState {
         .metadata(
             MetadataRow(
                 id: record.id, instanceID: record.instanceID, name: record.name, createdAt: record.createdAt,
-                mergedIntoID: record.mergedIntoID, mergedAt: record.mergedAt))
+                mergedIntoID: record.mergedIntoID, mergedAt: record.mergedAt, matchModeRaw: record.matchModeRaw,
+                matchPattern: record.matchPattern))
     }
 
     static func capture(_ record: DocumentType) -> RowState {
         .metadata(
             MetadataRow(
                 id: record.id, instanceID: record.instanceID, name: record.name, createdAt: record.createdAt,
-                mergedIntoID: record.mergedIntoID, mergedAt: record.mergedAt))
+                mergedIntoID: record.mergedIntoID, mergedAt: record.mergedAt, matchModeRaw: record.matchModeRaw,
+                matchPattern: record.matchPattern))
     }
 
     static func capture(_ file: DocumentFile) -> RowState {

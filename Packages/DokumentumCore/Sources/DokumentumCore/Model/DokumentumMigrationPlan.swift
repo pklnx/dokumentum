@@ -11,10 +11,18 @@ import SwiftData
 ///   checksum, which SwiftData rejects.
 public enum DokumentumMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [DokumentumSchemaV1.self]
+        [DokumentumSchemaV1.self, DokumentumSchemaV2.self]
     }
 
     public static var stages: [MigrationStage] {
-        []
+        [.lightweight(fromVersion: DokumentumSchemaV1.self, toVersion: DokumentumSchemaV2.self)]
+    }
+
+    /// The current schema version: the last of `schemas`. The one place that names it for the store
+    /// (`ArchiveStore.schema`), the CloudKit schema initializer (`DebugSchemaInitializer.makeContainer(at:)`) and
+    /// `RowStateTests`, so a new version needs no edit there (review B1 of #10).
+    public static var current: any VersionedSchema.Type {
+        // `schemas` is a literal with at least one element.
+        schemas[schemas.count - 1]
     }
 }

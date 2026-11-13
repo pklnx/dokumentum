@@ -2,15 +2,15 @@ import DokumentumKit
 import Foundation
 import SwiftData
 
-// The current schema version's models. Features name these, never a `DokumentumSchemaV<N>`; a new
-// schema version moves the typealiases.
-public typealias Document = DokumentumSchemaV1.Document
-public typealias DocumentFile = DokumentumSchemaV1.DocumentFile
-public typealias DocumentThumbnail = DokumentumSchemaV1.DocumentThumbnail
-public typealias DocumentText = DokumentumSchemaV1.DocumentText
-public typealias Tag = DokumentumSchemaV1.Tag
-public typealias Correspondent = DokumentumSchemaV1.Correspondent
-public typealias DocumentType = DokumentumSchemaV1.DocumentType
+// The current schema version's models (`DokumentumMigrationPlan.current`). Features name these, never a
+// `DokumentumSchemaV<N>`; a new schema version moves the typealiases.
+public typealias Document = DokumentumSchemaV2.Document
+public typealias DocumentFile = DokumentumSchemaV2.DocumentFile
+public typealias DocumentThumbnail = DokumentumSchemaV2.DocumentThumbnail
+public typealias DocumentText = DokumentumSchemaV2.DocumentText
+public typealias Tag = DokumentumSchemaV2.Tag
+public typealias Correspondent = DokumentumSchemaV2.Correspondent
+public typealias DocumentType = DokumentumSchemaV2.DocumentType
 
 extension Document {
     /// How the document came into the archive. An unknown stored value (from a newer build) reads as
@@ -57,14 +57,44 @@ extension Document {
 extension Tag {
     /// Not merged away by the repair. Tombstones are hidden from every list and picker.
     public var isLive: Bool { mergedIntoID == nil }
+
+    /// How this record's matching rule compares its pattern (#10). An unknown stored value reads as `.unknown`;
+    /// setting `.unknown`, or the value it already reads as, writes nothing.
+    public var matchMode: MatchMode {
+        get { MatchMode(storedValue: matchModeRaw) }
+        set {
+            guard newValue != matchMode, let stored = newValue.storedValue else { return }
+            matchModeRaw = stored
+        }
+    }
 }
 
 extension Correspondent {
     /// Not merged away by the repair. Tombstones are hidden from every list and picker.
     public var isLive: Bool { mergedIntoID == nil }
+
+    /// How this record's matching rule compares its pattern (#10). An unknown stored value reads as `.unknown`;
+    /// setting `.unknown`, or the value it already reads as, writes nothing.
+    public var matchMode: MatchMode {
+        get { MatchMode(storedValue: matchModeRaw) }
+        set {
+            guard newValue != matchMode, let stored = newValue.storedValue else { return }
+            matchModeRaw = stored
+        }
+    }
 }
 
 extension DocumentType {
     /// Not merged away by the repair. Tombstones are hidden from every list and picker.
     public var isLive: Bool { mergedIntoID == nil }
+
+    /// How this record's matching rule compares its pattern (#10). An unknown stored value reads as `.unknown`;
+    /// setting `.unknown`, or the value it already reads as, writes nothing.
+    public var matchMode: MatchMode {
+        get { MatchMode(storedValue: matchModeRaw) }
+        set {
+            guard newValue != matchMode, let stored = newValue.storedValue else { return }
+            matchModeRaw = stored
+        }
+    }
 }

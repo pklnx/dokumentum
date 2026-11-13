@@ -33,21 +33,35 @@ struct FrozenEnumTests {
         }
     }
 
-    @Test(arguments: ["fax", "FILE", " file", "unknown", "queued"])
+    @Test func matchModeRawValuesAreFrozen() {
+        let table: [(MatchMode, String)] = [
+            (.none, ""), (.any, "any"), (.all, "all"), (.exact, "exact"), (.regex, "regex"),
+        ]
+        #expect(table.count == MatchMode.allCases.count - 1)
+        for (value, raw) in table {
+            #expect(value.storedValue == raw)
+            #expect(MatchMode(storedValue: raw) == value)
+        }
+    }
+
+    @Test(arguments: ["fax", "FILE", " file", "unknown", "queued", "ANY", "fuzzy", " regex"])
     func unknownValuesReadAsTheFallback(raw: String) {
         #expect(DocumentSource(storedValue: raw) == .file)
         #expect(TextSource(storedValue: raw) == .unknown)
         #expect(ProcessingState(storedValue: raw) == .unknown)
+        #expect(MatchMode(storedValue: raw) == .unknown)
     }
 
     @Test func anEmptyValueIsNoTextButAnUnknownSourceAndState() {
         #expect(TextSource(storedValue: "") == .none)
         #expect(DocumentSource(storedValue: "") == .file)
         #expect(ProcessingState(storedValue: "") == .unknown)
+        #expect(MatchMode(storedValue: "") == .none)
     }
 
     @Test func unknownHasNoStoredValueOfItsOwn() {
         #expect(TextSource.unknown.storedValue == nil)
         #expect(ProcessingState.unknown.storedValue == nil)
+        #expect(MatchMode.unknown.storedValue == nil)
     }
 }
