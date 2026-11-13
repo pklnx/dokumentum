@@ -160,8 +160,10 @@ private struct CornerHandle: View {
     let nudge: (_ outward: Bool) -> Void
 
     var body: some View {
+        // White sits on the colour (the ring), so the accent's fill role (#9, P4): white on it is 5.00:1 in light and
+        // dark. The tint's dark #be95ff under the white ring is 2.35:1, which the iPhone's audit fails (review of #192).
         Circle()
-            .fill(Color.accentColor)
+            .fill(Color(.accentFill))
             .overlay { Circle().stroke(.white, lineWidth: 2) }
             .frame(width: 22, height: 22)
             .frame(width: 44, height: 44)

@@ -76,8 +76,23 @@ DOKUMENTUM_IOS_APP_SCENES_Dokumentum = YES
 INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
 
-// Assets and previews. The AppIcon set stays empty until step 8.
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+// Assets and previews (step 8, P3 and P4 on #9; docs/development/index.md, "Look"). The app icon is
+// Dokumentum/AppIcon.icon, an Icon Composer bundle of text only: icon.json and the two SVG layers, copied
+// byte-identical from pklnx/design-system (regenerate there, copy here). actool builds the iOS and Mac renditions
+// from it. The accent has two roles: AccentColor is the tint (text, glyphs and system controls), AccentFill the
+// fill under white text. The share extension's own catalog has an AccentColor with the fill's value, because its
+// only accent use is the prominent OK button. check-project.py computes the contrast of both roles. One variable
+// per target, as for the platforms: the extension's catalog has no app icon (actool fails on a name it cannot find),
+// and the test targets have no catalog.
+DOKUMENTUM_APPICON_Dokumentum = AppIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = $(DOKUMENTUM_APPICON_$(TARGET_NAME))
+DOKUMENTUM_ACCENT_Dokumentum = AccentColor
+DOKUMENTUM_ACCENT_DokumentumShare = AccentColor
+// P4's Mac fallback, measured on #184: in dark mode the document list draws the selected row in #9671d1, derived from
+// the tint #be95ff, and white text on it reaches only 3.76:1. So the Mac app keeps the user's system accent, and the
+// brand shows there in the icon (and in AccentFill, which the app names itself).
+DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*] =
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = $(DOKUMENTUM_ACCENT_$(TARGET_NAME))
 ENABLE_PREVIEWS = YES
 
 // Build system. The synchronized folders would copy every .gitkeep into the app's resources, where

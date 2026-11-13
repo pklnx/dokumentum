@@ -54,7 +54,8 @@ struct TrashRowActions: ViewModifier {
                         identifier: document.isTrashed
                             ? AccessibilityID.rowSwipeRestore : AccessibilityID.rowSwipeMoveToTrash
                     )
-                    .tint(document.isTrashed ? .accentColor : .red)
+                    // White sits on the colour here, so the accent's fill role (#9, P4), not the tint.
+                    .tint(document.isTrashed ? Color(.accentFill) : .red)
                 }
                 // The same action for VoiceOver and other assistive technologies, named as the button (plan of
                 // #3, part 5): the row reads as one element (`DocumentRow`), so the swipe is no gesture they offer.

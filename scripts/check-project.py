@@ -66,12 +66,25 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   drops the target silently and reports success.
 - The Xcode Cloud scripts exist and are executable (Xcode Cloud ignores them otherwise), and
   .xcode-version holds a version.
+- The look (step 8, P3 and P4 on #9). The app icon is Dokumentum/AppIcon.icon, text only: icon.json parses, every
+  image-name exists in its Assets/ folder and is SVG text, no other file is there, and the layers are the byte-identical
+  copies of pklnx/design-system that ICON_SOURCE and ICON_LAYERS pin (sha256). The old AppIcon set, which would collide
+  with it, stays gone. TARGETS pins the app icon's name (the app only: the extension's catalog has none) and the
+  global accent per target: AccentColor for the iOS app and the extension, none for the Mac app (P4's fallback,
+  measured on #184).
+- The accent's contrast, computed from the colour sets with WCAG's formula (CONTRAST_ROLES): the tint (AccentColor) as
+  text on #ffffff and #f2f2f7 in light and on #000000, #1c1c1e and #2c2c2e in dark; white on the fill (AccentFill)
+  and on the extension's AccentColor, light and dark. Each pair reaches 4.5:1. The UISmoke audit does not see a closed
+  swipe action, hence this check.
+- No tracked file has a NUL byte in its first 8 KB: the repository holds text only, with no exceptions (plan of #9,
+  probe 2).
 
     python3 scripts/check-project.py                 # from the repository root
     python3 scripts/check-project.py --self-test
 """
-import json
 import fnmatch
+import hashlib
+import json
 import os
 import pathlib
 import plistlib
@@ -259,6 +272,42 @@ SHARE_INFO_CONTENT = {"NSExtension": {
 }}
 
 
+# The look (step 8, P3 and P4 on #9; docs/development/index.md, "Look"). The app icon is an Icon Composer bundle of
+# text only. A set and an .icon with the same name would collide, so the old AppIcon set stays gone.
+APP_ICON = "Dokumentum/AppIcon.icon"
+APP_ICON_JSON = f"{APP_ICON}/icon.json"
+APP_ICON_ASSETS = f"{APP_ICON}/Assets"
+APP_ICON_SET = "Dokumentum/Assets.xcassets/AppIcon.appiconset"
+# The layers are byte-identical copies of project/assets/Logos/products/ in pklnx/design-system at ICON_SOURCE, never
+# edited here. A new mark is generated there and copied here, with the new commit and sha256 in these two constants.
+ICON_SOURCE = "pklnx/design-system 526f6ed93f13e87395240f2e0595dde881bfde6c"
+ICON_LAYERS = {
+    "dokumentum-icon-layer-ink.svg": "f8009c858c69e11125c6146295984d52e99b98c7825fac9af704490acc8310fc",
+    "dokumentum-icon-layer-star.svg": "c1bc8922c74fbf4469e79ba51e3a6a189d581bd413e83f6b4e7cdc3f8728fe0f",
+}
+APP_ICON_SETTING = "ASSETCATALOG_COMPILER_APPICON_NAME"
+ACCENT_SETTING = "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"
+# The accent's two roles (P4): the tint (AccentColor) as text and glyphs on iOS's backgrounds, the fill (AccentFill,
+# and the extension's AccentColor, whose only use is the prominent OK button) under white text. Each colour must reach
+# MINIMUM_CONTRAST against every background of its role, in light and in dark; a colour set without a dark colour shows
+# its universal colour in dark too. The UISmoke audit does not see a closed swipe action, hence this computed check.
+APP_TINT = "Dokumentum/Assets.xcassets/AccentColor.colorset"
+APP_FILL = "Dokumentum/Assets.xcassets/AccentFill.colorset"
+SHARE_FILL = "DokumentumShare/Assets.xcassets/AccentColor.colorset"
+MINIMUM_CONTRAST = 4.5
+WHITE = 0xFFFFFF
+TINT_BACKGROUNDS = {"light": [0xFFFFFF, 0xF2F2F7], "dark": [0x000000, 0x1C1C1E, 0x2C2C2E]}
+FILL_BACKGROUNDS = {"light": [WHITE], "dark": [WHITE]}
+CONTRAST_ROLES = {
+    APP_TINT: ("the tint, as text on", TINT_BACKGROUNDS),
+    APP_FILL: ("the fill, under the text", FILL_BACKGROUNDS),
+    SHARE_FILL: ("the extension's fill, under the text", FILL_BACKGROUNDS),
+}
+# A tracked file with a NUL byte in its first BINARY_PROBE_BYTES is binary. The repository holds text only (plan of #9,
+# probe 2: the icon too), with no exceptions.
+BINARY_PROBE_BYTES = 8192
+
+
 def on_ios_and_mac(ios, mac):
     return {"iphoneos": ios, "iphonesimulator": ios, "macosx": mac}
 
@@ -278,7 +327,8 @@ APP_INFO_KEYS = {
 }
 NO_APP_INFO_KEYS = {key: on_ios_and_mac("", "") for key in APP_INFO_KEYS}
 # Keys TARGETS gives per SDK; the files among them must exist.
-PER_SDK_KEYS = ["CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE", HARDENED_RUNTIME, *APP_INFO_KEYS]
+PER_SDK_KEYS = ["CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE", HARDENED_RUNTIME, APP_ICON_SETTING, ACCENT_SETTING,
+                *APP_INFO_KEYS]
 FILE_KEYS = {"CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE"}
 
 
@@ -290,6 +340,9 @@ TARGETS = {
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(IOS_APP_ENTITLEMENTS, MAC_APP_ENTITLEMENTS),
         "INFOPLIST_FILE": on_ios_and_mac(IOS_APP_INFO, MAC_APP_INFO),
         HARDENED_RUNTIME: on_ios_and_mac("YES", "YES"),
+        APP_ICON_SETTING: on_ios_and_mac("AppIcon", "AppIcon"),
+        # P4's Mac fallback: white on the list's selection reached 3.76:1 in dark under the tint (measured on #184).
+        ACCENT_SETTING: on_ios_and_mac("AccentColor", ""),
         **APP_INFO_KEYS,
     },
     SHARE_TARGET: {
@@ -298,6 +351,8 @@ TARGETS = {
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(SHARE_ENTITLEMENTS, None),
         "INFOPLIST_FILE": on_ios_and_mac(SHARE_INFO, None),
         HARDENED_RUNTIME: on_ios_and_mac("NO", None),
+        APP_ICON_SETTING: on_ios_and_mac("", None),
+        ACCENT_SETTING: on_ios_and_mac("AccentColor", None),
         **NO_APP_INFO_KEYS,
     },
     "DokumentumTests": {
@@ -306,6 +361,8 @@ TARGETS = {
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
         HARDENED_RUNTIME: on_ios_and_mac("NO", "NO"),
+        APP_ICON_SETTING: on_ios_and_mac("", ""),
+        ACCENT_SETTING: on_ios_and_mac("", ""),
         **NO_APP_INFO_KEYS,
     },
     "DokumentumUITests": {
@@ -314,6 +371,8 @@ TARGETS = {
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
         HARDENED_RUNTIME: on_ios_and_mac("NO", "NO"),
+        APP_ICON_SETTING: on_ios_and_mac("", ""),
+        ACCENT_SETTING: on_ios_and_mac("", ""),
         **NO_APP_INFO_KEYS,
     },
 }
@@ -900,6 +959,174 @@ def check_test_plan(root, plan, expected, target_ids, paths):
     return problems
 
 
+def svg_text_problem(data):
+    """Why `data` is not SVG text, or None: UTF-8 without NUL bytes whose root element is <svg>."""
+    if b"\0" in data:
+        return "has NUL bytes"
+    try:
+        root = xml.etree.ElementTree.fromstring(data.decode("utf-8"))
+    except (UnicodeDecodeError, xml.etree.ElementTree.ParseError) as error:
+        return f"is not XML text ({error})"
+    if root.tag not in ("svg", "{http://www.w3.org/2000/svg}svg"):
+        return f"has the root element {root.tag}"
+    return None
+
+
+def check_app_icon(root):
+    """The .icon bundle: icon.json parses, its layers exist and are SVG text, and they are ICON_SOURCE's files."""
+    problems = []
+    if (root / APP_ICON_SET).exists():
+        problems.append(f"{APP_ICON_SET} exists; it would collide with {APP_ICON}, the app icon (#9, P3)")
+    path = root / APP_ICON_JSON
+    if not path.is_file():
+        return problems + [f"{APP_ICON_JSON} is missing"]
+    try:
+        icon = json.loads(path.read_text(encoding="utf-8"))
+        names = [layer["image-name"] for group in icon["groups"] for layer in group["layers"]]
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
+        return problems + [f"{APP_ICON_JSON}: cannot be parsed as an Icon Composer file with groups of layers: {error!r}"]
+    if not names:
+        problems.append(f"{APP_ICON_JSON}: has no layer")
+    for name in names:
+        if not isinstance(name, str) or not name or "/" in name or name.startswith("."):
+            problems.append(f"{APP_ICON_JSON}: the image-name {name!r} is not a file name in {APP_ICON_ASSETS}")
+            continue
+        layer = root / APP_ICON_ASSETS / name
+        if not layer.is_file():
+            problems.append(f"{APP_ICON_JSON}: names {name}, which does not exist in {APP_ICON_ASSETS}")
+            continue
+        data = layer.read_bytes()
+        problem = svg_text_problem(data)
+        if problem:
+            problems.append(f"{APP_ICON_ASSETS}/{name}: {problem}; every layer is SVG text (#9, P3)")
+        elif hashlib.sha256(data).hexdigest() != ICON_LAYERS.get(name):
+            problems.append(f"{APP_ICON_ASSETS}/{name}: is not the copy of {ICON_SOURCE} that ICON_LAYERS pins; the "
+                            "layers are generated there and copied here byte-identical, never edited here")
+    assets = root / APP_ICON_ASSETS
+    # Hidden files (Finder's .DS_Store) are not in git and not compiled into the icon.
+    present = sorted(entry.name for entry in assets.iterdir() if not entry.name.startswith(".")) if assets.is_dir() else []
+    for name in present:
+        if name not in names:
+            problems.append(f"{APP_ICON_ASSETS}/{name}: is not a layer of {APP_ICON_JSON}")
+    if sorted(names) != sorted(ICON_LAYERS):
+        problems.append(f"{APP_ICON_JSON}: the layers are {sorted(names)}, ICON_LAYERS pins {sorted(ICON_LAYERS)}")
+    return problems
+
+
+def colour_component(text):
+    """A colour set's component as 0-1: "0xRR" and "255" are 8-bit, a value with a point is a fraction."""
+    text = str(text).strip()
+    if text.lower().startswith("0x"):
+        value = int(text, 16) / 255
+    elif "." in text:
+        value = float(text)
+    else:
+        value = int(text) / 255
+    if not 0 <= value <= 1:
+        raise ValueError(f"{text} is out of range")
+    return value
+
+
+def read_colour_set(root, name):
+    """{"light": 0xRRGGBB, "dark": 0xRRGGBB} of a colour set, or a problem. Only sRGB, opaque, universal colours, with
+    no appearance but dark; the universal colour also shows in dark when there is no dark one."""
+    path = root / name / "Contents.json"
+    if not path.is_file():
+        return None, f"{name}/Contents.json is missing"
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))["colors"]
+        colours = {}
+        for entry in entries:
+            appearances = entry.get("appearances", [])
+            if entry.get("idiom") != "universal" or appearances not in (
+                    [], [{"appearance": "luminosity", "value": "dark"}], [{"appearance": "luminosity", "value": "light"}]):
+                return None, (f"{name}: only universal colours with no appearance but light or dark are checked, found "
+                              f"{entry.get('idiom')} {appearances}")
+            colour = entry["color"]
+            if colour.get("color-space") != "srgb":
+                return None, f"{name}: the colour space is {colour.get('color-space')}, the contrast check needs srgb"
+            components = colour["components"]
+            # Xcode writes the alpha as a fraction in every form ("1.000").
+            if float(components.get("alpha", "1")) != 1:
+                return None, f"{name}: a colour is not opaque"
+            rgb = 0
+            for channel in ("red", "green", "blue"):
+                rgb = rgb << 8 | round(colour_component(components[channel]) * 255)
+            mode = appearances[0]["value"] if appearances else "any"
+            colours[mode] = rgb
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+        return None, f"{name}/Contents.json: cannot be read as a colour set: {error!r}"
+    light = colours.get("light", colours.get("any"))
+    dark = colours.get("dark", colours.get("any"))
+    if light is None or dark is None:
+        return None, f"{name}: needs a universal colour, or a light and a dark one"
+    return {"light": light, "dark": dark}, None
+
+
+def relative_luminance(rgb):
+    """WCAG 2 relative luminance of an sRGB colour 0xRRGGBB."""
+    def linear(channel):
+        value = channel / 255
+        return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+    return 0.2126 * linear(rgb >> 16 & 0xFF) + 0.7152 * linear(rgb >> 8 & 0xFF) + 0.0722 * linear(rgb & 0xFF)
+
+
+def contrast_ratio(first, second):
+    """WCAG 2 contrast ratio of two sRGB colours."""
+    lighter, darker = sorted((relative_luminance(first), relative_luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def check_accent_contrast(root):
+    """Every role's colour reaches MINIMUM_CONTRAST on every background of its role (CONTRAST_ROLES, #9, P4)."""
+    problems = []
+    for name, (role, backgrounds) in CONTRAST_ROLES.items():
+        colours, problem = read_colour_set(root, name)
+        if problem:
+            problems.append(problem)
+            continue
+        for mode, others in backgrounds.items():
+            for other in others:
+                ratio = contrast_ratio(colours[mode], other)
+                if ratio < MINIMUM_CONTRAST:
+                    # Compared unrounded; a ratio that rounds to the minimum is shown with four decimals.
+                    shown = f"{ratio:.2f}" if round(ratio, 2) < MINIMUM_CONTRAST else f"{ratio:.4f}"
+                    problems.append(f"{name}: {role} #{other:06x} in {mode} mode is #{colours[mode]:06x}, "
+                                    f"{shown}:1; at least {MINIMUM_CONTRAST}:1 (#9, P4)")
+    return problems
+
+
+def tracked_files(root):
+    """The files git tracks under `root`; in a folder without git (the self-test's fixtures), every file."""
+    try:
+        result = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True)
+    except OSError as error:
+        raise ValueError(f"cannot ask git for the tracked files: {error}")
+    if result.returncode == 0:
+        return [name for name in result.stdout.decode("utf-8", errors="surrogateescape").split("\0") if name]
+    if (root / ".git").exists():
+        raise ValueError(f"cannot ask git for the tracked files: {result.stderr.decode(errors='replace').strip()}")
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
+def check_text_only(root):
+    """No tracked file has a NUL byte in its first BINARY_PROBE_BYTES (#9, probe 2): the repository holds text only."""
+    try:
+        names = tracked_files(root)
+    except ValueError as error:
+        return [str(error)]
+    problems = []
+    for name in names:
+        path = root / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open("rb") as file:
+            if b"\0" in file.read(BINARY_PROBE_BYTES):
+                problems.append(f"{name}: has a NUL byte in its first {BINARY_PROBE_BYTES} bytes, so it is binary; the "
+                                "repository holds text only (plan of #9, probe 2)")
+    return problems
+
+
 def check(root):
     """The problems of the repository at `root` (empty when it is fine)."""
     problems = []
@@ -935,6 +1162,9 @@ def check(root):
     problems += check_entitlements(root)
     problems += check_info_plists(root)
     problems += check_unsigned_xcconfig(root)
+    problems += check_app_icon(root)
+    problems += check_accent_contrast(root)
+    problems += check_text_only(root)
 
     target_ids = {target_id: objects.get(target_id, {}).get("name") for target_id in project.get("targets", [])}
     problems += check_scheme(root, target_ids)
@@ -1024,6 +1254,12 @@ INFOPLIST_KEY_CFBundleDisplayName = Dokumentum
 DOKUMENTUM_IOS_APP_SCENES_Dokumentum = YES
 INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
+DOKUMENTUM_APPICON_Dokumentum = AppIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = $(DOKUMENTUM_APPICON_$(TARGET_NAME))
+DOKUMENTUM_ACCENT_Dokumentum = AccentColor
+DOKUMENTUM_ACCENT_DokumentumShare = AccentColor
+DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*] =
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = $(DOKUMENTUM_ACCENT_$(TARGET_NAME))
 #include? "Local.xcconfig"
 """
 FIXTURE_UNSIGNED = """// A comment
@@ -1044,6 +1280,37 @@ def fixture_plan(*targets):
     return json.dumps({"testTargets": [
         {"target": {"containerPath": container, "identifier": identifier, "name": name}}
         for container, identifier, name in targets]})
+
+
+FIXTURE_ICON_JSON = json.dumps({
+    "fill": {"solid": "extended-srgb:0.08627,0.08627,0.08627,1.00000"},
+    "groups": [{"layers": [
+        {"image-name": "dokumentum-icon-layer-star.svg", "name": "star"},
+        {"image-name": "dokumentum-icon-layer-ink.svg", "name": "ink"},
+    ]}],
+    "supported-platforms": {"squares": "shared"},
+}, indent=2)
+
+
+def fixture_colour(rgb, appearance=None, space="srgb", alpha="1.000"):
+    """One entry of a colour set's "colors", in Xcode's hexadecimal form."""
+    entry = {"color": {"color-space": space, "components": {
+        "alpha": alpha, "red": f"0x{rgb[0:2]}", "green": f"0x{rgb[2:4]}", "blue": f"0x{rgb[4:6]}"}}, "idiom": "universal"}
+    if appearance:
+        entry["appearances"] = [{"appearance": "luminosity", "value": appearance}]
+    return entry
+
+
+def fixture_colour_set(*entries):
+    return json.dumps({"colors": list(entries), "info": {"author": "xcode", "version": 1}}, indent=2)
+
+
+# The colour sets as decided (#9, P4).
+FIXTURE_COLOUR_SETS = {
+    APP_TINT: fixture_colour_set(fixture_colour("6929C4"), fixture_colour("BE95FF", "dark")),
+    APP_FILL: fixture_colour_set(fixture_colour("8A3FFC")),
+    SHARE_FILL: fixture_colour_set(fixture_colour("8A3FFC")),
+}
 
 
 FIXTURE_DEFAULT_PLAN = fixture_plan(
@@ -1079,6 +1346,15 @@ def write_fixture(root):
     (root / IOS_APP_INFO).write_bytes(plistlib.dumps(IOS_APP_INFO_FIXTURE))
     (root / SHARE_INFO).write_bytes(plistlib.dumps(SHARE_INFO_CONTENT))
     (root / MAC_APP_INFO).write_bytes(plistlib.dumps(MAC_APP_INFO_CONTENT))
+    # The real layers: their hashes are pinned, so the fixture cannot make up its own.
+    repository = pathlib.Path(__file__).resolve().parent.parent
+    (root / APP_ICON_ASSETS).mkdir(parents=True)
+    (root / APP_ICON_JSON).write_text(FIXTURE_ICON_JSON, encoding="utf-8")
+    for name in ICON_LAYERS:
+        (root / APP_ICON_ASSETS / name).write_bytes((repository / APP_ICON_ASSETS / name).read_bytes())
+    for name, text in FIXTURE_COLOUR_SETS.items():
+        (root / name).mkdir(parents=True)
+        (root / name / "Contents.json").write_text(text, encoding="utf-8")
 
 
 # The self-test's Info.plist: the reviewed content plus a camera text (its value is the maintainer's, not pinned).
@@ -1190,6 +1466,44 @@ def self_test():
 
     def not_executable(name):
         return lambda root: os.chmod(root / name, 0o644)
+
+    def write_bytes(name, data):
+        def apply(root):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+        return apply
+
+    def in_git(*names):
+        """A repository of the fixture's files; `names` are left untracked."""
+        def apply(root):
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "-A", "--", ".", *[f":!{name}" for name in names]],
+                           check=True, capture_output=True)
+        return apply
+
+    def then(*steps):
+        def apply(root):
+            for step in steps:
+                step(root)
+        return apply
+
+    def colour_set(name, *entries):
+        return write(f"{name}/Contents.json", fixture_colour_set(*entries))
+
+    def colour(rgb, appearance=None, **options):
+        return fixture_colour(rgb, appearance, **options)
+
+    def layer(name):
+        return f"{APP_ICON_ASSETS}/{name}"
+
+    star = "dokumentum-icon-layer-star.svg"
+    ink = "dokumentum-icon-layer-ink.svg"
+    png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\4\0\0\0\4\0\x08\x06\0\0\0"
+    fractions = {"color": {"color-space": "srgb", "components": {
+        "alpha": "1.000", "red": "0.412", "green": "0.161", "blue": "0.769"}}, "idiom": "universal"}
+    integers = {"appearances": [{"appearance": "luminosity", "value": "dark"}], "color": {"color-space": "srgb",
+                "components": {"alpha": "1.000", "red": "190", "green": "149", "blue": "255"}}, "idiom": "universal"}
+    high_contrast = {"appearances": [{"appearance": "contrast", "value": "high"}], **fixture_colour("4F2196")}
 
     cases = [
         ("the fixture is fine", lambda root: None, None),
@@ -1708,6 +2022,57 @@ def self_test():
         ("a space around the name", in_xcconfig_last("MY_SETTING[ sdk=macosx*] = x"), "[ sdk=macosx*] uses a condition"),
         ("a space in the unsigned file's condition", edit(UNSIGNED_XCCONFIG, "IDENTITY[sdk=macosx*] = -", "IDENTITY[sdk=macosx *] = -"),
          "must hold exactly"),
+        # The app icon (#9, P3).
+        ("the icon set next to the .icon", write_deep(f"{APP_ICON_SET}/Contents.json", "{}\n"), "would collide"),
+        ("a missing layer file", remove(layer(star)), f"names {star}, which does not exist"),
+        ("a PNG layer", then(edit(APP_ICON_JSON, star, "star.png"), write_bytes(layer("star.png"), png)),
+         "star.png: has NUL bytes; every layer is SVG text"),
+        ("a layer that is not SVG", write(layer(ink), "<html><body/></html>\n"), "has the root element html"),
+        ("a layer that is not XML", write(layer(ink), "M10 5 L40 5\n"), "is not XML text"),
+        ("an edited layer", edit(layer(ink), "#f4f4f4", "#ffffff"), "is not the copy of pklnx/design-system"),
+        ("a stray file next to the layers", write(layer("old.svg"), "<svg/>\n"), "old.svg: is not a layer"),
+        ("Finder's file next to the layers", write(layer(".DS_Store"), "Finder\n"), None),
+        ("a layer outside Assets", edit(APP_ICON_JSON, star, "../icon.json"), "is not a file name"),
+        ("an icon.json that does not parse", write(APP_ICON_JSON, "{\n"), "cannot be parsed"),
+        ("an icon.json without groups", write(APP_ICON_JSON, "{}\n"), "cannot be parsed"),
+        ("an icon.json without layers", write(APP_ICON_JSON, '{"groups": []}\n'), "has no layer"),
+        ("a missing icon.json", remove(APP_ICON_JSON), f"{APP_ICON_JSON} is missing"),
+        ("an app icon for the extension", in_xcconfig_last("DOKUMENTUM_APPICON_DokumentumShare = AppIcon"),
+         "target DokumentumShare: ASSETCATALOG_COMPILER_APPICON_NAME resolves to 'AppIcon' on iphoneos"),
+        # The accent's contrast (#9, P4); the figures are the plan's (probe 5).
+        ("a dark tint of #a56eff", colour_set(APP_TINT, colour("6929C4"), colour("A56EFF", "dark")),
+         "the tint, as text on #2c2c2e in dark mode is #a56eff, 4.16:1"),
+        ("a dark fill of #be95ff", colour_set(APP_FILL, colour("8A3FFC"), colour("BE95FF", "dark")),
+         "the fill, under the text #ffffff in dark mode is #be95ff, 2.35:1"),
+        ("Purple 60 as the light tint", colour_set(APP_TINT, colour("8A3FFC"), colour("BE95FF", "dark")),
+         "the tint, as text on #f2f2f7 in light mode is #8a3ffc, 4.48:1"),
+        ("system blue as the extension's fill", colour_set(SHARE_FILL, colour("007AFF")),
+         "the extension's fill, under the text #ffffff in light mode is #007aff, 4.02:1"),
+        ("a ratio that rounds to the minimum", colour_set(APP_FILL, colour("767676"), colour("7C7480", "dark")),
+         "the fill, under the text #ffffff in dark mode is #7c7480, 4.4998:1"),
+        ("a ratio just at the minimum", colour_set(APP_FILL, colour("767676")), None),
+        ("a tint without a dark colour shows it in dark", colour_set(APP_TINT, colour("6929C4")),
+         "#2c2c2e in dark mode is #6929c4, 1.80:1"),
+        ("a light colour of its own", colour_set(APP_TINT, colour("BE95FF"), colour("6929C4", "light"),
+                                                 colour("BE95FF", "dark")), None),
+        ("fractions and 8-bit integers", colour_set(APP_TINT, fractions, integers), None),
+        ("a Display P3 colour", colour_set(APP_FILL, colour("8A3FFC", space="display-p3")),
+         "the colour space is display-p3"),
+        ("a translucent fill", colour_set(APP_FILL, colour("8A3FFC", alpha="0.500")), "a colour is not opaque"),
+        ("a high-contrast colour", colour_set(APP_TINT, colour("6929C4"), high_contrast), "only universal colours"),
+        ("a colour set with only a dark colour", colour_set(APP_FILL, colour("8A3FFC", "dark")), "needs a universal"),
+        ("a missing colour set", remove(f"{APP_FILL}/Contents.json"), "AccentFill.colorset/Contents.json is missing"),
+        ("the brand's accent on the Mac", edit(XCCONFIG, "DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*] =\n", ""),
+         "target Dokumentum: ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME resolves to 'AccentColor' on macosx"),
+        ("no accent on iOS", edit(XCCONFIG, "DOKUMENTUM_ACCENT_Dokumentum = AccentColor\n", ""),
+         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME resolves to '' on iphoneos, expected 'AccentColor'"),
+        # Text only (#9, probe 2).
+        ("a binary file in the tree", write_bytes("docs/a.pdf", b"%PDF-1.7\n\0"), "docs/a.pdf: has a NUL byte"),
+        ("a NUL byte after the first 8 KB", write_bytes("docs/a.txt", b"a" * BINARY_PROBE_BYTES + b"\0"), None),
+        ("the fixture in git", in_git(), None),
+        ("a tracked binary file", then(write_bytes("docs/a.bin", b"\0"), in_git()), "docs/a.bin: has a NUL byte"),
+        ("an untracked binary file in a repository", then(write_bytes("docs/a.bin", b"\0"), in_git("docs/a.bin")),
+         None),
     ]
     # Every setting of the category fails in the xcconfig, on a target and on the project.
     for name in sorted(CAPABILITY_SETTINGS - {HARDENED_RUNTIME}):
@@ -1743,7 +2108,7 @@ def main():
         print(f"error: {problem}")
     if not problems:
         print(f"{PROJECT}, {XCCONFIG}, the targets, the entitlements, the scheme, the test plans, the Xcode Cloud "
-              "scripts and the model's imports are fine")
+              "scripts, the model's imports, the app icon, the accent's contrast and the text-only files are fine")
     return 1 if problems else 0
 
 
