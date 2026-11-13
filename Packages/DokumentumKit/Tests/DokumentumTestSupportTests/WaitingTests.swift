@@ -148,6 +148,60 @@ struct WaitingTests {
         #expect(!reached)
     }
 
+    /// On a thread of the cooperative pool, `passBlocking()` does not block (#164): it records its issue
+    /// and goes on at once. Without that guard, it blocks until its net (100 ms, scaled) runs out, and
+    /// the issue it records then is not the one expected here.
+    @Test(.enabled(if: TestSupport.detectsCooperativePool))
+    func aBlockingCheckpointOnThePoolIsAnIssue() async {
+        let checkpoint = Checkpoint()
+        defer { checkpoint.release() }
+        #expect(TestSupport.isOnCooperativePool, "a nonisolated test runs on the pool")
+        var released = true
+        withKnownIssue {
+            released = checkpoint.passBlocking(timeout: .milliseconds(100))
+        } matching: { issue in
+            issue.comments.contains { $0.rawValue.contains("thread of the cooperative pool") }
+        }
+        #expect(!released)
+        #expect(await checkpoint.reached(), "the hook counts as reached")
+    }
+
+    /// A blocked hook that is never released records an issue and goes on (#164), so a test that
+    /// misses its `release()` fails instead of hanging. On the main thread, which is not the pool's.
+    @Test @MainActor func aBlockingCheckpointThatIsNeverReleasedTimesOut() {
+        let checkpoint = Checkpoint()
+        #expect(!TestSupport.isOnCooperativePool)
+        var released = true
+        withKnownIssue {
+            released = checkpoint.passBlocking(timeout: .milliseconds(100))
+        } matching: { issue in
+            issue.comments.contains { $0.rawValue.contains("not released") }
+        }
+        #expect(!released)
+    }
+
+    /// `onOwnThread` runs its body off the cooperative pool and hands back its result or its error.
+    @Test func onOwnThreadRunsOffThePool() async {
+        if TestSupport.detectsCooperativePool {
+            #expect(await Task.detached { TestSupport.isOnCooperativePool }.value, "a detached task runs on the pool")
+        }
+        #expect(await TestSupport.onOwnThread { TestSupport.isOnCooperativePool } == false)
+        struct Failed: Error {}
+        await #expect(throws: Failed.self) {
+            try await TestSupport.onOwnThread { () throws(Failed) -> Int in throw Failed() }
+        }
+    }
+
+    /// A task that prefers an `OwnThreadExecutor` runs its nonisolated work there, off the pool.
+    @Test func anOwnThreadExecutorRunsOffThePool() async {
+        let executor = TestSupport.OwnThreadExecutor(name: "WaitingTests")
+        #expect(await Task(executorPreference: executor) { TestSupport.isOnCooperativePool }.value == false)
+        if TestSupport.detectsCooperativePool {
+            let onPool = await Task(executorPreference: nil) { TestSupport.isOnCooperativePool }.value
+            #expect(onPool, "without it: the pool")
+        }
+    }
+
     /// Suspends until cancelled, built on `Checkpoint`.
     @Test func waitForCancellationEndsWithItsTask() async {
         let started = TestSignal()
@@ -240,8 +294,9 @@ struct WaitingTests {
     }
 }
 
-/// The safety net while the waiter's actor is blocked. Serialized, because each test blocks a thread
-/// of the cooperative pool for its whole run, and together they could use up a small pool.
+/// The safety net while the waiter's actor is blocked. Each test blocks its actor for its whole run; the
+/// actor runs on a thread of its own (`BusyActor`), so no thread of the cooperative pool is held (#164).
+/// Serialized, so that the nets each test compares run with as little load from the others as possible.
 @Suite(.serialized) struct BlockedActorTests {
     /// The safety net takes its rounds on the waiter's actor: while that actor is blocked, the
     /// net stands still, and a net without an actor with twice the budget runs out first.
@@ -327,8 +382,13 @@ struct WaitingTests {
     }
 }
 
-/// An actor whose executor a test blocks (`BlockedActorTests`).
+/// An actor whose executor a test blocks (`BlockedActorTests`). It runs on a thread of its own, so blocking it
+/// holds that thread, not one of the cooperative pool (#164).
 private actor BusyActor {
+    private let executor = TestSupport.OwnThreadExecutor(name: "BusyActor")
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
+
     /// Blocks this actor's thread until `checkpoint` is released.
     func block(_ checkpoint: Checkpoint) {
         checkpoint.passBlocking()

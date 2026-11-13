@@ -1,10 +1,11 @@
-import DokumentumCore
 import DokumentumCoreTestSupport
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Testing
+
+@testable import DokumentumCore
 
 /// The search indexer (plan of #7, part 2): the build at launch, updates from local saves through the persistent
 /// history and the metadata re-read, the per-subscriber updates, and the history-error rule. Every test waits for
@@ -217,8 +218,12 @@ struct SearchIndexerTests {
         let document = try SearchStore.insert(title: "Stromrechnung", text: "Zählerstand", in: container)
         let armed = Armed()
         let reading = Checkpoint()
+        // The reads run on a queue of their own, so the stop in the history read holds no thread of the pool (#164).
+        var hooks = SearchIndexer.Hooks()
+        hooks.executor = TestSupport.OwnThreadExecutor(name: "SearchIndexer reads")
         let indexer = SearchIndexer(
-            container: container, history: BlockingHistory(container: container, armed: armed, checkpoint: reading))
+            container: container, history: BlockingHistory(container: container, armed: armed, checkpoint: reading),
+            hooks: hooks)
         let recorder = StateRecorder(indexer.updates())
         defer {
             reading.release()
