@@ -19,7 +19,10 @@ For each manifest in MANIFESTS:
 What counts as a use: the symbol as a whole word (`@AppStorage` counts as AppStorage), on a line that is not a
 comment line. As in scripts/check-logging.py, comment lines (starting with `//`, doc comments included) are
 skipped; a mention in a trailing comment or a block comment counts, which fails loudly and is fixed by
-rewording. A folder without any Swift file fails too, so a renamed folder cannot let every rule pass.
+rewording. A folder without any Swift file fails too, so a renamed folder cannot let every rule pass. Every package target
+folder (`Packages/*/Sources/*`) must be one that a manifest scans or one of TEST_SUPPORT_SOURCES, so a new package
+target fails here until it is mapped (review B-N1 on #189). The products each target links are pinned in
+scripts/check-project.py (APP_PACKAGE_PRODUCTS, SHARE_PACKAGE_PRODUCTS); the two lists change together.
 
 The symbols and reason codes follow Apple's lists ("Describing use of required reason API" and
 NSPrivacyAccessedAPITypeReasons) as of 2026-11-13. Apple requires the declarations for iOS, iPadOS, tvOS,
@@ -87,6 +90,12 @@ MANIFESTS = {
     "Dokumentum/PrivacyInfo.xcprivacy": ["Dokumentum", CORE, KIT],
     "DokumentumShare/PrivacyInfo.xcprivacy": ["DokumentumShare", KIT],
 }
+# The package target folders that ship in no product: test support for the test targets only.
+TEST_SUPPORT_SOURCES = {
+    "Packages/DokumentumCore/Sources/DokumentumCoreTestSupport",
+    "Packages/DokumentumKit/Sources/DokumentumTestSupport",
+}
+PACKAGE_SOURCES_GLOB = "Packages/*/Sources/*"
 # P5 on #9: each manifest's categories and reasons, exactly. A change is a change here, on purpose.
 DECLARED = {
     "Dokumentum/PrivacyInfo.xcprivacy": {FILE_TIMESTAMP: ["C617.1"], USER_DEFAULTS: ["CA92.1"]},
@@ -208,9 +217,24 @@ def check_manifest(root, name, folders, reviewed):
     return problems, report
 
 
+def check_package_folders(root):
+    """Every package target folder is scanned for a manifest or is test support; none of those is missing."""
+    scanned = {folder for folders in MANIFESTS.values() for folder in folders if folder.startswith("Packages/")}
+    known = scanned | TEST_SUPPORT_SOURCES
+    found = {path.relative_to(root).as_posix() for path in root.glob(PACKAGE_SOURCES_GLOB) if path.is_dir()}
+    problems = []
+    for folder in sorted(found - known):
+        problems.append(f"{folder}: a package target that no privacy manifest scans and that is not test support; "
+                        "add it to MANIFESTS for every target that links it (and to its products in "
+                        "scripts/check-project.py), or to TEST_SUPPORT_SOURCES")
+    for folder in sorted(known - found):
+        problems.append(f"{folder}: listed in scripts/check-privacy-manifest.py, but the folder does not exist")
+    return problems
+
+
 def check(root, declared_rows=None):
     """(problems, report lines). `declared_rows` replaces DECLARED in the self-test only."""
-    problems, report = [], []
+    problems, report = check_package_folders(root), []
     for name, folders in MANIFESTS.items():
         more, lines = check_manifest(root, name, folders, (declared_rows or DECLARED)[name])
         problems += more
@@ -239,8 +263,9 @@ def write_fixture(root):
         "DokumentumShare/Share.swift": "import UIKit\n",
         f"{CORE}/Core.swift": "/// Kept in UserDefaults.\nlet x = 1\n",
         f"{KIT}/Queue.swift": "var status = stat()\nlet found = fstat(descriptor, &status)\n",
-        # Ships in no product, so its use does not count.
+        # Ship in no product, so their uses do not count.
         "Packages/DokumentumCore/Sources/DokumentumCoreTestSupport/Log.swift": "let up = ProcessInfo().systemUptime\n",
+        "Packages/DokumentumKit/Sources/DokumentumTestSupport/Clock.swift": "let t = mach_absolute_time()\n",
     }
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -351,6 +376,19 @@ def self_test():
          f"declares {FILE_TIMESTAMP}, which no shipped source uses"),
         ("a folder without Swift files", remove("DokumentumShare/Share.swift"),
          "DokumentumShare: no Swift files found"),
+        # Package target folders (review B-N1 on #189).
+        ("a new Kit target with UserDefaults", write("Packages/DokumentumKit/Sources/DokumentumKitPrefs/Prefs.swift",
+                                                    "let d = UserDefaults.standard\n"),
+         "Packages/DokumentumKit/Sources/DokumentumKitPrefs: a package target that no privacy manifest scans"),
+        ("a new Kit target without any API", write("Packages/DokumentumKit/Sources/DokumentumKitMath/A.swift",
+                                                  "let x = 1\n"),
+         "Packages/DokumentumKit/Sources/DokumentumKitMath: a package target that no privacy manifest scans"),
+        ("a new package", write("Packages/DokumentumSync/Sources/DokumentumSync/A.swift", "let x = 1\n"),
+         "Packages/DokumentumSync/Sources/DokumentumSync: a package target"),
+        ("a test-support folder renamed", lambda root: (root / "Packages/DokumentumKit/Sources/DokumentumTestSupport").rename(
+            root / "Packages/DokumentumKit/Sources/DokumentumTestKit"),
+         "Packages/DokumentumKit/Sources/DokumentumTestSupport: listed in scripts/check-privacy-manifest.py, but"),
+        ("a file next to the targets is not a target", write("Packages/DokumentumKit/Sources/README.md", "x\n"), None),
     ]
     for description, mutate, expected, *rows in cases:
         with tempfile.TemporaryDirectory() as directory:

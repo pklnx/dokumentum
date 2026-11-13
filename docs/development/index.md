@@ -96,7 +96,9 @@ live in `Packages/`.
   required-reason APIs and fails on a category used but not declared, or declared but not used. Apple
   requires the declarations on iOS; the same manifest ships in the Mac app's `Contents/Resources`, where
   it is informational. A new use of such an API needs its category and an approved reason in the manifest
-  of every target that ships the code.
+  of every target that ships the code. Every `Packages/*/Sources/*` folder must be scanned for a manifest or
+  listed as test support, and `check-project.py` pins the package products the app and the extension link, so a
+  new package target or product fails `lint` until the privacy check covers it.
 - **The Mac app reads files the user picks** through `com.apple.security.files.user-selected.read-only`
   (an App Sandbox key, not an App ID capability): the open panel and ⌘O need it, and the import only
   reads. A drop needs no key when the app receives it as a file (`FileRepresentation`, a copy); a

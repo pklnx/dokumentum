@@ -31,6 +31,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   and xcodebuild accept), into PlugIns. It links exactly the package product DokumentumKit, for the
   share queue's format (plan of #4, part 4, T8), and nothing else, and its Info.plist holds exactly the
   reviewed keys and activation rule.
+- The app links exactly the package products APP_PACKAGE_PRODUCTS (DokumentumCore and DokumentumKit), in its
+  package dependencies and in its build phases: scripts/check-privacy-manifest.py scans exactly the sources of those
+  products for the app's privacy manifest, so a new product must be mapped there too (review B-N1 on #189).
 - The app's iOS Info.plist holds exactly the reviewed background modes and background task identifiers
   (IOS_APP_INFO_CONTENT, plan of #6, part 5), and no permitted identifier falls under another one's
   wildcard: the continued-processing tasks and the processing task stay apart (N4).
@@ -185,6 +188,9 @@ SHARE_FOLDER = "DokumentumShare"
 SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
 # The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
 SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
+# The package products the app links. scripts/check-privacy-manifest.py scans their sources for the app's manifest
+# (MANIFESTS there); the two lists change together.
+APP_PACKAGE_PRODUCTS = ["DokumentumCore", "DokumentumKit"]
 # The only Swift files that may import FoundationModels: the classifier, and its tests, which construct the
 # framework's errors (#8, part 2, review N6).
 MODEL_IMPORT_FILES = {
@@ -797,6 +803,30 @@ def check_share_extension(objects, project):
     return problems
 
 
+def check_app_packages(objects, project):
+    """The app links exactly APP_PACKAGE_PRODUCTS, as dependencies and in its build phases."""
+    by_name = {objects.get(target_id, {}).get("name"): target_id for target_id in project.get("targets", [])}
+    if APP_TARGET not in by_name:
+        return []  # check_targets reports it.
+    app = objects[by_name[APP_TARGET]]
+    problems = []
+    linked = product_names(objects, app.get("packageProductDependencies", []))
+    if linked != APP_PACKAGE_PRODUCTS:
+        problems.append(f"target {APP_TARGET}: must link exactly the package products {APP_PACKAGE_PRODUCTS}, found "
+                        f"{linked}; a new product needs its sources in scripts/check-privacy-manifest.py's MANIFESTS")
+    in_phases = []
+    for phase_id in app.get("buildPhases", []):
+        for identifier in objects.get(phase_id, {}).get("files", []):
+            entry = objects.get(identifier, {})
+            if "productRef" in entry:
+                in_phases.append(entry["productRef"])
+    in_phases = product_names(objects, in_phases)
+    if in_phases != APP_PACKAGE_PRODUCTS:
+        problems.append(f"target {APP_TARGET}: its build phases must link exactly the package products "
+                        f"{APP_PACKAGE_PRODUCTS}, found {in_phases}")
+    return problems
+
+
 def check_scheme(root, target_ids):
     path = root / SCHEME
     if not path.is_file():
@@ -879,6 +909,7 @@ def check(root):
     except ValueError as error:
         problems.append(f"{XCCONFIG}: {error}")
     problems += check_share_extension(objects, project)
+    problems += check_app_packages(objects, project)
     problems += check_share_sources(root)
     problems += check_model_sources(root)
     problems += check_local_xcconfig(root)
@@ -908,7 +939,7 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		A0 = {isa = PBXProject; attributes = {TargetAttributes = {A1 = {CreatedOnToolsVersion = 27.1;};};};
 			buildConfigurationList = A2; mainGroup = A3; targets = (A1 /* Dokumentum */, A7, A8, C0, );};
 		A1 /* Dokumentum */ = {isa = PBXNativeTarget; buildConfigurationList = A4; name = Dokumentum;
-			buildPhases = (C2, ); dependencies = (C3, );};
+			buildPhases = (C2, F0, ); dependencies = (C3, ); packageProductDependencies = (D0, D3, );};
 		A2 = {isa = XCConfigurationList; buildConfigurations = (A5, );};
 		A3 = {isa = PBXGroup; children = (A6, B0, B1, ); sourceTree = "<group>";};
 		A4 = {isa = XCConfigurationList; buildConfigurations = (A9, );};
@@ -933,6 +964,10 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		D0 = {isa = XCSwiftPackageProductDependency; productName = DokumentumCore;};
 		D1 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
 		D2 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
+		D3 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
+		F0 = {isa = PBXFrameworksBuildPhase; files = (F1, F2, );};
+		F1 = {isa = PBXBuildFile; productRef = D0;};
+		F2 = {isa = PBXBuildFile; productRef = D3;};
 	};
 	rootObject = A0;
 }
@@ -1519,6 +1554,23 @@ def self_test():
          "found ['DokumentumCore', 'DokumentumKit']"),
         ("Kit not linked in the extension's phase", edit(PROJECT, "files = (C6, );", "files = ();"),
          "its build phases must link exactly the package products ['DokumentumKit'], found []"),
+        # The app's package products (review B-N1 on #189).
+        ("the app links a new product", edit(PROJECT, "packageProductDependencies = (D0, D3, );",
+                                             "packageProductDependencies = (D0, D3, D4, );};\n\t\tD4 = {isa = "
+                                             "XCSwiftPackageProductDependency; productName = DokumentumKitPrefs;"),
+         "target Dokumentum: must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found "
+         "['DokumentumCore', 'DokumentumKit', 'DokumentumKitPrefs']"),
+        ("the app links the test support", edit(PROJECT, "packageProductDependencies = (D0, D3, );",
+                                                "packageProductDependencies = (D0, D3, D5, );};\n\t\tD5 = {isa = "
+                                                "XCSwiftPackageProductDependency; productName = DokumentumTestSupport;"),
+         "found ['DokumentumCore', 'DokumentumKit', 'DokumentumTestSupport']"),
+        ("the app without Core", edit(PROJECT, "packageProductDependencies = (D0, D3, );", "packageProductDependencies = (D3, );"),
+         "target Dokumentum: must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found ['DokumentumKit']"),
+        ("a new product only in the app's phase", edit(PROJECT, "files = (F1, F2, );",
+                                                       "files = (F1, F2, F3, );};\n\t\tF3 = {isa = PBXBuildFile; productRef = D4;};"
+                                                       "\n\t\tD4 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKitPrefs;"),
+         "target Dokumentum: its build phases must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found "
+         "['DokumentumCore', 'DokumentumKit', 'DokumentumKitPrefs']"),
         ("embedded into another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolderSpec = 10;"), "must copy DokumentumShare into PlugIns"),
         ("embedded without a destination", edit(PROJECT, "dstSubfolderSpec = 13;", ""), "must copy DokumentumShare into PlugIns"),
         ("embedded into a subfolder", edit(PROJECT, 'dstPath = "";', "dstPath = x;"), "must copy DokumentumShare into PlugIns"),
