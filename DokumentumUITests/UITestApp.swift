@@ -110,6 +110,57 @@ struct UITestApp {
         #endif
     }
 
+    /// The end of the sidebar to scroll towards.
+    enum SidebarEnd {
+        case top, bottom
+    }
+
+    /// On the iPhone, scrolls the sidebar with slow swipes (at most six) until the row lies in full between the
+    /// navigation bar and the footer, and fails the test if it does not get there. On the Mac it does nothing: the
+    /// sidebar is a column of its own.
+    ///
+    /// Not `isHittable` alone (#168): a row whose centre lies under the status bar counts as hittable, so XCUITest taps
+    /// it there without scrolling it into view. The tap lands on the status bar, which scrolls the list to the top
+    /// instead of opening the row. A row the list has not created yet (it creates rows only near the visible part) is
+    /// looked for towards `missingTowards`.
+    func revealSidebarRow(
+        _ identifier: String, missingTowards end: SidebarEnd = .top, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        #if os(iOS)
+            let row = element(identifier)
+            let sidebar = element("sidebar")
+            XCTAssertTrue(sidebar.waitForExistence(timeout: 10), "no sidebar", file: file, line: line)
+            // Slow, so the list does not keep scrolling: a tap on a list that still moves only stops it.
+            for _ in 0..<6 {
+                switch sidebarScrollToReveal(row, missingTowards: end) {
+                case nil: return
+                case .top: sidebar.swipeDown(velocity: .slow)
+                case .bottom: sidebar.swipeUp(velocity: .slow)
+                }
+            }
+            XCTAssertNil(
+                sidebarScrollToReveal(row, missingTowards: end),
+                "\(identifier) is not in full view: \(row.exists ? "\(row.frame)" : "not in the list")", file: file,
+                line: line)
+        #endif
+    }
+
+    #if os(iOS)
+        /// `nil` when the row lies in full below the navigation bar and above the footer and can be tapped; otherwise
+        /// the end of the sidebar to scroll towards.
+        private func sidebarScrollToReveal(_ row: XCUIElement, missingTowards end: SidebarEnd) -> SidebarEnd? {
+            guard row.exists else { return end }
+            let frame = row.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let top = navigationBar.exists ? navigationBar.frame.maxY : app.windows.firstMatch.frame.minY
+            let footer = [element("sidebar.syncOff"), element("sidebar.syncStatus")].first { $0.exists }
+            let bottom = footer?.frame.minY ?? app.windows.firstMatch.frame.maxY
+            if frame.minY < top { return .top }
+            if frame.maxY > bottom { return .bottom }
+            return row.isHittable ? nil : end
+        }
+    #endif
+
     /// A screenshot of the app's window only, kept with the result. Never `XCUIScreen.main`: on the
     /// Mac that is the whole desktop, with other apps' windows.
     func attachWindowScreenshot(_ name: String, to testCase: XCTestCase) {
@@ -452,6 +503,13 @@ struct TextContrast: CustomStringConvertible {
             return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
         }
         return 0.2126 * linear(rgb >> 16) + 0.7152 * linear(rgb >> 8) + 0.0722 * linear(rgb)
+    }
+
+    /// Whether two sRGB colours differ by at most `tolerance` in every channel (rendering may shift a colour slightly).
+    static func isClose(_ first: UInt32, to second: UInt32, tolerance: Int = 6) -> Bool {
+        [16, 8, 0].allSatisfy { shift in
+            abs(Int(first >> UInt32(shift) & 0xff) - Int(second >> UInt32(shift) & 0xff)) <= tolerance
+        }
     }
 
     static func ratio(_ first: Double, _ second: Double) -> Double {

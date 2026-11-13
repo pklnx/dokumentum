@@ -60,6 +60,10 @@ public actor SearchIndexer: DocumentSearching {
         var readTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [SearchStoreReader.TextRow])?
         /// Reads the text rows that documents link now in place of `SearchStoreReader.linkedTexts`.
         var readLinkedTexts: (@Sendable ([PersistentIdentifier], ModelContext) throws -> [PersistentIdentifier])?
+        /// Where the work off the actor runs (the build's and the updates' reads) in place of the cooperative pool:
+        /// a test that stops a read in a synchronous hook then holds a thread of its own, not one of the pool's
+        /// (#164).
+        var executor: (any TaskExecutor)?
 
         public init(
             afterBatch: (@Sendable (Int) async -> Void)? = nil, beforeHistory: (@Sendable () async -> Void)? = nil,
@@ -152,7 +156,7 @@ public actor SearchIndexer: DocumentSearching {
                 for await _ in storeChanges { continuation.yield() }
             }
         }
-        let task = Task { await self.run(events: events) }
+        let task = Task(executorPreference: hooks.executor) { await self.run(events: events) }
         let previous = running.withLock { running in
             defer { running = Running(observation: observation, forwarding: forwarding, task: task) }
             return running

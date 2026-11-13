@@ -1,7 +1,8 @@
 import XCTest
 
 /// The trash on the sample documents (`-UITestSeed`, in memory; plan of #3, part 4): a document moves into the
-/// trash and back, and Empty Trash asks first and deletes only the trash's documents.
+/// trash and back, and Empty Trash asks first and deletes only the trash's documents. On the iPhone the restore swipe
+/// action shows the accent's fill under white, at 4.5:1 or more (#9, P4).
 final class TrashSmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test cannot see the
     // app's code.
@@ -13,6 +14,8 @@ final class TrashSmokeTests: XCTestCase {
     private static let electricityBill = 1
     private static let medicalInvoice = 2
     private static let accountStatement = 4
+    /// The accent's fill role (`AccentFill`, #9, P4): the restore swipe action's colour in light and dark.
+    private static let accentFill: UInt32 = 0x8A3FFC
 
     override func setUp() {
         continueAfterFailure = false
@@ -43,6 +46,24 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element("trash.empty").waitForExistence(timeout: 10), "no Empty Trash in the trash")
         XCTAssertFalse(ui.element("import.menu").exists, "the trash offers Import")
         ui.attachWindowScreenshot("2-trash", to: self)
+        #if os(iOS)
+            // The restore swipe action is the accent's fill with white on it (#9, P4), measured on its own screenshot.
+            row.swipeLeft()
+            let restore = ui.element("documentList.swipe.restore")
+            XCTAssertTrue(restore.waitForExistence(timeout: 10), "no restore swipe action")
+            ui.attachWindowScreenshot("2a-restore-swipe", to: self)
+            // The element's frame also holds the list around the capsule, and black there reaches 4.5:1 on any light
+            // fill, so the pixel count alone passes a wrong colour in dark (review of #192). The capsule itself must
+            // be the fill, with white on it at 4.5:1.
+            if let contrast = ui.assertTextContrast("documentList.swipe.restore", in: self) {
+                XCTAssertGreaterThanOrEqual(contrast.ratio, 4.5, "the restore swipe action: \(contrast)")
+                XCTAssertTrue(
+                    TextContrast.isClose(contrast.background, to: Self.accentFill),
+                    "the restore swipe action is not the accent's fill #8a3ffc: \(contrast)")
+            }
+            row.swipeRight()
+            waitForDisappearance(of: restore, "the restore swipe action stayed open")
+        #endif
 
         // A trashed document's detail is read only and offers Restore.
         ui.activate(Self.documentRow(Self.electricityBill))
@@ -144,23 +165,11 @@ final class TrashSmokeTests: XCTestCase {
         #endif
     }
 
-    /// Scrolls the sidebar row into view: on the iPhone the list creates Trash, its last row, only once it is
-    /// scrolled into view, and Inbox and All Documents leave the view when it is. A bounded number of swipes.
+    /// Scrolls the sidebar row into full view (`UITestApp.revealSidebarRow`): on the iPhone the list creates Trash, its
+    /// last row, only once it is scrolled into view, and Inbox and All Documents leave the view when it is.
     @MainActor
     private func revealSidebarRow(_ identifier: String, _ ui: UITestApp) {
-        #if os(iOS)
-            let row = ui.element(identifier)
-            for _ in 0..<5 where !(row.exists && row.isHittable) {
-                // Slow, so the list does not keep scrolling: a tap on a list that still moves only stops it.
-                if identifier == "sidebar.trash" {
-                    ui.element("sidebar").swipeUp(velocity: .slow)
-                } else {
-                    ui.element("sidebar").swipeDown(velocity: .slow)
-                }
-            }
-            let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: row)
-            XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed, "\(identifier) is not in view")
-        #endif
+        ui.revealSidebarRow(identifier, missingTowards: identifier == "sidebar.trash" ? .bottom : .top)
     }
 
     /// Selects a sidebar row, scrolled into view first; on the iPhone that opens its list.

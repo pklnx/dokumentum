@@ -1,6 +1,7 @@
 # Development
 
-How to work on Dokumentum. Product and architecture: [plan.md](./plan.md).
+How to work on Dokumentum. Product and architecture: [plan.md](./plan.md). TestFlight releases, the CloudKit
+Production deploy and the device checklist: [release.md](./release.md).
 Workflow, roles and review rules: `CLAUDE.md` and
 [pklnx/dev-process](https://github.com/pklnx/dev-process).
 
@@ -12,9 +13,9 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 | Where | Used for |
 |---|---|
 | The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
-| The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
+| The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. Release archives and the TestFlight uploads (manual, [release.md](./release.md), M6; #9, P2). The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
-| Xcode Cloud | Kept for the TestFlight uploads (step 8). It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). Configured by the maintainer in Xcode and App Store Connect. |
+| Xcode Cloud | Not used for v1. It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). TestFlight uploads are manual from the MacBook Air (#9, P2), and its workflows `PR` and `Main` were disabled by the maintainer on 2026-11-13 ([release.md](./release.md), M0). |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
 ## Setup on the development Mac
@@ -65,8 +66,41 @@ live in `Packages/`.
 - **Capabilities change by editing the entitlements files in `Config/`**, which the script pins key by
   key, so an unreviewed capability fails `lint`. Do not use Xcode's Signing & Capabilities editor; strip
   whatever it writes into the `.pbxproj`. The settings of Xcode's "App Sandbox & Hardened Runtime"
-  category inject entitlements past these files, so the script rejects them all, except
-  `ENABLE_HARDENED_RUNTIME = NO` until step 8.
+  category inject entitlements past these files, so the script rejects them all, except hardened runtime
+  in exactly one form (below).
+- **Hardened runtime is on for the app target only** (step 8, maintainer decision P1 on #9), with no
+  exception entitlements: `ENABLE_HARDENED_RUNTIME = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))`, `YES`
+  for `Dokumentum` and `NO` for `DokumentumShare` (iOS only, where it does nothing), `DokumentumTests` and
+  `DokumentumUITests`. A hardened UI test runner refuses to load the ad hoc test bundle ("mapping process
+  and mapped file (non-platform) have different Team IDs"), so a project-wide `YES` breaks macOS UISmoke on
+  the unsigned path. An ad hoc Debug build drops the flag from the app by itself (Xcode notes "Disabling
+  hardened runtime with ad-hoc codesigning"), so unsigned test runs behave as before and
+  `Config/Unsigned.xcconfig` does not touch it. An unsigned Release build keeps it (`codesign -dv` shows
+  `flags=0x10002(adhoc,runtime)`), and so does the signed Mac app (`runtime`). `check-project.py`
+  accepts only that line, each `DOKUMENTUM_HARDENED_RUNTIME_*` as an unconditioned `YES` or `NO`, and pins
+  what each target resolves to.
+- **Info.plist keys only the app has** never come from a plain build setting: an `INFOPLIST_KEY_*` setting writes
+  its key into every target's generated Info.plist, also where it resolves empty (measured on #182: the
+  extension then got an empty `LSApplicationCategoryType`, `ITSAppUsesNonExemptEncryption = false` and an
+  empty orientation list). They are in the app's files: `Config/Info-iOS.plist` holds the iPhone orientations
+  and, as `Config/Info-macOS.plist` does for the Mac app, the App Store keys `ITSAppUsesNonExemptEncryption =
+  NO` (P6 on #9: no encryption of its own) and `LSApplicationCategoryType = public.app-category.productivity`
+  (P7; a Mac upload needs it). The scene manifest and the launch screen stay generated, through a variable only
+  the app sets (a `_Generation` setting that resolves empty adds no key). `CFBundleDisplayName` is the one
+  project-wide key that every target carries on purpose: the share sheet shows the extension under that name.
+  `check-project.py` allows no other `INFOPLIST_KEY_*` setting in `Project.xcconfig`, and none in the `.pbxproj`. The share extension and the test
+  bundles carry none of these keys; `check-project.py` pins the files and the per-target values.
+- **Privacy manifests** (`Dokumentum/PrivacyInfo.xcprivacy`, `DokumentumShare/PrivacyInfo.xcprivacy`, P5 on
+  #9): no tracking, no tracking domains, no collected data. The app declares UserDefaults (`CA92.1`: its own
+  per-device settings) and file timestamps (`C617.1`: the share queue in the app group container); the
+  extension declares file timestamps (`C617.1`) only. `scripts/check-privacy-manifest.py` searches the Swift
+  sources each target ships (its folder and the library sources of the packages it links) for Apple's
+  required-reason APIs and fails on a category used but not declared, or declared but not used. Apple
+  requires the declarations on iOS; the same manifest ships in the Mac app's `Contents/Resources`, where
+  it is informational. A new use of such an API needs its category and an approved reason in the manifest
+  of every target that ships the code. Every `Packages/*/Sources/*` folder must be scanned for a manifest or
+  listed as test support, and `check-project.py` pins the package products the app and the extension link, so a
+  new package target or product fails `lint` until the privacy check covers it.
 - **The Mac app reads files the user picks** through `com.apple.security.files.user-selected.read-only`
   (an App Sandbox key, not an App ID capability): the open panel and ⌘O need it, and the import only
   reads. A drop needs no key when the app receives it as a file (`FileRepresentation`, a copy); a
@@ -163,7 +197,7 @@ target can import:
 
 | Tool | For | Instead of |
 |---|---|---|
-| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
+| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook on a thread of its own, see below), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
 | `ManualDebounce` | Code that sleeps through an injected function: the test sees each event start the quiet period (`waitForStarts`) and ends it with `fire()` | A short debounce and sleeping "twice the debounce" |
 | `TestSignal` | Any event: the hook calls `fire()`, the test awaits `wait(for:)`; `TestSignal.counting(stream)` counts the elements of a stream | Polling a counter |
 | `TestSupport.waitForCancellation` | A body that must keep running until its test stops it | Sleeping for a long time |
@@ -186,6 +220,35 @@ when nobody releases it; `WaitingTests` shows the pattern.
 
 **Tests never block the main actor** with synchronous work that can take long: they call the
 `@concurrent` API instead.
+
+**Tests never block a thread of the cooperative pool (#164).** Every task of a test process runs on one
+pool, as wide as the CPU count: 3 threads on the CI runners. A thread that blocks until the test acts (a
+semaphore, a lock held by a paused hook, `DispatchQueue.main.sync`) is gone for every task: the test's own,
+every safety net and Swift Testing's time limits included. Three such threads froze the whole
+`DokumentumCoreTests` process in parallel mode, with no output and no failure. Work that blocks runs on a
+thread of its own: `TestSupport.onOwnThread { … }`, or a `TestSupport.OwnThreadExecutor` as an actor's
+executor (`BusyActor` in `WaitingTests`) or as the executor preference of the task in which the code under
+test runs its nonisolated work (`SearchIndexer.Hooks.executor`, used by `BlockingHistory`). Not a dispatch
+queue: on the 3-CPU runners, tasks blocked on the pool kept even a `DispatchQueue.global()` timer from
+running. `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking, and
+gives up with an issue after its timeout, so a missing `release()` fails the test instead of hanging it.
+
+`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns such a block into a
+certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows it on any Mac.
+
+**The strict-pool step (#174).** The rule above is checked, not only written down: the `app-macos` job runs the
+`DokumentumCore` package tests a second time, after the Default plan, with `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`
+(`swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`). In that mode the
+cooperative pool has one thread, so a test that blocks a pool thread hangs at once on any machine, instead of
+freezing at random on a small runner. The step has its own time bound of 10 minutes (it takes about 4 with the
+build), so a hang fails the job in 10 minutes and not after the job's 30. The two tests of `FoundationModelsRealModelTests` that call the model
+are skipped there (its model-free mapping test still runs): they fail fast in this debug mode by design (the framework's `.noRoom`). The step is part of the
+required job `app-macos`, so the check names are unchanged, and it runs only when the Default plan runs (not for
+docs-only pull requests). To try it locally: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --package-path
+Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`.
+Counter-proof: a throwaway test that detaches a task and
+then blocks its own pool thread on a semaphore the task signals passes in the Default plan and hangs the step (see
+the pull request that added it).
 
 **The safety net waits with the waiter's actor.** A `TestSignal` wait (and `Checkpoint.reached`,
 `ManualDebounce.waitForStarts`) passes its caller's isolation (`#isolation`) to
@@ -275,7 +338,9 @@ helpers call it).
 
 **Production freezes a version.** Until step 8 nothing is in Production, and V1 may still change in place (with
 its snapshot, in the same PR, with the reason; a non-additive change also needs "Reset Development
-Environment" in the CloudKit Console, a maintainer step). The PR that records step 8's deploy adds `1` to
+Environment" in the CloudKit Console, a maintainer step). Before the deploy the Development schema is exported and
+compared field by field with the snapshot (`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The
+PR that records step 8's deploy adds `1` to
 `Schema/production-versions.txt`; from then on `check-schema-snapshots.py --base <sha>` fails if that snapshot
 changes. Deploying the schema to Production is the maintainer's.
 
@@ -503,10 +568,18 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   runs drain. While a task holds the work, the background does not pause. An **expiry** pauses (the attempt is given
   back) and fails the task; in the foreground the queue goes on at once. The foreground is the application's state
   (`UIApplication.applicationState`), not assumed: a launch in the background for the processing task brings no scene
-  phase. Each identifier is registered once per
-  process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
-  two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
-  another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
+  phase. **Registration** (#194): the processing task is registered at launch. Each continued request registers its
+  own `continued.<UUID>` just before it is submitted, and is submitted only when that registration succeeded: the SDK
+  exempts continued tasks from the launch deadline, refuses to register the wildcard itself, and raises an uncatchable
+  exception for a submission whose exact identifier has no handler. Each identifier is registered once per process
+  (the SDK kills an app that registers one twice). `SystemBackgroundTasks` submits nothing it has not registered: it
+  keeps the identifiers it registered, refuses a second registration and throws `notRegistered` for a submission
+  without one. A launch of a continued request that is no longer asked for completes at once. `Config/Info-iOS.plist`
+  permits exactly the two identifiers (`BackgroundTaskIdentifier.permitted`: the wildcard and the processing task) and
+  the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under another one's wildcard.
+  The Mac has neither task. The real tasks cannot run on the simulator, but registration and submission are tested
+  there (`SystemBackgroundTasksTests`, against the real `BGTaskScheduler`): maintainer step M5 and #194's device
+  check.
 - **Classification** (#8, parts 1 and 2; plan of #8, T1–T13, T17). A second step after the text, one document at a
   time, with the queue's claims, attempts, backoff, watchdog and interruptions. The queue runs it only with a
   classifier (`DocumentClassifying`); the app passes the on-device model (`FoundationModelsClassifier`, below) to
@@ -811,6 +884,59 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
   screenshot failed with "Failed to create screenshot. Image creation failed" (#67).
 - A window screenshot can still show another window lying over the app's; whoever passes PNGs on opens each
   first. PNGs never go into the repository: a PR lists each with its SHA-256.
+
+## Look
+
+The app icon and the accent colour (step 8, #9: decisions P3 and P4, part 2b in #184).
+
+**The app icon** is `Dokumentum/AppIcon.icon`, an Icon Composer bundle of text only: `icon.json` and two SVG layers in
+`Assets/`. `icon.json` fills the ground with `#161616` (G100, as on the design system's product tiles), puts the star
+layer above the ink layer, and shares one design between iOS and macOS (`"squares": "shared"`).
+- **The layers come from pklnx/design-system**, commit `526f6ed93f13e87395240f2e0595dde881bfde6c` (PR #74 there):
+  `project/assets/Logos/products/dokumentum-icon-layer-ink.svg` (sha256 `f8009c85…10fc`) and
+  `dokumentum-icon-layer-star.svg` (sha256 `c1bc8922…fe0f`), copied byte-identical under the same names.
+- **Regenerate there, copy here.** The mark is generated by `scripts/build_product_logos.py` in design-system and
+  never edited here. A new mark: change and merge it there, copy both files with
+  `git -C <design-system> show <sha>:project/assets/Logos/products/<file>`, and put the commit and the two sha256 into
+  `ICON_SOURCE` and `ICON_LAYERS` in `scripts/check-project.py`, which pins them.
+- **actool builds the renditions** at build time; none is in the repository. iOS: `Assets.car` with three 1024 × 1024
+  `Icon Image` renditions (Any, Dark, Tintable) and a `MultiSized Image`, plus `AppIcon60x60@2x.png`. Mac:
+  `Contents/Resources/AppIcon.icns` and `Assets.car`. The iOS Info.plist gets `CFBundleIconName = AppIcon` under
+  `CFBundleIcons` → `CFBundlePrimaryIcon`, the Mac's at the top level, next to `CFBundleIconFile = AppIcon`
+  (`xcrun assetutil --info <app>/Assets.car` lists them).
+- The app icon is the app's only: `ASSETCATALOG_COMPILER_APPICON_NAME` resolves to `AppIcon` for the app target and
+  empty for the others (actool fails on the extension's catalog otherwise). An `AppIcon.appiconset` must not come back:
+  it would collide with the `.icon`.
+
+**The accent has two roles** (P4). WCAG contrast ratios:
+
+| Role | Light | Dark | Used by |
+|---|---|---|---|
+| **Tint**, `AccentColor` | `#6929c4`: 7.74:1 on `#ffffff`, 6.93:1 on `#f2f2f7` | `#be95ff`: 8.93:1 on `#000000`, 7.24:1 on `#1c1c1e`, 5.93:1 on `#2c2c2e` | tinted text and glyphs and the system controls on the iPhone (`.tint`, `Color.accentColor`) |
+| **Fill**, `AccentFill` | `#8a3ffc`, white on it 5.00:1 | the same | only where white sits on the colour: the restore swipe action (`TrashViews.swift`) and the cleanup sheet's corner handles, a dot with a white ring (`PhotoCleanupView.swift`), both `Color(.accentFill)` |
+| **Extension**, `DokumentumShare/Assets.xcassets/AccentColor` | `#8a3ffc`, white on it 5.00:1 | the same | the share sheet's prominent OK button, its only accent use, so it carries the fill |
+
+- `check-project.py` computes these ratios from the colour sets and fails `lint` below 4.5:1 (see "Checks"). The UISmoke
+  audit does not see a closed swipe action; `TrashSmokeTests` measures the open one on the iPhone and asserts that
+  its capsule is the fill and white on it reaches 4.5:1. The pixel count of `assertTextContrast` alone is not enough
+  there: the element's frame also holds the list around the capsule, and black there reaches 4.5:1 on any light
+  colour (review of #192). The corner handles were the tint at first; under their white ring the dark tint gave 2.35:1,
+  which the iPhone's audit reported as "Contrast failed".
+- **On the Mac the app keeps the user's system accent** (P4's fallback). The Mac's document list draws the selected row
+  in a colour the system derives from the accent, with white text. Measured on #184 with the tint as the Mac accent:
+  `#5418a9` in light (white on it 10.09:1) but `#9671d1` in dark, where white reaches only 3.76:1. So
+  `DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*]` is empty, the Mac app has no `NSAccentColorName`, and the brand shows
+  on the Mac in the icon and in `AccentFill`. With the system accent (Multicolor, blue) the selection measured
+  `#0064e1` in light (5.37:1) and `#0059d1` in dark (6.27:1). The sidebar's selection on macOS 27 is grey whatever the
+  accent: black on `#d8d7d6` in light (14.61:1), white on `#4a4745` in dark (9.22:1).
+  `SelectionContrastSmokeTests` (macOS) measures both selections on the rows' own screenshots in every UISmoke run;
+  run it with `TEST_RUNNER_DOKUMENTUM_UI_APPEARANCE=dark` in the environment of `xcodebuild` for dark.
+- A new use of the accent picks its role by what sits on it: text or a glyph on a background is the tint, white text
+  or a white glyph on the colour is the fill.
+
+**Text only.** The repository holds no binary file: `check-project.py` fails `lint` when a tracked file has a NUL byte
+in its first 8 KB, with no exceptions. The icon is SVG for this reason; screenshots and renders go on the PR or the
+issue, never into the repository.
 
 ## Share extension and queue
 
@@ -1158,12 +1284,14 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`; the app icon's layers are design-system's pinned SVG files; the accent's colour sets reach 4.5:1 in both roles; no tracked file is binary, see "Look"), keeps the privacy manifests matched to the required-reason APIs the shipped code uses (`scripts/check-privacy-manifest.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). The self-tests include `scripts/check-cloudkit-schema.py`, which compares an exported CloudKit schema with a snapshot before a Production deploy ([release.md](./release.md), M3); it runs on an export only in M3, not in `lint`. |
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| `app-ios` | GitHub Actions, `app.yml` | Since 2026-11-12 the PR check for build and app tests (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. |
-| `app-macos` | GitHub Actions, `app.yml` | The same on macOS. |
+| `app-ios` | GitHub Actions, `app.yml` | Required. The PR check for build and app tests since 2026-11-12 (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. A pull request that changes only docs and process files skips it and passes with a note in the job summary. |
+| `app-macos` | GitHub Actions, `app.yml` | Required. The same on macOS. |
+| `scope` | GitHub Actions, `app.yml` | Runs `scripts/app-scope.py` and its self-test; decides what `app-ios` and `app-macos` do. Not required. |
+| `release-ios`, `release-macos` | GitHub Actions, `release.yml` | Started by hand (`workflow_dispatch`) before a TestFlight build: the full `Default` plan and the `UISmoke` plan on iOS and on macOS, then an unsigned build of the Release configuration on each platform (iOS `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, macOS through `Unsigned.xcconfig`). A build goes out only after a green run at the release commit ([release.md](./release.md), "Gates"). |
 
 Run the Python checks from the repository root:
 
@@ -1172,6 +1300,8 @@ python3 scripts/check-labels.py --self-test
 python3 scripts/check-labels.py
 python3 scripts/check-project.py --self-test
 python3 scripts/check-project.py
+python3 scripts/check-privacy-manifest.py --self-test
+python3 scripts/check-privacy-manifest.py
 python3 scripts/check-localization.py --self-test
 python3 scripts/check-localization.py --catalog
 python3 scripts/check-test-waits.py --self-test
@@ -1180,6 +1310,7 @@ python3 scripts/check-logging.py --self-test
 python3 scripts/check-logging.py
 python3 scripts/check-schema-snapshots.py --self-test
 python3 scripts/check-schema-snapshots.py --base origin/main
+python3 scripts/check-cloudkit-schema.py --self-test
 ```
 
 `--catalog` only reads the catalogs. `python3 scripts/check-localization.py <derived data path>` also
@@ -1190,28 +1321,57 @@ strings of the iOS-only extension, so they are checked only once its target was 
 ### GitHub Actions macOS
 
 Since 2026-11-12 `.github/workflows/app.yml` is the PR check for build and app tests. It runs on pull
-requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app-ios` and `app-macos`
-(the required checks). Each selects the Xcode in `.xcode-version` through `DEVELOPER_DIR`, runs
-`ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the test plan
-`Default` (`build-for-testing`), runs the localisation check on the derived data, and then runs the tests
-(`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
-(`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
-iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
-is set. The tests run serially (`-parallel-testing-enabled NO`) as a workaround for #164: in parallel mode the
-`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure, in one run of each job; the
-hosted app tests had finished; thread pool starvation is suspected, the trigger is not proven). Switch back to
-parallel mode when #164 is fixed. No per-test time allowance is set (it is not verified that it bounds Swift Testing
-tests, and a frozen pool stops `.timeLimit` too), so the bound of a stuck run is the job timeout of 30 minutes. A
-failed or cancelled run uploads its `.xcresult` bundles as an artifact (kept 7 days). The workflow needs no secrets and only
-`contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.
+requests, on pushes to `main` and nightly (02:17 UTC), with no `paths` filter, and has two required jobs,
+`app-ios` and `app-macos`, which always run and always report. A `scope` job first runs `scripts/app-scope.py`
+(with a self-test, like the `check-*.py` scripts) on the files the pull request changes against its merge base:
+
+| Changed files | `app-ios` / `app-macos` |
+|---|---|
+| Only docs and process files: `docs/**`, `*.md` anywhere, `.github/ISSUE_TEMPLATE/**`, `.github/labels.json` | Skipped: no build, no tests, a note in the job summary. The jobs run on a Linux runner and pass. |
+| Anything else, any file the script does not know, no files, or a diff that cannot be read | The full `Default` plan. If in doubt, the full plan runs. |
+
+If the `scope` job itself fails (checkout, runner, a script error), `app-ios` and `app-macos` still run, as they are
+not skipped (`if: !cancelled()`; a skipped job would satisfy the ruleset), and an empty scope is not `docs`, so they run
+the full plan.
+
+Every push to `main` and the nightly run always run the full plan; the coordinator reads failures on `main`.
+The jobs use the composite action `.github/actions/app-test`. It selects the Xcode in `.xcode-version` through
+`DEVELOPER_DIR`, runs `ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the
+test plans (`build-for-testing`), runs the localisation check on the derived data, and then runs the tests
+(`test-without-building`). Builds are unsigned (`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the
+destinations are the iPhone 18 Pro on iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so
+`TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3` is set. The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
+`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure), because test hooks blocked
+all three threads of the cooperative pool ("Waiting in tests"). No per-test time allowance is set (it
+is not verified that it bounds Swift Testing tests, and a frozen pool stops `.timeLimit` too), so the bound of a
+stuck run is the job timeout of 30 minutes. A failed or cancelled run uploads its `.xcresult` bundles as an
+artifact (kept 7 days). The workflows need no secrets and only `contents: read`. The runner image `xcode-27` is a
+preview image whose default Xcode is newer than the pin.
+
+**Before a TestFlight build**, start `.github/workflows/release.yml` (`workflow_dispatch`) on the release commit: it
+runs the full `Default` plan and the `UISmoke` plan on iOS and on macOS (`release-ios`, `release-macos`), then an
+unsigned build of the Release configuration on each platform, the configuration TestFlight ships (the tests build
+Debug). The Release build runs even after a failed test step, so every run shows whether Release compiles. The whole
+gate: [release.md](./release.md), "Gates".
+
+**UISmoke on the hosted runners does not pass yet** (first runs 2026-11-12, run 43314705135, attempts 1 and 2; the
+`Default` plan passed on macOS both times). On macOS, 12 of 13 UI tests pass and `ScanSmokeTests.testScanAndCleanupLandInInbox`
+fails both times with the accessibility audit's "Contrast failed for Inbox empty" (the placeholder behind the cleanup
+sheet; the runner is a virtual machine). On iOS, attempt 1 had 10 passed and 2 failed with timeouts that look like load
+on the 3-CPU runner (`LibrarySmokeTests.testSidebarFiltersAndOpensAPDF`: "Timed out while evaluating UI query";
+`ScanSmokeTests.testScanAndCleanupLandInInbox`: "Audit failed to complete in time"); the UISmoke plan took 19 minutes
+there. The tests are not weakened; the workflow stays as the intended gate, and until these are understood a red
+`release-*` run is expected. Follow-up issue: #173.
 
 ### Xcode Cloud
 
-Kept for the TestFlight uploads (step 8). It was the PR check until 2026-11-12, when its monthly usage
-limit was reached and every build was cancelled; the repository is public, so GitHub Actions macOS runners
-are free and took over (plan.md, section 6, question 1). The maintainer sets up the workflows in Xcode
-and App Store Connect (plan on #1, maintainer step 6); the repository holds only the shared scheme and
-`ci_scripts/`. The workflows `PR` and `Main` below are no longer required checks.
+Not used for v1. It was the PR check until 2026-11-12, when its monthly usage limit was reached and every
+build was cancelled; the repository is public, so GitHub Actions macOS runners are free and took over (plan.md,
+section 6, question 1). TestFlight uploads are manual from the MacBook Air (#9, P2; [release.md](./release.md),
+M6), not an Xcode Cloud workflow. The maintainer disabled the workflows `PR` and `Main` below on 2026-11-13, before
+the quota resets on 6 December ([release.md](./release.md), M0); they are no longer required checks. The repository holds
+only the shared scheme and `ci_scripts/`; what follows describes them as they were set up (plan on #1, maintainer
+step 6), and stays valid if a workflow is switched on again.
 
 - Workflow `PR` (Pull Request Changes, target `main`, no file filter) and workflow `Main` (Branch
   Changes on `main`): Test action, scheme `Dokumentum`, test plan `Default`, once for one iPhone
@@ -1223,7 +1383,7 @@ and App Store Connect (plan on #1, maintainer step 6); the repository holds only
   refuses to launch an ad hoc test host with `com.apple.developer.*` keys ("Runningboard has returned
   error 5", "Launchd job spawn failed"). So for the workflows `PR`, `Main` or `main`,
   `ci_post_clone.sh` copies `Config/Unsigned.xcconfig` to `Config/Local.xcconfig`, and prints that it
-  did. Any other workflow, such as step 8's `Release`, keeps the real signing settings, and the script
+  did. Any other workflow, such as an archive workflow if one is ever added (#9, P2 b), keeps the real signing settings, and the script
   prints that it left them alone. Under Xcode Cloud without `CI_WORKFLOW` it fails.
 - `ci_scripts/ci_post_xcodebuild.sh` runs the localisation check's build mode on
   `$CI_DERIVED_DATA_PATH` after `build`, `build-for-testing` and `archive`, unless `xcodebuild` failed.

@@ -13,11 +13,13 @@ import Testing
     import BackgroundTasks
 #endif
 
-/// The processing queue's background tasks on iOS (plan of #6, part 5, T13, N4, P3), with a fake `BGTaskScheduler`
-/// and a stub runner: a user's import asks for continued processing, a CloudKit insertion never does, each identifier
-/// is registered once, progress counts documents, the drain completes, the expiry pauses (the attempt is given back)
-/// and fails, and the background asks for one processing task. The logic is platform-independent, so it runs on the
-/// Mac too; the real tasks are maintainer step M5.
+/// The processing queue's background tasks on iOS (plan of #6, part 5, T13, N4, P3; #194), with a fake
+/// `BGTaskScheduler` that behaves like the SDK where the simulator showed it (#194's probes) and a stub runner: a
+/// user's import registers its own identifier and then asks for continued processing, a CloudKit insertion never
+/// does, each identifier is registered once, progress counts documents, the drain completes, the expiry pauses (the
+/// attempt is given back) and fails, and the background asks for one processing task. The logic is
+/// platform-independent, so it runs on the Mac too; `SystemBackgroundTasksTests` checks the real scheduler on the
+/// simulator, and the real tasks are maintainer step M5.
 @MainActor
 struct BackgroundProcessingTests {
     /// A task the fake system started.
@@ -51,36 +53,90 @@ struct BackgroundProcessingTests {
         }
     }
 
-    /// `BGTaskScheduler` as the tests need it: records registrations and requests, and starts tasks on demand.
+    /// `BGTaskScheduler` as the tests need it, strict where the SDK is (#194's probes on the simulator): records
+    /// registrations and requests in order, and starts tasks on demand.
+    /// - `register` refuses (returns `false`, stores no handler) the wildcard itself and anything outside the
+    ///   Info.plist's identifiers: only `processing` and `continuedPrefix` followed by a non-empty suffix pass (P1).
+    ///   A second registration of an identifier records an issue: the SDK kills the app (P5).
+    /// - A submission without a handler under exactly its identifier records an issue and throws: the SDK raises an
+    ///   exception (P2, P3, Q2).
     final class FakeTasks: BackgroundTaskScheduling {
-        private(set) var registrations: [String] = []
+        enum Event: Equatable {
+            case register(String)
+            case submit(String)
+        }
+
+        struct NotRegistered: Error {}
+
+        /// Every registration (also refused ones) and submission, in order.
+        private(set) var events: [Event] = []
         private var handlers: [String: @MainActor (any BackgroundTaskHandle) -> Void] = [:]
         private(set) var continuedRequests: [(identifier: String, title: String, subtitle: String)] = []
         private(set) var processingRequests: [String] = []
         /// Whether a continued request fails (`.fail`: the system cannot start it now).
         var refusesContinued = false
+        /// Whether `register` refuses every identifier under `continuedPrefix`, as the system would refuse one it
+        /// does not permit.
+        var refusesRegistration = false
+
+        /// Every identifier `register` was called with, in order.
+        var registrations: [String] {
+            events.compactMap { if case .register(let identifier) = $0 { identifier } else { nil } }
+        }
+
+        /// Whether a launch handler is registered under exactly `identifier`.
+        func isRegistered(_ identifier: String) -> Bool { handlers[identifier] != nil }
+
+        /// What the Info.plist permits as a concrete identifier: the processing task, or a non-empty suffix under
+        /// `continuedPrefix` that is not the wildcard.
+        static func isPermitted(_ identifier: String) -> Bool {
+            if identifier == BackgroundTaskIdentifier.processing { return true }
+            guard identifier.hasPrefix(BackgroundTaskIdentifier.continuedPrefix) else { return false }
+            let suffix = identifier.dropFirst(BackgroundTaskIdentifier.continuedPrefix.count)
+            return !suffix.isEmpty && !suffix.contains("*")
+        }
 
         func register(
             _ identifier: String, launchHandler: @escaping @MainActor (any BackgroundTaskHandle) -> Void
         ) -> Bool {
-            registrations.append(identifier)
+            events.append(.register(identifier))
+            guard handlers[identifier] == nil else {
+                Issue.record("registered twice: \(identifier)")
+                return false
+            }
+            guard Self.isPermitted(identifier) else { return false }
+            if refusesRegistration && identifier.hasPrefix(BackgroundTaskIdentifier.continuedPrefix) { return false }
             handlers[identifier] = launchHandler
             return true
         }
 
         func submitContinued(identifier: String, title: String, subtitle: String) async throws {
+            events.append(.submit(identifier))
             continuedRequests.append((identifier, title, subtitle))
+            guard isRegistered(identifier) else {
+                Issue.record("submitted without a registered handler: \(identifier)")
+                throw NotRegistered()
+            }
             if refusesContinued { throw CocoaError(.featureUnsupported) }
         }
 
         func submitProcessing(identifier: String) async throws {
+            events.append(.submit(identifier))
             processingRequests.append(identifier)
+            guard isRegistered(identifier) else {
+                Issue.record("submitted without a registered handler: \(identifier)")
+                throw NotRegistered()
+            }
         }
 
-        /// Starts a task as the system would, through the handler registered for `registeredIdentifier`.
-        func launch(_ registeredIdentifier: String, as identifier: String? = nil) -> FakeTask {
-            let task = FakeTask(identifier: identifier ?? registeredIdentifier)
-            handlers[registeredIdentifier]?(task)
+        /// Starts a task as the system would, through the handler registered under exactly `identifier`.
+        func launch(_ identifier: String) -> FakeTask {
+            let task = FakeTask(identifier: identifier)
+            guard let handler = handlers[identifier] else {
+                Issue.record("launched without a registered handler: \(identifier)")
+                return task
+            }
+            handler(task)
             return task
         }
     }
@@ -106,6 +162,11 @@ struct BackgroundProcessingTests {
         }
     }
 
+    /// Every submission attempt `didSubmit` reported, in order.
+    final class Submissions {
+        var all: [(identifier: String, accepted: Bool)] = []
+    }
+
     /// The open-document count the test sets: all open documents, and the open ones of the user's.
     final class OpenCount {
         var all = 0
@@ -121,6 +182,7 @@ struct BackgroundProcessingTests {
         let runs: TestSignal
         let open: OpenCount
         let submits: TestSignal
+        let submissions: Submissions
     }
 
     /// A scheduler that is not started (nothing runs until the test asks) and the background work over it, with
@@ -144,15 +206,19 @@ struct BackgroundProcessingTests {
             applicationIsInForeground: { open.applicationInForeground }, registry: BackgroundTaskRegistry())
         background.register()
         let submits = TestSignal()
-        background.didSubmit = { _, _ in submits.fire() }
+        let submissions = Submissions()
+        background.didSubmit = { identifier, accepted in
+            submissions.all.append((identifier, accepted))
+            submits.fire()
+        }
         return Setup(
-            background: background, tasks: tasks, scheduler: scheduler, runs: runs, open: open, submits: submits)
+            background: background, tasks: tasks, scheduler: scheduler, runs: runs, open: open, submits: submits,
+            submissions: submissions)
     }
 
-    /// Starts the continued task the user's import asked for.
+    /// Starts the continued task the user's import asked for: the last submitted identifier.
     private func launchContinued(_ setup: Setup) -> FakeTask {
-        let identifier = setup.tasks.continuedRequests.last?.identifier
-        return setup.tasks.launch(BackgroundTaskIdentifier.continued, as: identifier)
+        setup.tasks.launch(setup.tasks.continuedRequests.last?.identifier ?? "no continued request")
     }
 
     // MARK: - Identifiers and registration
@@ -162,7 +228,20 @@ struct BackgroundProcessingTests {
         #expect(BackgroundTaskIdentifier.processing == "space.pklnx.Dokumentum.backgroundProcessing")
         #expect(!BackgroundTaskIdentifier.processing.hasPrefix(BackgroundTaskIdentifier.continuedPrefix))
         #expect(BackgroundTaskIdentifier.continued.hasPrefix(BackgroundTaskIdentifier.continuedPrefix))
-        #expect(Set(BackgroundTaskIdentifier.all).count == 2)
+        #expect(Set(BackgroundTaskIdentifier.permitted).count == 2)
+    }
+
+    /// Launch registers only the processing task; the Info.plist's list stays the wildcard and the processing task
+    /// (#194: the SDK refuses to register the wildcard itself).
+    @Test func theLaunchRegistersOnlyTheProcessingTask() throws {
+        let setup = try makeSetup(runner: StubRunner())
+        #expect(setup.tasks.events == [.register(BackgroundTaskIdentifier.processing)])
+        #expect(setup.tasks.isRegistered(BackgroundTaskIdentifier.processing))
+        #expect(BackgroundTaskIdentifier.registeredAtLaunch == [BackgroundTaskIdentifier.processing])
+        #expect(
+            BackgroundTaskIdentifier.permitted == [
+                BackgroundTaskIdentifier.continued, BackgroundTaskIdentifier.processing,
+            ])
     }
 
     /// The SDK kills an app that registers an identifier twice: a second `register()`, also of a second instance in
@@ -185,7 +264,7 @@ struct BackgroundProcessingTests {
             registry: registry)
         second.register()
 
-        #expect(tasks.registrations == BackgroundTaskIdentifier.all)
+        #expect(tasks.registrations == BackgroundTaskIdentifier.registeredAtLaunch)
     }
 
     #if os(iOS)
@@ -193,7 +272,7 @@ struct BackgroundProcessingTests {
         @Test func theInfoPlistPermitsTheRegisteredIdentifiers() throws {
             let info = try #require(Bundle.main.infoDictionary)
             let permitted = info["BGTaskSchedulerPermittedIdentifiers"] as? [String]
-            #expect(permitted == BackgroundTaskIdentifier.all)
+            #expect(permitted == BackgroundTaskIdentifier.permitted)
             let modes = info["UIBackgroundModes"] as? [String] ?? []
             #expect(modes.contains("processing"))
         }
@@ -468,6 +547,109 @@ struct BackgroundProcessingTests {
         setup.background.userImported([UUID()])
         await setup.submits.wait(for: 2)
         #expect(setup.tasks.continuedRequests.count == 2)
+    }
+
+    // MARK: - Registration of continued requests (#194)
+
+    /// A user's import registers a new identifier under `continuedPrefix` and only then submits that same
+    /// identifier; the system starts the task through that registration, and its progress is reported.
+    @Test func aUserImportRegistersItsIdentifierBeforeSubmitting() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        defer { setup.scheduler.stop() }
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 1, "no continued request was submitted")
+
+        let identifier = try #require(setup.tasks.continuedRequests.first?.identifier)
+        #expect(identifier.hasPrefix(BackgroundTaskIdentifier.continuedPrefix))
+        #expect(identifier.count > BackgroundTaskIdentifier.continuedPrefix.count)
+        #expect(
+            setup.tasks.events == [
+                .register(BackgroundTaskIdentifier.processing), .register(identifier), .submit(identifier),
+            ])
+        #expect(setup.tasks.isRegistered(identifier), "the fake refused the identifier the import built")
+        #expect(setup.submissions.all.map(\.accepted) == [true])
+
+        let task = setup.tasks.launch(identifier)
+        #expect(setup.background.holdsWork, "the launch did not start the continued task")
+        #expect(task.reports.first?.total == 1, "no progress was reported")
+        await task.completed.wait(for: 1, "the drain did not complete the task")
+        #expect(task.completions == [true])
+    }
+
+    /// When the system refuses the registration, nothing is submitted and nothing is asked for; the next import tries
+    /// again with a new identifier.
+    @Test func aRefusedRegistrationSubmitsNothing() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        setup.tasks.refusesRegistration = true
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 1, "the refused registration was not reported")
+
+        let refused = try #require(setup.submissions.all.first)
+        #expect(!refused.accepted)
+        #expect(refused.identifier.hasPrefix(BackgroundTaskIdentifier.continuedPrefix))
+        #expect(setup.tasks.events == [.register(BackgroundTaskIdentifier.processing), .register(refused.identifier)])
+        #expect(setup.tasks.continuedRequests.isEmpty, "a request was submitted without a registration")
+        #expect(!setup.background.isContinuedRequested)
+        #expect(setup.background.tracked.isEmpty)
+
+        setup.tasks.refusesRegistration = false
+        let id = UUID()
+        setup.background.userImported([id])
+        await setup.submits.wait(for: 2, "the next import did not ask again")
+        let retried = try #require(setup.tasks.continuedRequests.first?.identifier)
+        #expect(retried != refused.identifier)
+        #expect(setup.tasks.continuedRequests.count == 1)
+        #expect(setup.tasks.isRegistered(retried))
+        #expect(setup.background.tracked == [id])
+    }
+
+    /// Each request registers a new identifier, each once, and submits it after its own registration: a second
+    /// registration of one identifier would kill the app (P5).
+    @Test func eachRequestRegistersANewIdentifier() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        setup.tasks.refusesContinued = true
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 1)
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 2)
+
+        let identifiers = setup.tasks.continuedRequests.map(\.identifier)
+        try #require(identifiers.count == 2, "not two submissions")
+        #expect(Set(identifiers).count == 2, "two requests used the same identifier")
+        let (first, second) = (identifiers[0], identifiers[1])
+        #expect(
+            setup.tasks.events == [
+                .register(BackgroundTaskIdentifier.processing), .register(first), .submit(first), .register(second),
+                .submit(second),
+            ])
+    }
+
+    /// A launch of a request that is no longer asked for (an earlier one that the system refused) completes at once
+    /// with failure and changes nothing; the request asked for then starts normally (#194, T2).
+    @Test func aLaunchOfAnOlderRequestCompletesAtOnce() async throws {
+        let setup = try makeSetup(runner: StubRunner())
+        defer { setup.scheduler.stop() }
+        setup.tasks.refusesContinued = true
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 1)
+        setup.tasks.refusesContinued = false
+        setup.background.userImported([UUID()])
+        await setup.submits.wait(for: 2)
+        let identifiers = setup.tasks.continuedRequests.map(\.identifier)
+        try #require(identifiers.count == 2, "not two submissions")
+        let (older, current) = (identifiers[0], identifiers[1])
+
+        let stale = setup.tasks.launch(older)
+        #expect(stale.completions == [false], "the older request's launch did not complete at once")
+        #expect(!setup.background.holdsWork, "the older request became the running task")
+        #expect(setup.background.isContinuedRequested, "the request asked for was dropped")
+
+        let task = setup.tasks.launch(current)
+        #expect(setup.background.holdsWork, "the request asked for did not start")
+        #expect(!setup.background.isContinuedRequested)
+        await task.completed.wait(for: 1, "the drain did not complete the task")
+        #expect(task.completions == [true])
+        #expect(stale.completions == [false])
     }
 
     // MARK: - Processing task

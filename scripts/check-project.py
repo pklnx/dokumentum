@@ -7,9 +7,21 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   that must only ever live there: a setting in the .pbxproj overrides the xcconfig without a trace,
   and Xcode's template and capability editor write exactly these. The team must not appear in the
   target attributes either.
-- Each target resolves, per SDK, to its expected bundle identifier, platforms, entitlements file and
-  Info.plist file, through the $(TARGET_NAME) indirection in the xcconfig. A new target needs a row in
-  TARGETS: without its own variables it would silently get the app's identifier.
+- Each target resolves, per SDK, to its expected bundle identifier, platforms, entitlements file,
+  Info.plist file, hardened runtime and app-only Info.plist keys, through the $(TARGET_NAME) indirection in
+  the xcconfig. A new target needs a row in TARGETS: without its own variables it would silently get the
+  app's identifier.
+- The scene manifest and the launch screen (APP_INFO_KEYS) are generated for the iOS app only: they resolve empty
+  for the extension and the test bundles, so their generated Info.plists do not carry them (#9, part 1).
+- The other keys only the app has are in its Info.plist files, never build settings (APP_ONLY_INFO_SETTINGS): an
+  INFOPLIST_KEY_ setting writes its key into every target's Info.plist, also where it resolves empty (measured on
+  #182: an empty category, export compliance false and an empty orientation list in the extension). The iOS file
+  holds the orientations and the App Store keys of step 8 (export compliance, P6 on #9; the category, P7), the Mac
+  file (MAC_APP_INFO_CONTENT) exactly those two App Store keys. CFBundleDisplayName is not app-only: every target
+  carries it on purpose (the share sheet shows the extension under that name), so it stays a project-wide setting.
+- Project.xcconfig sets only the INFOPLIST_KEY_ settings of XCCONFIG_INFOPLIST_SETTINGS (CFBundleDisplayName and the
+  two _Generation keys), and the .pbxproj none: any other one would reach the extension's Info.plist too (review
+  B-N2 on #189). A new key goes into an Info.plist file, or into that list with a reason.
 - The camera's usage text (NSCameraUsageDescription, #5, part 2) is in the iOS app's Config/Info-iOS.plist,
   non-empty, and no build setting sets INFOPLIST_KEY_NSCameraUsageDescription: Xcode writes such a key into
   every target's generated Info.plist, also where it resolves empty (measured: the extension got an empty
@@ -21,6 +33,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   and xcodebuild accept), into PlugIns. It links exactly the package product DokumentumKit, for the
   share queue's format (plan of #4, part 4, T8), and nothing else, and its Info.plist holds exactly the
   reviewed keys and activation rule.
+- The app links exactly the package products APP_PACKAGE_PRODUCTS (DokumentumCore and DokumentumKit), in its
+  package dependencies and in its build phases: scripts/check-privacy-manifest.py scans exactly the sources of those
+  products for the app's privacy manifest, so a new product must be mapped there too (review B-N1 on #189).
 - The app's iOS Info.plist holds exactly the reviewed background modes and background task identifiers
   (IOS_APP_INFO_CONTENT, plan of #6, part 5), and no permitted identifier falls under another one's
   wildcard: the continued-processing tasks and the processing task stay apart (N4).
@@ -42,22 +57,38 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   uses only the conditions in XCCONFIG_CONDITIONS: this script resolves them on the bare SDK names, and
   Xcode also honours patterns that match only versioned names, such as [sdk=macosx*.*].
 - No setting of Xcode's "App Sandbox & Hardened Runtime" category is set (CAPABILITY_SETTINGS): these
-  inject entitlements past the files. The one exception is ENABLE_HARDENED_RUNTIME = NO in
-  Project.xcconfig, until step 8 decides hardened runtime. The App Sandbox comes from the macOS
-  entitlements file; if that alone turns out not to be enough in a signed build, the fix is a later
-  change, and this rule must change with it.
+  inject entitlements past the files. The one exception is hardened runtime, decided in step 8 (P1 on #9: the
+  shipped app only, no exception entitlements): Project.xcconfig sets ENABLE_HARDENED_RUNTIME only as the one
+  unconditioned line `ENABLE_HARDENED_RUNTIME = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))`, every
+  DOKUMENTUM_HARDENED_RUNTIME_* variable is an unconditioned YES or NO, and TARGETS pins YES for the app and NO
+  for the extension and the test targets (a hardened UI test runner cannot load the ad hoc test bundle). The
+  RUNTIME_EXCEPTION_* settings stay barred. The App Sandbox comes from the macOS entitlements file; if that alone
+  turns out not to be enough in a signed build, the fix is a later change, and this rule must change with it.
 - The shared scheme exists and references both test plans; Xcode Cloud only sees shared schemes.
 - The test plans hold exactly the expected test targets, and each one resolves. A plan's target in
   a local package needs a folder reference to that package in the project: without one xcodebuild
   drops the target silently and reports success.
 - The Xcode Cloud scripts exist and are executable (Xcode Cloud ignores them otherwise), and
   .xcode-version holds a version.
+- The look (step 8, P3 and P4 on #9). The app icon is Dokumentum/AppIcon.icon, text only: icon.json parses, every
+  image-name exists in its Assets/ folder and is SVG text, no other file is there, and the layers are the byte-identical
+  copies of pklnx/design-system that ICON_SOURCE and ICON_LAYERS pin (sha256). The old AppIcon set, which would collide
+  with it, stays gone. TARGETS pins the app icon's name (the app only: the extension's catalog has none) and the
+  global accent per target: AccentColor for the iOS app and the extension, none for the Mac app (P4's fallback,
+  measured on #184).
+- The accent's contrast, computed from the colour sets with WCAG's formula (CONTRAST_ROLES): the tint (AccentColor) as
+  text on #ffffff and #f2f2f7 in light and on #000000, #1c1c1e and #2c2c2e in dark; white on the fill (AccentFill)
+  and on the extension's AccentColor, light and dark. Each pair reaches 4.5:1. The UISmoke audit does not see a closed
+  swipe action, hence this check.
+- No tracked file has a NUL byte in its first 8 KB: the repository holds text only, with no exceptions (plan of #9,
+  probe 2).
 
     python3 scripts/check-project.py                 # from the repository root
     python3 scripts/check-project.py --self-test
 """
-import json
 import fnmatch
+import hashlib
+import json
 import os
 import pathlib
 import plistlib
@@ -90,8 +121,12 @@ XCCONFIG_ONLY = {
     "MACOSX_DEPLOYMENT_TARGET",
     "PRODUCT_BUNDLE_IDENTIFIER",
     "SWIFT_VERSION",
-    # Not even there: see CAMERA_USAGE_KEY.
+    # Not even there: see CAMERA_USAGE_KEY and APP_ONLY_INFO_SETTINGS.
     "INFOPLIST_KEY_NSCameraUsageDescription",
+    "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption",
+    "INFOPLIST_KEY_LSApplicationCategoryType",
+    "INFOPLIST_KEY_UISupportedInterfaceOrientations",
+    "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone",
 }
 # Never in the .pbxproj either: with no signing identity, Config/Unsigned.xcconfig does this from outside.
 SIGNING_OVERRIDES = {"CODE_SIGN_IDENTITY", "CODE_SIGNING_ALLOWED", "OTHER_CODE_SIGN_FLAGS"}
@@ -127,6 +162,10 @@ CAPABILITY_SETTINGS = {
     "RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION",
     "RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION",
 }
+# Hardened runtime, per target (#9, P1): the only form of ENABLE_HARDENED_RUNTIME, and the prefix of its variables.
+HARDENED_RUNTIME = "ENABLE_HARDENED_RUNTIME"
+HARDENED_RUNTIME_FORM = "$(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))"
+HARDENED_RUNTIME_PREFIX = "DOKUMENTUM_HARDENED_RUNTIME_"
 ALLOWED_INCLUDE = '#include? "Local.xcconfig"'
 # Every condition Project.xcconfig may use, as a whole. A list, not a pattern: see the docstring.
 XCCONFIG_CONDITIONS = {"", "[sdk=iphone*]", "[sdk=iphoneos*]", "[sdk=iphonesimulator*]", "[sdk=macosx*]"}
@@ -139,6 +178,7 @@ IOS_APP_ENTITLEMENTS = "Config/Dokumentum-iOS.entitlements"
 MAC_APP_ENTITLEMENTS = "Config/Dokumentum-macOS.entitlements"
 SHARE_ENTITLEMENTS = "Config/DokumentumShare.entitlements"
 IOS_APP_INFO = "Config/Info-iOS.plist"
+MAC_APP_INFO = "Config/Info-macOS.plist"
 SHARE_INFO = "Config/DokumentumShare-Info.plist"
 USER_SELECTED_READ_ONLY = "com.apple.security.files.user-selected.read-only"
 ENTITLEMENTS = {
@@ -169,6 +209,9 @@ SHARE_FORBIDDEN_WORDS = {"DokumentumCore", "SwiftData"}
 DEBUG_ONLY_FOLDERS = ["Dokumentum/Features/SyncLab"]
 # The only package product the extension links: the share queue's format, Foundation only (plan of #4, part 4).
 SHARE_PACKAGE_PRODUCTS = ["DokumentumKit"]
+# The package products the app links. scripts/check-privacy-manifest.py scans their sources for the app's manifest
+# (MANIFESTS there); the two lists change together.
+APP_PACKAGE_PRODUCTS = ["DokumentumCore", "DokumentumKit"]
 # The only Swift files that may import FoundationModels: the classifier, and its tests, which construct the
 # framework's errors (#8, part 2, review N6).
 MODEL_IMPORT_FILES = {
@@ -181,9 +224,15 @@ MODEL_IMPORT = re.compile(
     r"(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?FoundationModels\b")
 # Folders that hold build output, never sources.
 SKIPPED_FOLDERS = {"build", ".build", "DerivedData"}
+# The App Store keys of step 8 (#9, part 1): export compliance (P6: no encryption of its own) and the category (P7).
+# In the app's files on both platforms, never in a build setting (APP_ONLY_INFO_SETTINGS).
+APP_STORE_INFO = {
+    "ITSAppUsesNonExemptEncryption": False,
+    "LSApplicationCategoryType": "public.app-category.productivity",
+}
 # The app's whole iOS Info.plist file (plan of #6, part 5, T13 and N4): CloudKit's silent pushes, and the
-# processing task with the continued-processing tasks, whose identifiers do not overlap. A change of the rule is a
-# change here, on purpose.
+# processing task with the continued-processing tasks, whose identifiers do not overlap; the iPhone orientations and
+# the App Store keys (#9, part 1). A change of the rule is a change here, on purpose.
 BACKGROUND_TASK_PREFIX = "space.pklnx.Dokumentum."
 IOS_APP_INFO_CONTENT = {
     "BGTaskSchedulerPermittedIdentifiers": [
@@ -191,6 +240,30 @@ IOS_APP_INFO_CONTENT = {
         "space.pklnx.Dokumentum.backgroundProcessing",
     ],
     "UIBackgroundModes": ["remote-notification", "processing"],
+    "UISupportedInterfaceOrientations~iphone": [
+        "UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight",
+    ],
+    **APP_STORE_INFO,
+}
+# The Mac app's whole Info.plist file: the App Store keys only.
+MAC_APP_INFO_CONTENT = dict(APP_STORE_INFO)
+# The only INFOPLIST_KEY_ settings Project.xcconfig may set; the .pbxproj sets none. CFBundleDisplayName goes into every
+# target on purpose; the _Generation keys resolve empty outside the iOS app (APP_INFO_KEYS). Anything else would reach
+# the extension's and the test bundles' Info.plists and belongs into an Info.plist file (review B-N2 on #189).
+XCCONFIG_INFOPLIST_SETTINGS = {
+    "INFOPLIST_KEY_CFBundleDisplayName",
+    "INFOPLIST_KEY_UIApplicationSceneManifest_Generation",
+    "INFOPLIST_KEY_UILaunchScreen_Generation",
+}
+INFOPLIST_SETTING_PREFIX = "INFOPLIST_KEY_"
+# Keys only the app has, which therefore never come from a build setting: such a setting writes its key into every
+# target's generated Info.plist, also where it resolves empty (measured on #182). Not CFBundleDisplayName, which every
+# target carries on purpose.
+APP_ONLY_INFO_SETTINGS = {
+    "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption",
+    "INFOPLIST_KEY_LSApplicationCategoryType",
+    "INFOPLIST_KEY_UISupportedInterfaceOrientations",
+    "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone",
 }
 # The extension's whole Info.plist file: PDFs and images only. A change of the rule is a change here, on purpose.
 SHARE_INFO_CONTENT = {"NSExtension": {
@@ -205,6 +278,42 @@ SHARE_INFO_CONTENT = {"NSExtension": {
 }}
 
 
+# The look (step 8, P3 and P4 on #9; docs/development/index.md, "Look"). The app icon is an Icon Composer bundle of
+# text only. A set and an .icon with the same name would collide, so the old AppIcon set stays gone.
+APP_ICON = "Dokumentum/AppIcon.icon"
+APP_ICON_JSON = f"{APP_ICON}/icon.json"
+APP_ICON_ASSETS = f"{APP_ICON}/Assets"
+APP_ICON_SET = "Dokumentum/Assets.xcassets/AppIcon.appiconset"
+# The layers are byte-identical copies of project/assets/Logos/products/ in pklnx/design-system at ICON_SOURCE, never
+# edited here. A new mark is generated there and copied here, with the new commit and sha256 in these two constants.
+ICON_SOURCE = "pklnx/design-system 526f6ed93f13e87395240f2e0595dde881bfde6c"
+ICON_LAYERS = {
+    "dokumentum-icon-layer-ink.svg": "f8009c858c69e11125c6146295984d52e99b98c7825fac9af704490acc8310fc",
+    "dokumentum-icon-layer-star.svg": "c1bc8922c74fbf4469e79ba51e3a6a189d581bd413e83f6b4e7cdc3f8728fe0f",
+}
+APP_ICON_SETTING = "ASSETCATALOG_COMPILER_APPICON_NAME"
+ACCENT_SETTING = "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"
+# The accent's two roles (P4): the tint (AccentColor) as text and glyphs on iOS's backgrounds, the fill (AccentFill,
+# and the extension's AccentColor, whose only use is the prominent OK button) under white text. Each colour must reach
+# MINIMUM_CONTRAST against every background of its role, in light and in dark; a colour set without a dark colour shows
+# its universal colour in dark too. The UISmoke audit does not see a closed swipe action, hence this computed check.
+APP_TINT = "Dokumentum/Assets.xcassets/AccentColor.colorset"
+APP_FILL = "Dokumentum/Assets.xcassets/AccentFill.colorset"
+SHARE_FILL = "DokumentumShare/Assets.xcassets/AccentColor.colorset"
+MINIMUM_CONTRAST = 4.5
+WHITE = 0xFFFFFF
+TINT_BACKGROUNDS = {"light": [0xFFFFFF, 0xF2F2F7], "dark": [0x000000, 0x1C1C1E, 0x2C2C2E]}
+FILL_BACKGROUNDS = {"light": [WHITE], "dark": [WHITE]}
+CONTRAST_ROLES = {
+    APP_TINT: ("the tint, as text on", TINT_BACKGROUNDS),
+    APP_FILL: ("the fill, under the text", FILL_BACKGROUNDS),
+    SHARE_FILL: ("the extension's fill, under the text", FILL_BACKGROUNDS),
+}
+# A tracked file with a NUL byte in its first BINARY_PROBE_BYTES is binary. The repository holds text only (plan of #9,
+# probe 2: the icon too), with no exceptions.
+BINARY_PROBE_BYTES = 8192
+
+
 def on_ios_and_mac(ios, mac):
     return {"iphoneos": ios, "iphonesimulator": ios, "macosx": mac}
 
@@ -216,31 +325,61 @@ CAMERA_USAGE_SETTING = "INFOPLIST_KEY_NSCameraUsageDescription"
 assert CAMERA_USAGE_SETTING in XCCONFIG_ONLY
 
 
+# The generated keys only the iOS app has, and what the app resolves them to per SDK; every other target resolves
+# them empty, and a _Generation setting that resolves empty adds no key (#9, part 1).
+APP_INFO_KEYS = {
+    "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": on_ios_and_mac("YES", ""),
+    "INFOPLIST_KEY_UILaunchScreen_Generation": on_ios_and_mac("YES", ""),
+}
+NO_APP_INFO_KEYS = {key: on_ios_and_mac("", "") for key in APP_INFO_KEYS}
+# Keys TARGETS gives per SDK; the files among them must exist.
+PER_SDK_KEYS = ["CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE", HARDENED_RUNTIME, APP_ICON_SETTING, ACCENT_SETTING,
+                *APP_INFO_KEYS]
+FILE_KEYS = {"CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE"}
+
+
 # What each target must resolve to, per SDK it supports.
 TARGETS = {
     APP_TARGET: {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum",
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(IOS_APP_ENTITLEMENTS, MAC_APP_ENTITLEMENTS),
-        "INFOPLIST_FILE": on_ios_and_mac(IOS_APP_INFO, ""),
+        "INFOPLIST_FILE": on_ios_and_mac(IOS_APP_INFO, MAC_APP_INFO),
+        HARDENED_RUNTIME: on_ios_and_mac("YES", "YES"),
+        APP_ICON_SETTING: on_ios_and_mac("AppIcon", "AppIcon"),
+        # P4's Mac fallback: white on the list's selection reached 3.76:1 in dark under the tint (measured on #184).
+        ACCENT_SETTING: on_ios_and_mac("AccentColor", ""),
+        **APP_INFO_KEYS,
     },
     SHARE_TARGET: {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.Share",
         "SUPPORTED_PLATFORMS": IOS_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac(SHARE_ENTITLEMENTS, None),
         "INFOPLIST_FILE": on_ios_and_mac(SHARE_INFO, None),
+        HARDENED_RUNTIME: on_ios_and_mac("NO", None),
+        APP_ICON_SETTING: on_ios_and_mac("", None),
+        ACCENT_SETTING: on_ios_and_mac("AccentColor", None),
+        **NO_APP_INFO_KEYS,
     },
     "DokumentumTests": {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.Tests",
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
+        HARDENED_RUNTIME: on_ios_and_mac("NO", "NO"),
+        APP_ICON_SETTING: on_ios_and_mac("", ""),
+        ACCENT_SETTING: on_ios_and_mac("", ""),
+        **NO_APP_INFO_KEYS,
     },
     "DokumentumUITests": {
         "PRODUCT_BUNDLE_IDENTIFIER": "space.pklnx.Dokumentum.UITests",
         "SUPPORTED_PLATFORMS": ALL_SDKS,
         "CODE_SIGN_ENTITLEMENTS": on_ios_and_mac("", ""),
         "INFOPLIST_FILE": on_ios_and_mac("", ""),
+        HARDENED_RUNTIME: on_ios_and_mac("NO", "NO"),
+        APP_ICON_SETTING: on_ios_and_mac("", ""),
+        ACCENT_SETTING: on_ios_and_mac("", ""),
+        **NO_APP_INFO_KEYS,
     },
 }
 # Config/Unsigned.xcconfig: macOS only, so the simulator keeps the real team and keys.
@@ -433,6 +572,9 @@ def check_project_setting(where, key, protected):
         return [f"{where}: sets {key}, which injects entitlements past the entitlements files"]
     if name in SIGNING_OVERRIDES:
         return [f"{where}: sets {key}; no project or target overrides signing ({UNSIGNED_XCCONFIG} does, from outside)"]
+    if name.startswith(INFOPLIST_SETTING_PREFIX) and name not in protected:
+        return [f"{where}: sets {key}; Info.plist keys come from {XCCONFIG} (XCCONFIG_INFOPLIST_SETTINGS) or the "
+                "Info.plist files in Config/, never from the .pbxproj"]
     if name in protected:
         return [f"{where}: sets {key}, which belongs into {XCCONFIG}"]
     return []
@@ -445,15 +587,34 @@ def check_xcconfig(text, settings):
         if line != ALLOWED_INCLUDE:
             problems.append(f"{XCCONFIG}: {line}; the only include allowed is {ALLOWED_INCLUDE}")
     for key in sorted(CAPABILITY_SETTINGS & set(settings)):
+        if key == HARDENED_RUNTIME and settings[key] == [("", HARDENED_RUNTIME_FORM)]:
+            continue
         for condition, value in settings[key]:
-            if (key, condition, value) != ("ENABLE_HARDENED_RUNTIME", "", "NO"):
+            if key == HARDENED_RUNTIME:
+                problems.append(f"{XCCONFIG}: sets {key}{condition} = {value}; hardened runtime is set per target, "
+                                f"only as the one line {key} = {HARDENED_RUNTIME_FORM} (#9, P1)")
+            else:
                 problems.append(f"{XCCONFIG}: sets {key}{condition} = {value}, which injects entitlements past "
                                 "the entitlements files")
+    for key, lines in sorted(settings.items()):
+        if key.startswith(HARDENED_RUNTIME_PREFIX):
+            for condition, value in lines:
+                if condition or value not in ("YES", "NO"):
+                    problems.append(f"{XCCONFIG}: sets {key}{condition} = {value}; a target's hardened runtime is "
+                                    "one unconditioned YES or NO")
     for key in sorted(XCCONFIG_SIGNING_OVERRIDES & set(settings)):
         problems.append(f"{XCCONFIG}: sets {key}; a build that signs differently says so on its command line")
     if CAMERA_USAGE_SETTING in settings:
         problems.append(f"{XCCONFIG}: uses {CAMERA_USAGE_SETTING}, which puts the key into every target's Info.plist; "
                         f"the text belongs into {IOS_APP_INFO}")
+    for key in sorted(settings):
+        if key.startswith(INFOPLIST_SETTING_PREFIX) and key not in XCCONFIG_INFOPLIST_SETTINGS | {CAMERA_USAGE_SETTING}:
+            problems.append(f"{XCCONFIG}: sets {key}, which is not in XCCONFIG_INFOPLIST_SETTINGS: an INFOPLIST_KEY_ "
+                            "setting reaches every target's Info.plist, also the extension's; put the key into the "
+                            "app's Info.plist files, or into that list with a reason")
+    for key in sorted(APP_ONLY_INFO_SETTINGS & set(settings)):
+        problems.append(f"{XCCONFIG}: uses {key}, which puts the key into every target's Info.plist, also the "
+                        f"extension's; it belongs into {IOS_APP_INFO} and {MAC_APP_INFO}")
     for key, lines in sorted(settings.items()):
         for condition, _ in lines:
             if condition not in XCCONFIG_CONDITIONS:
@@ -491,13 +652,13 @@ def check_targets(root, objects, project, settings):
                 actual = resolve(settings, key, name, sdk)
                 if actual != expected[key]:
                     problems.append(f"target {name}: {key} resolves to '{actual}' on {sdk}, expected '{expected[key]}'")
-        for key in ("CODE_SIGN_ENTITLEMENTS", "INFOPLIST_FILE"):
+        for key in PER_SDK_KEYS:
             for sdk in sdks:
                 actual = resolve(settings, key, name, sdk)
                 if actual != expected[key][sdk]:
                     problems.append(f"target {name}: {key} resolves to '{actual}' on {sdk}, "
                                     f"expected '{expected[key][sdk]}'")
-                if actual and not (root / actual).is_file():
+                if key in FILE_KEYS and actual and not (root / actual).is_file():
                     problems.append(f"target {name}: {key} on {sdk} names {actual}, which does not exist")
     return problems
 
@@ -544,10 +705,17 @@ def check_info_plists(root):
         camera = actual.pop(CAMERA_USAGE_KEY, None)
         if not isinstance(camera, str) or not camera.strip():
             problems.append(f"{IOS_APP_INFO}: {CAMERA_USAGE_KEY} must hold the camera's usage text, found {camera!r}")
-        if actual != IOS_APP_INFO_CONTENT:
+        if actual != IOS_APP_INFO_CONTENT or not isinstance(actual.get("ITSAppUsesNonExemptEncryption"), bool):
             problems.append(f"{IOS_APP_INFO}: must hold exactly the reviewed background modes and task identifiers "
                             f"and {CAMERA_USAGE_KEY} (IOS_APP_INFO_CONTENT in scripts/check-project.py), found {actual}")
         problems += check_task_identifiers(actual.get("BGTaskSchedulerPermittedIdentifiers"))
+    actual, problem = read_plist(root, MAC_APP_INFO)
+    if problem:
+        problems.append(problem)
+    elif actual != MAC_APP_INFO_CONTENT or any(type(actual[key]) is not type(value)
+                                               for key, value in MAC_APP_INFO_CONTENT.items()):
+        problems.append(f"{MAC_APP_INFO}: must hold exactly the App Store keys (MAC_APP_INFO_CONTENT in "
+                        f"scripts/check-project.py), found {actual}")
     actual, problem = read_plist(root, SHARE_INFO)
     if problem:
         problems.append(problem)
@@ -741,6 +909,30 @@ def check_share_extension(objects, project):
     return problems
 
 
+def check_app_packages(objects, project):
+    """The app links exactly APP_PACKAGE_PRODUCTS, as dependencies and in its build phases."""
+    by_name = {objects.get(target_id, {}).get("name"): target_id for target_id in project.get("targets", [])}
+    if APP_TARGET not in by_name:
+        return []  # check_targets reports it.
+    app = objects[by_name[APP_TARGET]]
+    problems = []
+    linked = product_names(objects, app.get("packageProductDependencies", []))
+    if linked != APP_PACKAGE_PRODUCTS:
+        problems.append(f"target {APP_TARGET}: must link exactly the package products {APP_PACKAGE_PRODUCTS}, found "
+                        f"{linked}; a new product needs its sources in scripts/check-privacy-manifest.py's MANIFESTS")
+    in_phases = []
+    for phase_id in app.get("buildPhases", []):
+        for identifier in objects.get(phase_id, {}).get("files", []):
+            entry = objects.get(identifier, {})
+            if "productRef" in entry:
+                in_phases.append(entry["productRef"])
+    in_phases = product_names(objects, in_phases)
+    if in_phases != APP_PACKAGE_PRODUCTS:
+        problems.append(f"target {APP_TARGET}: its build phases must link exactly the package products "
+                        f"{APP_PACKAGE_PRODUCTS}, found {in_phases}")
+    return problems
+
+
 def check_scheme(root, target_ids):
     path = root / SCHEME
     if not path.is_file():
@@ -795,6 +987,174 @@ def check_test_plan(root, plan, expected, target_ids, paths):
     return problems
 
 
+def svg_text_problem(data):
+    """Why `data` is not SVG text, or None: UTF-8 without NUL bytes whose root element is <svg>."""
+    if b"\0" in data:
+        return "has NUL bytes"
+    try:
+        root = xml.etree.ElementTree.fromstring(data.decode("utf-8"))
+    except (UnicodeDecodeError, xml.etree.ElementTree.ParseError) as error:
+        return f"is not XML text ({error})"
+    if root.tag not in ("svg", "{http://www.w3.org/2000/svg}svg"):
+        return f"has the root element {root.tag}"
+    return None
+
+
+def check_app_icon(root):
+    """The .icon bundle: icon.json parses, its layers exist and are SVG text, and they are ICON_SOURCE's files."""
+    problems = []
+    if (root / APP_ICON_SET).exists():
+        problems.append(f"{APP_ICON_SET} exists; it would collide with {APP_ICON}, the app icon (#9, P3)")
+    path = root / APP_ICON_JSON
+    if not path.is_file():
+        return problems + [f"{APP_ICON_JSON} is missing"]
+    try:
+        icon = json.loads(path.read_text(encoding="utf-8"))
+        names = [layer["image-name"] for group in icon["groups"] for layer in group["layers"]]
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
+        return problems + [f"{APP_ICON_JSON}: cannot be parsed as an Icon Composer file with groups of layers: {error!r}"]
+    if not names:
+        problems.append(f"{APP_ICON_JSON}: has no layer")
+    for name in names:
+        if not isinstance(name, str) or not name or "/" in name or name.startswith("."):
+            problems.append(f"{APP_ICON_JSON}: the image-name {name!r} is not a file name in {APP_ICON_ASSETS}")
+            continue
+        layer = root / APP_ICON_ASSETS / name
+        if not layer.is_file():
+            problems.append(f"{APP_ICON_JSON}: names {name}, which does not exist in {APP_ICON_ASSETS}")
+            continue
+        data = layer.read_bytes()
+        problem = svg_text_problem(data)
+        if problem:
+            problems.append(f"{APP_ICON_ASSETS}/{name}: {problem}; every layer is SVG text (#9, P3)")
+        elif hashlib.sha256(data).hexdigest() != ICON_LAYERS.get(name):
+            problems.append(f"{APP_ICON_ASSETS}/{name}: is not the copy of {ICON_SOURCE} that ICON_LAYERS pins; the "
+                            "layers are generated there and copied here byte-identical, never edited here")
+    assets = root / APP_ICON_ASSETS
+    # Hidden files (Finder's .DS_Store) are not in git and not compiled into the icon.
+    present = sorted(entry.name for entry in assets.iterdir() if not entry.name.startswith(".")) if assets.is_dir() else []
+    for name in present:
+        if name not in names:
+            problems.append(f"{APP_ICON_ASSETS}/{name}: is not a layer of {APP_ICON_JSON}")
+    if sorted(names) != sorted(ICON_LAYERS):
+        problems.append(f"{APP_ICON_JSON}: the layers are {sorted(names)}, ICON_LAYERS pins {sorted(ICON_LAYERS)}")
+    return problems
+
+
+def colour_component(text):
+    """A colour set's component as 0-1: "0xRR" and "255" are 8-bit, a value with a point is a fraction."""
+    text = str(text).strip()
+    if text.lower().startswith("0x"):
+        value = int(text, 16) / 255
+    elif "." in text:
+        value = float(text)
+    else:
+        value = int(text) / 255
+    if not 0 <= value <= 1:
+        raise ValueError(f"{text} is out of range")
+    return value
+
+
+def read_colour_set(root, name):
+    """{"light": 0xRRGGBB, "dark": 0xRRGGBB} of a colour set, or a problem. Only sRGB, opaque, universal colours, with
+    no appearance but dark; the universal colour also shows in dark when there is no dark one."""
+    path = root / name / "Contents.json"
+    if not path.is_file():
+        return None, f"{name}/Contents.json is missing"
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))["colors"]
+        colours = {}
+        for entry in entries:
+            appearances = entry.get("appearances", [])
+            if entry.get("idiom") != "universal" or appearances not in (
+                    [], [{"appearance": "luminosity", "value": "dark"}], [{"appearance": "luminosity", "value": "light"}]):
+                return None, (f"{name}: only universal colours with no appearance but light or dark are checked, found "
+                              f"{entry.get('idiom')} {appearances}")
+            colour = entry["color"]
+            if colour.get("color-space") != "srgb":
+                return None, f"{name}: the colour space is {colour.get('color-space')}, the contrast check needs srgb"
+            components = colour["components"]
+            # Xcode writes the alpha as a fraction in every form ("1.000").
+            if float(components.get("alpha", "1")) != 1:
+                return None, f"{name}: a colour is not opaque"
+            rgb = 0
+            for channel in ("red", "green", "blue"):
+                rgb = rgb << 8 | round(colour_component(components[channel]) * 255)
+            mode = appearances[0]["value"] if appearances else "any"
+            colours[mode] = rgb
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+        return None, f"{name}/Contents.json: cannot be read as a colour set: {error!r}"
+    light = colours.get("light", colours.get("any"))
+    dark = colours.get("dark", colours.get("any"))
+    if light is None or dark is None:
+        return None, f"{name}: needs a universal colour, or a light and a dark one"
+    return {"light": light, "dark": dark}, None
+
+
+def relative_luminance(rgb):
+    """WCAG 2 relative luminance of an sRGB colour 0xRRGGBB."""
+    def linear(channel):
+        value = channel / 255
+        return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+    return 0.2126 * linear(rgb >> 16 & 0xFF) + 0.7152 * linear(rgb >> 8 & 0xFF) + 0.0722 * linear(rgb & 0xFF)
+
+
+def contrast_ratio(first, second):
+    """WCAG 2 contrast ratio of two sRGB colours."""
+    lighter, darker = sorted((relative_luminance(first), relative_luminance(second)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def check_accent_contrast(root):
+    """Every role's colour reaches MINIMUM_CONTRAST on every background of its role (CONTRAST_ROLES, #9, P4)."""
+    problems = []
+    for name, (role, backgrounds) in CONTRAST_ROLES.items():
+        colours, problem = read_colour_set(root, name)
+        if problem:
+            problems.append(problem)
+            continue
+        for mode, others in backgrounds.items():
+            for other in others:
+                ratio = contrast_ratio(colours[mode], other)
+                if ratio < MINIMUM_CONTRAST:
+                    # Compared unrounded; a ratio that rounds to the minimum is shown with four decimals.
+                    shown = f"{ratio:.2f}" if round(ratio, 2) < MINIMUM_CONTRAST else f"{ratio:.4f}"
+                    problems.append(f"{name}: {role} #{other:06x} in {mode} mode is #{colours[mode]:06x}, "
+                                    f"{shown}:1; at least {MINIMUM_CONTRAST}:1 (#9, P4)")
+    return problems
+
+
+def tracked_files(root):
+    """The files git tracks under `root`; in a folder without git (the self-test's fixtures), every file."""
+    try:
+        result = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True)
+    except OSError as error:
+        raise ValueError(f"cannot ask git for the tracked files: {error}")
+    if result.returncode == 0:
+        return [name for name in result.stdout.decode("utf-8", errors="surrogateescape").split("\0") if name]
+    if (root / ".git").exists():
+        raise ValueError(f"cannot ask git for the tracked files: {result.stderr.decode(errors='replace').strip()}")
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
+def check_text_only(root):
+    """No tracked file has a NUL byte in its first BINARY_PROBE_BYTES (#9, probe 2): the repository holds text only."""
+    try:
+        names = tracked_files(root)
+    except ValueError as error:
+        return [str(error)]
+    problems = []
+    for name in names:
+        path = root / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open("rb") as file:
+            if b"\0" in file.read(BINARY_PROBE_BYTES):
+                problems.append(f"{name}: has a NUL byte in its first {BINARY_PROBE_BYTES} bytes, so it is binary; the "
+                                "repository holds text only (plan of #9, probe 2)")
+    return problems
+
+
 def check(root):
     """The problems of the repository at `root` (empty when it is fine)."""
     problems = []
@@ -823,6 +1183,7 @@ def check(root):
     except ValueError as error:
         problems.append(f"{XCCONFIG}: {error}")
     problems += check_share_extension(objects, project)
+    problems += check_app_packages(objects, project)
     problems += check_share_sources(root)
     problems += check_model_sources(root)
     problems += check_debug_only_sources(root)
@@ -830,6 +1191,9 @@ def check(root):
     problems += check_entitlements(root)
     problems += check_info_plists(root)
     problems += check_unsigned_xcconfig(root)
+    problems += check_app_icon(root)
+    problems += check_accent_contrast(root)
+    problems += check_text_only(root)
 
     target_ids = {target_id: objects.get(target_id, {}).get("name") for target_id in project.get("targets", [])}
     problems += check_scheme(root, target_ids)
@@ -853,7 +1217,7 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		A0 = {isa = PBXProject; attributes = {TargetAttributes = {A1 = {CreatedOnToolsVersion = 27.1;};};};
 			buildConfigurationList = A2; mainGroup = A3; targets = (A1 /* Dokumentum */, A7, A8, C0, );};
 		A1 /* Dokumentum */ = {isa = PBXNativeTarget; buildConfigurationList = A4; name = Dokumentum;
-			buildPhases = (C2, ); dependencies = (C3, );};
+			buildPhases = (C2, F0, ); dependencies = (C3, ); packageProductDependencies = (D0, D3, );};
 		A2 = {isa = XCConfigurationList; buildConfigurations = (A5, );};
 		A3 = {isa = PBXGroup; children = (A6, B0, B1, ); sourceTree = "<group>";};
 		A4 = {isa = XCConfigurationList; buildConfigurations = (A9, );};
@@ -878,6 +1242,10 @@ FIXTURE_PROJECT = """// !$*UTF8*$!
 		D0 = {isa = XCSwiftPackageProductDependency; productName = DokumentumCore;};
 		D1 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
 		D2 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
+		D3 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKit;};
+		F0 = {isa = PBXFrameworksBuildPhase; files = (F1, F2, );};
+		F1 = {isa = PBXBuildFile; productRef = D0;};
+		F2 = {isa = PBXBuildFile; productRef = D3;};
 	};
 	rootObject = A0;
 }
@@ -886,7 +1254,11 @@ FIXTURE_XCCONFIG = """// A comment = not a setting
 IPHONEOS_DEPLOYMENT_TARGET = 27.0
 TARGETED_DEVICE_FAMILY = 1
 ENABLE_PREVIEWS = YES
-ENABLE_HARDENED_RUNTIME = NO
+DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumShare = NO
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumTests = NO
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests = NO
+ENABLE_HARDENED_RUNTIME = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))
 CODE_SIGN_STYLE = Automatic
 DEVELOPMENT_TEAM = 88GY2V9C2A
 DOKUMENTUM_BUNDLE_ID_SUFFIX_Dokumentum =
@@ -904,9 +1276,19 @@ DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx*] = Config/Dokumentum-macOS.entitl
 DOKUMENTUM_ENTITLEMENTS_DokumentumShare = Config/DokumentumShare.entitlements
 CODE_SIGN_ENTITLEMENTS = $(DOKUMENTUM_ENTITLEMENTS_$(TARGET_NAME))
 DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
-DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =
+DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] = Config/Info-macOS.plist
 DOKUMENTUM_INFOPLIST_DokumentumShare = Config/DokumentumShare-Info.plist
 INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))
+INFOPLIST_KEY_CFBundleDisplayName = Dokumentum
+DOKUMENTUM_IOS_APP_SCENES_Dokumentum = YES
+INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
+INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
+DOKUMENTUM_APPICON_Dokumentum = AppIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = $(DOKUMENTUM_APPICON_$(TARGET_NAME))
+DOKUMENTUM_ACCENT_Dokumentum = AccentColor
+DOKUMENTUM_ACCENT_DokumentumShare = AccentColor
+DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*] =
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = $(DOKUMENTUM_ACCENT_$(TARGET_NAME))
 #include? "Local.xcconfig"
 """
 FIXTURE_UNSIGNED = """// A comment
@@ -927,6 +1309,37 @@ def fixture_plan(*targets):
     return json.dumps({"testTargets": [
         {"target": {"containerPath": container, "identifier": identifier, "name": name}}
         for container, identifier, name in targets]})
+
+
+FIXTURE_ICON_JSON = json.dumps({
+    "fill": {"solid": "extended-srgb:0.08627,0.08627,0.08627,1.00000"},
+    "groups": [{"layers": [
+        {"image-name": "dokumentum-icon-layer-star.svg", "name": "star"},
+        {"image-name": "dokumentum-icon-layer-ink.svg", "name": "ink"},
+    ]}],
+    "supported-platforms": {"squares": "shared"},
+}, indent=2)
+
+
+def fixture_colour(rgb, appearance=None, space="srgb", alpha="1.000"):
+    """One entry of a colour set's "colors", in Xcode's hexadecimal form."""
+    entry = {"color": {"color-space": space, "components": {
+        "alpha": alpha, "red": f"0x{rgb[0:2]}", "green": f"0x{rgb[2:4]}", "blue": f"0x{rgb[4:6]}"}}, "idiom": "universal"}
+    if appearance:
+        entry["appearances"] = [{"appearance": "luminosity", "value": appearance}]
+    return entry
+
+
+def fixture_colour_set(*entries):
+    return json.dumps({"colors": list(entries), "info": {"author": "xcode", "version": 1}}, indent=2)
+
+
+# The colour sets as decided (#9, P4).
+FIXTURE_COLOUR_SETS = {
+    APP_TINT: fixture_colour_set(fixture_colour("6929C4"), fixture_colour("BE95FF", "dark")),
+    APP_FILL: fixture_colour_set(fixture_colour("8A3FFC")),
+    SHARE_FILL: fixture_colour_set(fixture_colour("8A3FFC")),
+}
 
 
 FIXTURE_DEFAULT_PLAN = fixture_plan(
@@ -961,6 +1374,16 @@ def write_fixture(root):
         (root / name).write_bytes(plistlib.dumps(content))
     (root / IOS_APP_INFO).write_bytes(plistlib.dumps(IOS_APP_INFO_FIXTURE))
     (root / SHARE_INFO).write_bytes(plistlib.dumps(SHARE_INFO_CONTENT))
+    (root / MAC_APP_INFO).write_bytes(plistlib.dumps(MAC_APP_INFO_CONTENT))
+    # The real layers: their hashes are pinned, so the fixture cannot make up its own.
+    repository = pathlib.Path(__file__).resolve().parent.parent
+    (root / APP_ICON_ASSETS).mkdir(parents=True)
+    (root / APP_ICON_JSON).write_text(FIXTURE_ICON_JSON, encoding="utf-8")
+    for name in ICON_LAYERS:
+        (root / APP_ICON_ASSETS / name).write_bytes((repository / APP_ICON_ASSETS / name).read_bytes())
+    for name, text in FIXTURE_COLOUR_SETS.items():
+        (root / name).mkdir(parents=True)
+        (root / name / "Contents.json").write_text(text, encoding="utf-8")
 
 
 # The self-test's Info.plist: the reviewed content plus a camera text (its value is the maintainer's, not pinned).
@@ -1073,6 +1496,44 @@ def self_test():
     def not_executable(name):
         return lambda root: os.chmod(root / name, 0o644)
 
+    def write_bytes(name, data):
+        def apply(root):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+        return apply
+
+    def in_git(*names):
+        """A repository of the fixture's files; `names` are left untracked."""
+        def apply(root):
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "-A", "--", ".", *[f":!{name}" for name in names]],
+                           check=True, capture_output=True)
+        return apply
+
+    def then(*steps):
+        def apply(root):
+            for step in steps:
+                step(root)
+        return apply
+
+    def colour_set(name, *entries):
+        return write(f"{name}/Contents.json", fixture_colour_set(*entries))
+
+    def colour(rgb, appearance=None, **options):
+        return fixture_colour(rgb, appearance, **options)
+
+    def layer(name):
+        return f"{APP_ICON_ASSETS}/{name}"
+
+    star = "dokumentum-icon-layer-star.svg"
+    ink = "dokumentum-icon-layer-ink.svg"
+    png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\4\0\0\0\4\0\x08\x06\0\0\0"
+    fractions = {"color": {"color-space": "srgb", "components": {
+        "alpha": "1.000", "red": "0.412", "green": "0.161", "blue": "0.769"}}, "idiom": "universal"}
+    integers = {"appearances": [{"appearance": "luminosity", "value": "dark"}], "color": {"color-space": "srgb",
+                "components": {"alpha": "1.000", "red": "190", "green": "149", "blue": "255"}}, "idiom": "universal"}
+    high_contrast = {"appearances": [{"appearance": "contrast", "value": "high"}], **fixture_colour("4F2196")}
+
     cases = [
         ("the fixture is fine", lambda root: None, None),
         ("target IPHONEOS_DEPLOYMENT_TARGET", in_target("IPHONEOS_DEPLOYMENT_TARGET"), "sets IPHONEOS_DEPLOYMENT_TARGET"),
@@ -1137,7 +1598,7 @@ def self_test():
         ("platforms through :default=", edit(XCCONFIG, "$(DOKUMENTUM_PLATFORMS_$(TARGET_NAME))",
                                              "$(DOKUMENTUM_PLATFORMS_$(TARGET_NAME):default=iphoneos iphonesimulator macosx)"),
          "uses :default="),
-        ("the app's Info.plist reaches macOS", edit(XCCONFIG, "DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =\n", ""),
+        ("the app's Info.plist reaches macOS", edit(XCCONFIG, "DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] = Config/Info-macOS.plist\n", ""),
          "target Dokumentum: INFOPLIST_FILE resolves to 'Config/Info-iOS.plist' on macosx"),
         ("the app has no Info.plist", edit(XCCONFIG, "DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist\n", ""),
          "target Dokumentum: INFOPLIST_FILE resolves to '' on iphoneos"),
@@ -1214,12 +1675,133 @@ def self_test():
         ("xcconfig requires Local.xcconfig", edit(XCCONFIG, '#include? "Local.xcconfig"', '#include "Local.xcconfig"'),
          "the only include allowed"),
         # Capability settings.
-        ("hardened runtime on", edit(XCCONFIG, "ENABLE_HARDENED_RUNTIME = NO", "ENABLE_HARDENED_RUNTIME = YES"), "ENABLE_HARDENED_RUNTIME = YES"),
-        ("hardened runtime with a condition", edit(XCCONFIG, "ENABLE_HARDENED_RUNTIME = NO", "ENABLE_HARDENED_RUNTIME[sdk=macosx*] = NO"),
-         "ENABLE_HARDENED_RUNTIME[sdk=macosx*] = NO"),
-        ("hardened runtime off plus on", in_xcconfig("ENABLE_HARDENED_RUNTIME[sdk=macosx*] = YES"), "ENABLE_HARDENED_RUNTIME[sdk=macosx*] = YES"),
-        ("target hardened runtime off", in_target("ENABLE_HARDENED_RUNTIME"), "sets ENABLE_HARDENED_RUNTIME"),
-        ("project hardened runtime off", in_project("ENABLE_HARDENED_RUNTIME"), "sets ENABLE_HARDENED_RUNTIME"),
+        # Hardened runtime (#9, P1): the app only, per target.
+        ("hardened runtime project-wide YES", edit(XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}",
+                                                   "ENABLE_HARDENED_RUNTIME = YES"),
+         "sets ENABLE_HARDENED_RUNTIME = YES; hardened runtime is set per target"),
+        ("hardened runtime project-wide NO", edit(XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}",
+                                                  "ENABLE_HARDENED_RUNTIME = NO"),
+         "sets ENABLE_HARDENED_RUNTIME = NO; hardened runtime is set per target"),
+        ("hardened runtime project-wide NO: the app is not hardened", edit(
+            XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}", "ENABLE_HARDENED_RUNTIME = NO"),
+         "target Dokumentum: ENABLE_HARDENED_RUNTIME resolves to 'NO' on macosx, expected 'YES'"),
+        ("hardened runtime project-wide YES: the UI tests are hardened", edit(
+            XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}", "ENABLE_HARDENED_RUNTIME = YES"),
+         "target DokumentumUITests: ENABLE_HARDENED_RUNTIME resolves to 'YES' on macosx, expected 'NO'"),
+        ("hardened runtime with a condition", edit(XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}",
+                                                   f"ENABLE_HARDENED_RUNTIME[sdk=macosx*] = {HARDENED_RUNTIME_FORM}"),
+         "ENABLE_HARDENED_RUNTIME[sdk=macosx*] = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME)); hardened runtime"),
+        ("hardened runtime per target plus a conditioned line", in_xcconfig_last("ENABLE_HARDENED_RUNTIME[sdk=macosx*] = YES"),
+         "sets ENABLE_HARDENED_RUNTIME[sdk=macosx*] = YES; hardened runtime"),
+        ("hardened runtime missing", edit(XCCONFIG, f"ENABLE_HARDENED_RUNTIME = {HARDENED_RUNTIME_FORM}\n", ""),
+         "target Dokumentum: ENABLE_HARDENED_RUNTIME resolves to '' on macosx, expected 'YES'"),
+        ("the UI tests hardened", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests = NO",
+                                       "DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests = YES"),
+         "target DokumentumUITests: ENABLE_HARDENED_RUNTIME resolves to 'YES' on macosx, expected 'NO'"),
+        ("the unit tests hardened", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_DokumentumTests = NO",
+                                         "DOKUMENTUM_HARDENED_RUNTIME_DokumentumTests = YES"),
+         "target DokumentumTests: ENABLE_HARDENED_RUNTIME resolves to 'YES'"),
+        ("the extension hardened", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_DokumentumShare = NO",
+                                        "DOKUMENTUM_HARDENED_RUNTIME_DokumentumShare = YES"),
+         "target DokumentumShare: ENABLE_HARDENED_RUNTIME resolves to 'YES' on iphoneos, expected 'NO'"),
+        ("the app not hardened", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES",
+                                      "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = NO"),
+         "target Dokumentum: ENABLE_HARDENED_RUNTIME resolves to 'NO'"),
+        ("the app's variable missing", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES\n", ""),
+         "target Dokumentum: ENABLE_HARDENED_RUNTIME resolves to ''"),
+        ("a target's variable with a condition", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES",
+                                                      "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum[sdk=macosx*] = YES"),
+         "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum[sdk=macosx*] = YES; a target's hardened runtime is one unconditioned"),
+        ("a target's variable through another variable", edit(XCCONFIG, "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES",
+                                                               "MY_RUNTIME = YES\nDOKUMENTUM_HARDENED_RUNTIME_Dokumentum = $(MY_RUNTIME)"),
+         "DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = $(MY_RUNTIME); a target's hardened runtime"),
+        ("the UI tests hardened later in the file", in_xcconfig_last("DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests = YES"),
+         "target DokumentumUITests: ENABLE_HARDENED_RUNTIME resolves to 'YES'"),
+        ("a runtime exception", in_xcconfig("RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES"),
+         "sets RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES, which injects"),
+        # The app-only Info.plist keys (#9, part 1).
+        ("the scene manifest for every target", edit(
+            XCCONFIG, "_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))\nINFOPLIST_KEY_UILaunch",
+            "_Generation[sdk=iphone*] = YES\nINFOPLIST_KEY_UILaunch"),
+         "target DokumentumShare: INFOPLIST_KEY_UIApplicationSceneManifest_Generation resolves to 'YES' on iphoneos, expected ''"),
+        ("the launch screen for every target", edit(
+            XCCONFIG, "INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))",
+            "INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES"),
+         "target DokumentumTests: INFOPLIST_KEY_UILaunchScreen_Generation resolves to 'YES'"),
+        ("no scene manifest in the app", edit(XCCONFIG, "DOKUMENTUM_IOS_APP_SCENES_Dokumentum = YES\n", ""),
+         "target Dokumentum: INFOPLIST_KEY_UIApplicationSceneManifest_Generation resolves to '' on iphoneos, expected 'YES'"),
+        ("the scene manifest on macOS", in_xcconfig_last(
+            "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=macosx*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))"),
+         "target Dokumentum: INFOPLIST_KEY_UIApplicationSceneManifest_Generation resolves to 'YES' on macosx"),
+        # The allow-list of INFOPLIST_KEY_ settings (review B-N2 on #189).
+        ("iPad orientations as a setting", in_xcconfig_last(
+            "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait"),
+         "sets INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad, which is not in XCCONFIG_INFOPLIST_SETTINGS"),
+        ("the status bar style as a setting", in_xcconfig_last("INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDefault"),
+         "sets INFOPLIST_KEY_UIStatusBarStyle, which is not in XCCONFIG_INFOPLIST_SETTINGS"),
+        ("a conditioned unknown key", in_xcconfig_last("INFOPLIST_KEY_UIStatusBarStyle[sdk=iphone*] = UIStatusBarStyleDefault"),
+         "sets INFOPLIST_KEY_UIStatusBarStyle, which is not in XCCONFIG_INFOPLIST_SETTINGS"),
+        ("an unknown key through a variable", in_xcconfig_last(
+            "DOKUMENTUM_STYLE_Dokumentum = UIStatusBarStyleDefault\nINFOPLIST_KEY_UIStatusBarStyle = $(DOKUMENTUM_STYLE_$(TARGET_NAME))"),
+         "sets INFOPLIST_KEY_UIStatusBarStyle, which is not in XCCONFIG_INFOPLIST_SETTINGS"),
+        ("an unknown key on a target", in_target("INFOPLIST_KEY_UIStatusBarStyle"),
+         "sets INFOPLIST_KEY_UIStatusBarStyle; Info.plist keys come from"),
+        ("an unknown key on the project", in_project('"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad[sdk=iphone*]"'),
+         "sets INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad[sdk=iphone*]; Info.plist keys come from"),
+        ("the display name on a target", in_target("INFOPLIST_KEY_CFBundleDisplayName"),
+         "sets INFOPLIST_KEY_CFBundleDisplayName, which belongs into"),
+        ("export compliance as a setting", in_xcconfig("INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO"),
+         "uses INFOPLIST_KEY_ITSAppUsesNonExemptEncryption, which puts the key into every target's Info.plist"),
+        ("export compliance through a variable", in_xcconfig(
+            "DOKUMENTUM_ENCRYPTION_Dokumentum = NO\nINFOPLIST_KEY_ITSAppUsesNonExemptEncryption = $(DOKUMENTUM_ENCRYPTION_$(TARGET_NAME))"),
+         "uses INFOPLIST_KEY_ITSAppUsesNonExemptEncryption"),
+        ("the category as a setting", in_xcconfig("INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.productivity"),
+         "uses INFOPLIST_KEY_LSApplicationCategoryType"),
+        ("the orientations as an iPhone setting", in_xcconfig(
+            "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphone*] = UIInterfaceOrientationPortrait"),
+         "uses INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone"),
+        ("the orientations as a setting", in_xcconfig("INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait"),
+         "uses INFOPLIST_KEY_UISupportedInterfaceOrientations,"),
+        ("the category on a target", in_target("INFOPLIST_KEY_LSApplicationCategoryType"),
+         "sets INFOPLIST_KEY_LSApplicationCategoryType, which belongs into"),
+        ("export compliance on the project", in_project("INFOPLIST_KEY_ITSAppUsesNonExemptEncryption"),
+         "sets INFOPLIST_KEY_ITSAppUsesNonExemptEncryption"),
+        ("encryption declared on iOS", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "ITSAppUsesNonExemptEncryption": True}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("export compliance as a number on iOS", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "ITSAppUsesNonExemptEncryption": 0}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("no export compliance on iOS", write(IOS_APP_INFO, plistlib.dumps(
+            {k: v for k, v in IOS_APP_INFO_FIXTURE.items() if k != "ITSAppUsesNonExemptEncryption"}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("another category on iOS", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "LSApplicationCategoryType": "public.app-category.business"}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("portrait only on iOS", write(IOS_APP_INFO, plistlib.dumps(
+            {**IOS_APP_INFO_FIXTURE, "UISupportedInterfaceOrientations~iphone": ["UIInterfaceOrientationPortrait"]}).decode()),
+         "must hold exactly the reviewed background modes"),
+        ("the Mac file is gone", remove(MAC_APP_INFO), f"{MAC_APP_INFO} is missing"),
+        ("the Mac app without a file", edit(XCCONFIG, "DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] = Config/Info-macOS.plist",
+                                            "DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] ="),
+         "target Dokumentum: INFOPLIST_FILE resolves to '' on macosx, expected 'Config/Info-macOS.plist'"),
+        ("encryption declared on the Mac", write(MAC_APP_INFO, plistlib.dumps(
+            {**MAC_APP_INFO_CONTENT, "ITSAppUsesNonExemptEncryption": True}).decode()),
+         f"{MAC_APP_INFO}: must hold exactly the App Store keys"),
+        ("export compliance as a number on the Mac", write(MAC_APP_INFO, plistlib.dumps(
+            {**MAC_APP_INFO_CONTENT, "ITSAppUsesNonExemptEncryption": 0}).decode()),
+         f"{MAC_APP_INFO}: must hold exactly the App Store keys"),
+        ("no category on the Mac", write(MAC_APP_INFO, plistlib.dumps({"ITSAppUsesNonExemptEncryption": False}).decode()),
+         f"{MAC_APP_INFO}: must hold exactly the App Store keys"),
+        ("an extra key on the Mac", write(MAC_APP_INFO, plistlib.dumps({**MAC_APP_INFO_CONTENT, "X": "y"}).decode()),
+         f"{MAC_APP_INFO}: must hold exactly the App Store keys"),
+        ("the extension declares export compliance", write(SHARE_INFO, plistlib.dumps(
+            {**SHARE_INFO_CONTENT, "ITSAppUsesNonExemptEncryption": False}).decode()),
+         "must hold exactly the reviewed keys"),
+        ("target hardened runtime", in_target("ENABLE_HARDENED_RUNTIME"), "sets ENABLE_HARDENED_RUNTIME"),
+        ("project hardened runtime", in_project("ENABLE_HARDENED_RUNTIME"), "sets ENABLE_HARDENED_RUNTIME"),
+        ("target hardened-runtime variable", in_target("DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests"),
+         "sets DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests, which belongs into"),
         ("capability setting NO", in_xcconfig("ENABLE_APP_SANDBOX = NO"), "ENABLE_APP_SANDBOX = NO"),
         ("capability setting with a condition", in_target('"ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]"'),
          "sets ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*], which injects"),
@@ -1352,6 +1934,23 @@ def self_test():
          "found ['DokumentumCore', 'DokumentumKit']"),
         ("Kit not linked in the extension's phase", edit(PROJECT, "files = (C6, );", "files = ();"),
          "its build phases must link exactly the package products ['DokumentumKit'], found []"),
+        # The app's package products (review B-N1 on #189).
+        ("the app links a new product", edit(PROJECT, "packageProductDependencies = (D0, D3, );",
+                                             "packageProductDependencies = (D0, D3, D4, );};\n\t\tD4 = {isa = "
+                                             "XCSwiftPackageProductDependency; productName = DokumentumKitPrefs;"),
+         "target Dokumentum: must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found "
+         "['DokumentumCore', 'DokumentumKit', 'DokumentumKitPrefs']"),
+        ("the app links the test support", edit(PROJECT, "packageProductDependencies = (D0, D3, );",
+                                                "packageProductDependencies = (D0, D3, D5, );};\n\t\tD5 = {isa = "
+                                                "XCSwiftPackageProductDependency; productName = DokumentumTestSupport;"),
+         "found ['DokumentumCore', 'DokumentumKit', 'DokumentumTestSupport']"),
+        ("the app without Core", edit(PROJECT, "packageProductDependencies = (D0, D3, );", "packageProductDependencies = (D3, );"),
+         "target Dokumentum: must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found ['DokumentumKit']"),
+        ("a new product only in the app's phase", edit(PROJECT, "files = (F1, F2, );",
+                                                       "files = (F1, F2, F3, );};\n\t\tF3 = {isa = PBXBuildFile; productRef = D4;};"
+                                                       "\n\t\tD4 = {isa = XCSwiftPackageProductDependency; productName = DokumentumKitPrefs;"),
+         "target Dokumentum: its build phases must link exactly the package products ['DokumentumCore', 'DokumentumKit'], found "
+         "['DokumentumCore', 'DokumentumKit', 'DokumentumKitPrefs']"),
         ("embedded into another folder", edit(PROJECT, "dstSubfolderSpec = 13;", "dstSubfolderSpec = 10;"), "must copy DokumentumShare into PlugIns"),
         ("embedded without a destination", edit(PROJECT, "dstSubfolderSpec = 13;", ""), "must copy DokumentumShare into PlugIns"),
         ("embedded into a subfolder", edit(PROJECT, 'dstPath = "";', "dstPath = x;"), "must copy DokumentumShare into PlugIns"),
@@ -1465,9 +2064,60 @@ def self_test():
         ("a space around the name", in_xcconfig_last("MY_SETTING[ sdk=macosx*] = x"), "[ sdk=macosx*] uses a condition"),
         ("a space in the unsigned file's condition", edit(UNSIGNED_XCCONFIG, "IDENTITY[sdk=macosx*] = -", "IDENTITY[sdk=macosx *] = -"),
          "must hold exactly"),
+        # The app icon (#9, P3).
+        ("the icon set next to the .icon", write_deep(f"{APP_ICON_SET}/Contents.json", "{}\n"), "would collide"),
+        ("a missing layer file", remove(layer(star)), f"names {star}, which does not exist"),
+        ("a PNG layer", then(edit(APP_ICON_JSON, star, "star.png"), write_bytes(layer("star.png"), png)),
+         "star.png: has NUL bytes; every layer is SVG text"),
+        ("a layer that is not SVG", write(layer(ink), "<html><body/></html>\n"), "has the root element html"),
+        ("a layer that is not XML", write(layer(ink), "M10 5 L40 5\n"), "is not XML text"),
+        ("an edited layer", edit(layer(ink), "#f4f4f4", "#ffffff"), "is not the copy of pklnx/design-system"),
+        ("a stray file next to the layers", write(layer("old.svg"), "<svg/>\n"), "old.svg: is not a layer"),
+        ("Finder's file next to the layers", write(layer(".DS_Store"), "Finder\n"), None),
+        ("a layer outside Assets", edit(APP_ICON_JSON, star, "../icon.json"), "is not a file name"),
+        ("an icon.json that does not parse", write(APP_ICON_JSON, "{\n"), "cannot be parsed"),
+        ("an icon.json without groups", write(APP_ICON_JSON, "{}\n"), "cannot be parsed"),
+        ("an icon.json without layers", write(APP_ICON_JSON, '{"groups": []}\n'), "has no layer"),
+        ("a missing icon.json", remove(APP_ICON_JSON), f"{APP_ICON_JSON} is missing"),
+        ("an app icon for the extension", in_xcconfig_last("DOKUMENTUM_APPICON_DokumentumShare = AppIcon"),
+         "target DokumentumShare: ASSETCATALOG_COMPILER_APPICON_NAME resolves to 'AppIcon' on iphoneos"),
+        # The accent's contrast (#9, P4); the figures are the plan's (probe 5).
+        ("a dark tint of #a56eff", colour_set(APP_TINT, colour("6929C4"), colour("A56EFF", "dark")),
+         "the tint, as text on #2c2c2e in dark mode is #a56eff, 4.16:1"),
+        ("a dark fill of #be95ff", colour_set(APP_FILL, colour("8A3FFC"), colour("BE95FF", "dark")),
+         "the fill, under the text #ffffff in dark mode is #be95ff, 2.35:1"),
+        ("Purple 60 as the light tint", colour_set(APP_TINT, colour("8A3FFC"), colour("BE95FF", "dark")),
+         "the tint, as text on #f2f2f7 in light mode is #8a3ffc, 4.48:1"),
+        ("system blue as the extension's fill", colour_set(SHARE_FILL, colour("007AFF")),
+         "the extension's fill, under the text #ffffff in light mode is #007aff, 4.02:1"),
+        ("a ratio that rounds to the minimum", colour_set(APP_FILL, colour("767676"), colour("7C7480", "dark")),
+         "the fill, under the text #ffffff in dark mode is #7c7480, 4.4998:1"),
+        ("a ratio just at the minimum", colour_set(APP_FILL, colour("767676")), None),
+        ("a tint without a dark colour shows it in dark", colour_set(APP_TINT, colour("6929C4")),
+         "#2c2c2e in dark mode is #6929c4, 1.80:1"),
+        ("a light colour of its own", colour_set(APP_TINT, colour("BE95FF"), colour("6929C4", "light"),
+                                                 colour("BE95FF", "dark")), None),
+        ("fractions and 8-bit integers", colour_set(APP_TINT, fractions, integers), None),
+        ("a Display P3 colour", colour_set(APP_FILL, colour("8A3FFC", space="display-p3")),
+         "the colour space is display-p3"),
+        ("a translucent fill", colour_set(APP_FILL, colour("8A3FFC", alpha="0.500")), "a colour is not opaque"),
+        ("a high-contrast colour", colour_set(APP_TINT, colour("6929C4"), high_contrast), "only universal colours"),
+        ("a colour set with only a dark colour", colour_set(APP_FILL, colour("8A3FFC", "dark")), "needs a universal"),
+        ("a missing colour set", remove(f"{APP_FILL}/Contents.json"), "AccentFill.colorset/Contents.json is missing"),
+        ("the brand's accent on the Mac", edit(XCCONFIG, "DOKUMENTUM_ACCENT_Dokumentum[sdk=macosx*] =\n", ""),
+         "target Dokumentum: ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME resolves to 'AccentColor' on macosx"),
+        ("no accent on iOS", edit(XCCONFIG, "DOKUMENTUM_ACCENT_Dokumentum = AccentColor\n", ""),
+         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME resolves to '' on iphoneos, expected 'AccentColor'"),
+        # Text only (#9, probe 2).
+        ("a binary file in the tree", write_bytes("docs/a.pdf", b"%PDF-1.7\n\0"), "docs/a.pdf: has a NUL byte"),
+        ("a NUL byte after the first 8 KB", write_bytes("docs/a.txt", b"a" * BINARY_PROBE_BYTES + b"\0"), None),
+        ("the fixture in git", in_git(), None),
+        ("a tracked binary file", then(write_bytes("docs/a.bin", b"\0"), in_git()), "docs/a.bin: has a NUL byte"),
+        ("an untracked binary file in a repository", then(write_bytes("docs/a.bin", b"\0"), in_git("docs/a.bin")),
+         None),
     ]
     # Every setting of the category fails in the xcconfig, on a target and on the project.
-    for name in sorted(CAPABILITY_SETTINGS - {"ENABLE_HARDENED_RUNTIME"}):
+    for name in sorted(CAPABILITY_SETTINGS - {HARDENED_RUNTIME}):
         cases += [
             (f"xcconfig {name}", in_xcconfig(f"{name} = YES"), f"sets {name} = YES, which injects"),
             (f"target {name}", in_target(name), f"sets {name}, which injects"),
@@ -1500,7 +2150,7 @@ def main():
         print(f"error: {problem}")
     if not problems:
         print(f"{PROJECT}, {XCCONFIG}, the targets, the entitlements, the scheme, the test plans, the Xcode Cloud "
-              "scripts and the model's imports are fine")
+              "scripts, the model's imports, the app icon, the accent's contrast and the text-only files are fine")
     return 1 if problems else 0
 
 

@@ -2,19 +2,25 @@ name: App
 
 # Build and app tests on GitHub Actions macOS runners, the PR check since 2026-11-12 (docs/development/plan.md,
 # section 6, question 1). Both jobs mirror Xcode Cloud's former "Default - iOS" and "Default - macOS" actions:
-# the Dokumentum scheme, built unsigned, then the Default test plan. The UISmoke plan is not part of it.
-# There is deliberately no `paths` filter: these jobs are required checks, so they must run on every pull request.
-# The tests run serially (-parallel-testing-enabled NO) as a workaround for #164: in parallel mode the
-# DokumentumCoreTests process froze on these 3-CPU runners (no output, no time-limit failure; thread pool
-# starvation is suspected, the trigger is not proven). The hosted app tests had finished. Switch back to
-# parallel mode when #164 is fixed. No per-test time allowance is set: it is not verified that
-# -test-timeouts-enabled bounds Swift Testing tests, and a frozen pool stops `.timeLimit` as well, so the
-# bound of a stuck run is the job timeout.
-# `xcode-27` is a preview runner image; it has Xcode 27.1 as the default, so each job selects the pinned Xcode.
+# the Dokumentum scheme, built unsigned, then the Default test plan (.github/actions/app-test). The UISmoke plan
+# runs only in release.yml.
+# `app-ios` and `app-macos` are required checks: they always run and always report, and there is deliberately
+# no `paths` filter. The scope is decided in the `scope` job (scripts/app-scope.py): a pull request that changes
+# only docs and process files skips build and tests and passes with a note in the job summary; anything else, or
+# anything unknown, runs the full Default plan, and so does a failed `scope` job (its output is then empty). Every push to main and a nightly schedule run the full plan.
+# The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
+# DokumentumCoreTests process froze on these 3-CPU runners, because test hooks blocked all three threads of
+# the cooperative pool; tests no longer block pool threads (docs/development/index.md, "Waiting in tests").
+# No per-test time allowance is set: it is not verified that -test-timeouts-enabled bounds Swift Testing tests,
+# and a frozen pool stops `.timeLimit` as well, so the bound of a stuck run is the job timeout.
+# `xcode-27` is a preview runner image; it has Xcode 27.1 as the default, so the action selects the pinned Xcode. A skipped run does not need it, so it uses a Linux runner.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Nightly, full plan on both platforms. Off the hour.
+    - cron: "17 2 * * *"
 
 permissions:
   contents: read
@@ -23,84 +29,94 @@ concurrency:
   group: app-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  # The runners have 3 CPUs; every test wait multiplies its timeout by this (docs/development/index.md).
-  # `xcodebuild` strips the TEST_RUNNER_ prefix and passes the variable on to the test host.
-  TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
-  # Agents' unsigned path: macOS without team and entitlements, the simulator keeps its real keys.
-  XCODE_XCCONFIG_FILE: Config/Unsigned.xcconfig
-
 jobs:
-  app-ios:
-    name: app-ios
-    runs-on: xcode-27
-    timeout-minutes: 30
+  scope:
+    name: scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select the pinned Xcode
+          # The changed files are the diff against the merge base.
+          fetch-depth: 0
+      - name: Scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          echo "DEVELOPER_DIR=/Applications/Xcode_$(tr -d '[:space:]' < .xcode-version).app/Contents/Developer" >> "$GITHUB_ENV"
-      - name: Toolchain check
-        run: CI_PRIMARY_REPOSITORY_PATH="$PWD" ci_scripts/ci_post_clone.sh
-      - name: Build
+          python3 scripts/app-scope.py --self-test
+          if [ "$EVENT" = pull_request ]; then
+            python3 scripts/app-scope.py --base "$BASE" --head "$HEAD"
+          else
+            python3 scripts/app-scope.py --full
+          fi
+
+  app-ios:
+    name: app-ios
+    needs: scope
+    # Always run, also when `scope` failed or was cancelled by nobody: an empty scope output is not `docs`, so the
+    # full plan runs. A skipped job would satisfy the ruleset, so these jobs must never be skipped.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.scope.outputs.scope == 'docs' && 'ubuntu-24.04' || 'xcode-27' }}
+    timeout-minutes: 30
+    steps:
+      - name: Skipped, docs only
+        if: needs.scope.outputs.scope == 'docs'
         run: |
-          set -o pipefail
-          xcodebuild build-for-testing -scheme Dokumentum -testPlan Default \
-            -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/build.xcresult"
-      - name: Localisation
-        run: python3 scripts/check-localization.py "$RUNNER_TEMP/DerivedData"
-      - name: Test
-        run: |
-          set -o pipefail
-          xcodebuild test-without-building -scheme Dokumentum -testPlan Default \
-            -parallel-testing-enabled NO \
-            -destination 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/test.xcresult"
-      - name: Upload the result bundles
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          echo "### app-ios: skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "This pull request changes only docs and process files (scripts/app-scope.py), so build and tests are skipped. Every push to main and the nightly run run the full Default plan." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.scope != 'docs'
         with:
-          name: app-ios-xcresult
-          path: ${{ runner.temp }}/*.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
+          persist-credentials: false
+      - uses: ./.github/actions/app-test
+        if: needs.scope.outputs.scope != 'docs'
+        with:
+          destination: 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0'
+          plans: Default
+          artifact: app-ios-xcresult
 
   app-macos:
     name: app-macos
-    runs-on: xcode-27
+    needs: scope
+    # Always run, also when `scope` failed or was cancelled by nobody: an empty scope output is not `docs`, so the
+    # full plan runs. A skipped job would satisfy the ruleset, so these jobs must never be skipped.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.scope.outputs.scope == 'docs' && 'ubuntu-24.04' || 'xcode-27' }}
     timeout-minutes: 30
     steps:
+      - name: Skipped, docs only
+        if: needs.scope.outputs.scope == 'docs'
+        run: |
+          echo "### app-macos: skipped" >> "$GITHUB_STEP_SUMMARY"
+          echo "This pull request changes only docs and process files (scripts/app-scope.py), so build and tests are skipped. Every push to main and the nightly run run the full Default plan." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.scope != 'docs'
         with:
           persist-credentials: false
-      - name: Select the pinned Xcode
-        run: |
-          echo "DEVELOPER_DIR=/Applications/Xcode_$(tr -d '[:space:]' < .xcode-version).app/Contents/Developer" >> "$GITHUB_ENV"
-      - name: Toolchain check
-        run: CI_PRIMARY_REPOSITORY_PATH="$PWD" ci_scripts/ci_post_clone.sh
-      - name: Build
-        run: |
-          set -o pipefail
-          xcodebuild build-for-testing -scheme Dokumentum -testPlan Default \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/build.xcresult"
-      - name: Localisation
-        run: python3 scripts/check-localization.py "$RUNNER_TEMP/DerivedData"
-      - name: Test
-        run: |
-          set -o pipefail
-          xcodebuild test-without-building -scheme Dokumentum -testPlan Default \
-            -parallel-testing-enabled NO \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" -resultBundlePath "$RUNNER_TEMP/test.xcresult"
-      - name: Upload the result bundles
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: ./.github/actions/app-test
+        if: needs.scope.outputs.scope != 'docs'
         with:
-          name: app-macos-xcresult
-          path: ${{ runner.temp }}/*.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
+          destination: 'platform=macOS'
+          plans: Default
+          artifact: app-macos-xcresult
+      # DokumentumCore once on a cooperative pool of ONE thread (#174, docs/development/index.md, "Waiting in tests"):
+      # a test that blocks a pool thread hangs here at once, instead of freezing at random on a 3-CPU runner. The two
+      # tests of FoundationModelsRealModelTests that call the model fail fast in this mode by design (the framework's
+      # `.noRoom`), so they are skipped by name; the suite's model-free mapping test still runs. The step
+      # has its own time bound: a hang ends it after 10 minutes, not after the job timeout. It runs in the required
+      # job `app-macos`, after the Default plan, and so only when that plan runs (not for docs-only pull requests).
+      - name: Core tests on a one-thread cooperative pool
+        if: needs.scope.outputs.scope != 'docs'
+        timeout-minutes: 10
+        env:
+          LIBDISPATCH_COOPERATIVE_POOL_STRICT: "1"
+          DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'

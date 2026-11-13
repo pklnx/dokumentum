@@ -161,7 +161,8 @@ struct DokumentumApp: App {
             classifier: classifier, settings: ClassificationSettings(defaultsSuite: settingsSuite),
             requestRun: { scheduler?.requestRun() })
         #if os(iOS)
-            // Registered before the app finishes launching, once per identifier (T13, N4). Every user import goes
+            // Launch registers the processing task, before the app finishes launching (T13, N4); each continued
+            // request registers its own identifier just before it is submitted (#194). Every user import goes
             // through the importer below, which asks for a continued-processing task; a CloudKit import never does.
             if let processing {
                 let container = container

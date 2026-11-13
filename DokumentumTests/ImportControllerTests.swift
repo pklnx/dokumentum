@@ -424,4 +424,16 @@ struct ImportControllerTests {
                 arguments: [UITestImportSynthetic.argument, "YES"],
                 launchStore: LaunchStore(choice: .inMemory(seed: false), opened: .inMemory)))
     }
+
+    /// Saving is "gespeichert" in German, never "gesichert" (maintainer decision of 2026-11-11, #160): the title line
+    /// of the info panel and the import notice's line for a store failure.
+    @Test func theGermanSaveFailureTextsSayGespeichert() throws {
+        let path = try #require(Bundle.main.path(forResource: "de", ofType: "lproj"), "no German localization")
+        let german = try #require(Bundle(path: path))
+        func de(_ key: String) -> String { german.localizedString(forKey: key, value: "missing", table: nil) }
+        #expect(de("The title could not be saved.") == "Der Titel konnte nicht gespeichert werden.")
+        #expect(
+            String(format: de("“%@” could not be saved in the archive."), "Rechnung.pdf")
+                == "„Rechnung.pdf“ konnte nicht im Archiv gespeichert werden.")
+    }
 }
