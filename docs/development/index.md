@@ -1197,6 +1197,10 @@ requests, on pushes to `main` and nightly (02:17 UTC), with no `paths` filter, a
 | Only docs and process files: `docs/**`, `*.md` anywhere, `.github/ISSUE_TEMPLATE/**`, `.github/labels.json` | Skipped: no build, no tests, a note in the job summary. The jobs run on a Linux runner and pass. |
 | Anything else, any file the script does not know, no files, or a diff that cannot be read | The full `Default` plan. If in doubt, the full plan runs. |
 
+If the `scope` job itself fails (checkout, runner, a script error), `app-ios` and `app-macos` still run, as they are
+not skipped (`if: !cancelled()`; a skipped job would satisfy the ruleset), and an empty scope is not `docs`, so they run
+the full plan.
+
 Every push to `main` and the nightly run always run the full plan; the coordinator reads failures on `main`.
 The jobs use the composite action `.github/actions/app-test`. It selects the Xcode in `.xcode-version` through
 `DEVELOPER_DIR`, runs `ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the

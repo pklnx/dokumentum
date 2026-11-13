@@ -7,7 +7,7 @@ name: App
 # `app-ios` and `app-macos` are required checks: they always run and always report, and there is deliberately
 # no `paths` filter. The scope is decided in the `scope` job (scripts/app-scope.py): a pull request that changes
 # only docs and process files skips build and tests and passes with a note in the job summary; anything else, or
-# anything unknown, runs the full Default plan. Every push to main and a nightly schedule run the full plan.
+# anything unknown, runs the full Default plan, and so does a failed `scope` job (its output is then empty). Every push to main and a nightly schedule run the full plan.
 # The tests run serially (#164, see the action). `xcode-27` is a preview runner image; it has Xcode 27.1 as the
 # default, so the action selects the pinned Xcode. A skipped run does not need it, so it uses a Linux runner.
 on:
@@ -32,7 +32,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       scope: ${{ steps.scope.outputs.scope }}
-      runner: ${{ steps.scope.outputs.scope == 'docs' && 'ubuntu-24.04' || 'xcode-27' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,7 +55,10 @@ jobs:
   app-ios:
     name: app-ios
     needs: scope
-    runs-on: ${{ needs.scope.outputs.runner }}
+    # Always run, also when `scope` failed or was cancelled by nobody: an empty scope output is not `docs`, so the
+    # full plan runs. A skipped job would satisfy the ruleset, so these jobs must never be skipped.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.scope.outputs.scope == 'docs' && 'ubuntu-24.04' || 'xcode-27' }}
     timeout-minutes: 30
     steps:
       - name: Skipped, docs only
@@ -65,11 +67,11 @@ jobs:
           echo "### app-ios: skipped" >> "$GITHUB_STEP_SUMMARY"
           echo "This pull request changes only docs and process files (scripts/app-scope.py), so build and tests are skipped. Every push to main and the nightly run run the full Default plan." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope != 'docs'
         with:
           persist-credentials: false
       - uses: ./.github/actions/app-test
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope != 'docs'
         with:
           destination: 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0'
           plans: Default
@@ -78,7 +80,10 @@ jobs:
   app-macos:
     name: app-macos
     needs: scope
-    runs-on: ${{ needs.scope.outputs.runner }}
+    # Always run, also when `scope` failed or was cancelled by nobody: an empty scope output is not `docs`, so the
+    # full plan runs. A skipped job would satisfy the ruleset, so these jobs must never be skipped.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.scope.outputs.scope == 'docs' && 'ubuntu-24.04' || 'xcode-27' }}
     timeout-minutes: 30
     steps:
       - name: Skipped, docs only
@@ -87,11 +92,11 @@ jobs:
           echo "### app-macos: skipped" >> "$GITHUB_STEP_SUMMARY"
           echo "This pull request changes only docs and process files (scripts/app-scope.py), so build and tests are skipped. Every push to main and the nightly run run the full Default plan." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope != 'docs'
         with:
           persist-credentials: false
       - uses: ./.github/actions/app-test
-        if: needs.scope.outputs.scope == 'full'
+        if: needs.scope.outputs.scope != 'docs'
         with:
           destination: 'platform=macOS'
           plans: Default
