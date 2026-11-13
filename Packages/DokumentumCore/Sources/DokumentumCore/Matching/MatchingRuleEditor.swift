@@ -86,7 +86,8 @@ public struct MatchingRuleEditor {
         return .saved
     }
 
-    /// The live record, first of copies sharing the `instanceID`.
+    /// The live record with `instanceID`, when it has no copies sharing it (review B of #205, N5): the same records
+    /// matching uses.
     nonisolated static func live(_ kind: MetadataKind, _ instanceID: UUID, in context: ModelContext) throws
         -> (any MatchingRuleRecord)?
     {
@@ -105,7 +106,10 @@ public struct MatchingRuleEditor {
     private nonisolated static func first<T: PersistentModel & MatchingRuleRecord>(
         _ descriptor: FetchDescriptor<T>, in context: ModelContext
     ) throws -> T? {
-        try context.fetch(descriptor).first { $0.isLive }
+        // Only a record without copies (`MatchingStore.withoutCopies`): matching ignores a record with copies, so
+        // editing one copy's rule would do nothing, and which copy a fetch returns first is not stable.
+        let records = try context.fetch(descriptor)
+        return records.count == 1 && records[0].isLive ? records[0] : nil
     }
 }
 

@@ -94,6 +94,32 @@ extension ProcessingStore {
         }
     }
 
+    /// Two correspondents sharing an `instanceID`, both with the rule `any` "Stadtwerke" and the name "Stadtwerke"
+    /// (review A of #205, B1), the original inserted first. With `tombstoneFirst` the original is a merge's loser and its
+    /// copy is live; otherwise both are live and the copy is older (first in keeper order).
+    @discardableResult
+    func insertCopiedCorrespondent(tombstoneFirst: Bool) throws -> UUID {
+        let keeper = try insertMetadata(.correspondent, "Stadtwerke GmbH")
+        let context = ModelContext(container)
+        let original = Correspondent(name: "Stadtwerke", createdAt: processingStart.addingTimeInterval(-hour))
+        original.matchMode = .any
+        original.matchPattern = "Stadtwerke"
+        if tombstoneFirst {
+            original.mergedIntoID = keeper
+            original.mergedAt = processingStart
+        }
+        context.insert(original)
+        try context.save()
+        let copy = Correspondent(
+            name: "Stadtwerke", createdAt: processingStart.addingTimeInterval(tombstoneFirst ? -hour : -2 * hour))
+        copy.instanceID = original.instanceID
+        copy.matchMode = .any
+        copy.matchPattern = "Stadtwerke"
+        context.insert(copy)
+        try context.save()
+        return original.instanceID
+    }
+
     /// A document in `stateRaw` with `text` in its text record, never edited.
     @discardableResult
     func insertWithText(

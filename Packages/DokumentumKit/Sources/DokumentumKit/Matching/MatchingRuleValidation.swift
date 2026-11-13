@@ -4,7 +4,10 @@ import Foundation
 /// disables Save while there is one.
 ///
 /// - `check`, synchronous, on every change: at most `MatchingLimits.patternLength` characters, and a regular
-///   expression must compile.
+///   expression must compile and must not use a back-reference (`\1`–`\9`, `\k<name>`): one back-reference step
+///   compares a whole capture, so on a long run of one character ICU's steps between two progress callbacks take
+///   seconds and the guard stops far beyond its budget (review B of #205, N1: 1.4 s on 20,000 × "a", 20 s on
+///   100,000).
 /// - `probe`, debounced and off the main actor (review N3 b): the regular expression runs on fixed probe texts
 ///   (the adversarial strings of the plan's P-2 and R-1, and ordinary German and English text) within the run
 ///   budget; running out of it on any of them is `tooSlow`.
@@ -19,6 +22,8 @@ public enum MatchingRuleValidation {
         case invalidRegularExpression
         /// "This regular expression takes too long to check."
         case tooSlow
+        /// "Back-references (\1, \k<name>) are not supported."
+        case backReference
     }
 
     /// The synchronous checks: length (every mode with a pattern) and compilation (regular expressions). An empty or
@@ -31,8 +36,27 @@ public enum MatchingRuleValidation {
             guard pattern.count <= MatchingLimits.patternLength else { return .tooLong }
             // An empty pattern never matches and has nothing to compile.
             guard mode == .regex, !pattern.allSatisfy(\.isWhitespace) else { return nil }
-            return RegexMatcher.compile(pattern) == nil ? .invalidRegularExpression : nil
+            guard RegexMatcher.compile(pattern) != nil else { return .invalidRegularExpression }
+            return hasBackReference(pattern) ? .backReference : nil
         }
+    }
+
+    /// Whether `pattern` uses a back-reference: an unescaped `\` followed by a digit 1–9 or by `k<`. An escaped
+    /// backslash (`\\1`) is a literal backslash, not a reference; `\0` is an octal escape in ICU.
+    static func hasBackReference(_ pattern: String) -> Bool {
+        let scalars = Array(pattern.unicodeScalars)
+        var index = 0
+        while index < scalars.count {
+            guard scalars[index] == "\\", index + 1 < scalars.count else {
+                index += 1
+                continue
+            }
+            let next = scalars[index + 1]
+            if ("1"..."9").contains(next) { return true }
+            if next == "k", index + 2 < scalars.count, scalars[index + 2] == "<" { return true }
+            index += 2
+        }
+        return false
     }
 
     /// The probe run of a regular expression on `texts` (the probe texts; a test passes bounded ones), after

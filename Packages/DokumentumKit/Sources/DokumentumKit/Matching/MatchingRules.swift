@@ -72,12 +72,22 @@ public enum MatchingRules {
         }
 
         /// The outcome for `text`. Rules in `skipping` are left out: the bulk run's rules that timed out earlier.
+        ///
+        /// **A correspondent or type rule that timed out or is skipped makes its kind ambiguous** (review A of #205,
+        /// N4): whether it matches is unknown, so none of that kind is set, as for several matches (P2). Otherwise a
+        /// slower device would set the other record alone where a faster one leaves the field empty, and the value
+        /// would depend on the device's speed.
         public func evaluate(text: String, budget: MatchingBudget, skipping: Set<UUID> = []) -> RuleOutcome {
             var outcome = RuleOutcome(invalid: invalid)
             var words: MatchingText?
             var nfc: String?
             var matched: [MetadataKind: Set<UUID>] = [:]
-            for (rule, matcher) in rules where !skipping.contains(rule.id) {
+            var undecided: Set<MetadataKind> = []
+            for (rule, matcher) in rules {
+                guard !skipping.contains(rule.id) else {
+                    undecided.insert(rule.kind)
+                    continue
+                }
                 let matches: Bool
                 switch matcher {
                 case .never:
@@ -95,6 +105,7 @@ public enum MatchingRules {
                     case .timedOut:
                         matches = false
                         outcome.timedOut.insert(rule.id)
+                        undecided.insert(rule.kind)
                     }
                 }
                 if matches { matched[rule.kind, default: []].insert(rule.id) }
@@ -102,8 +113,9 @@ public enum MatchingRules {
             outcome.tags = matched[.tag] ?? []
             for kind in [MetadataKind.correspondent, .documentType] {
                 let ids = matched[kind] ?? []
-                if ids.count > 1 { outcome.ambiguous.insert(kind) }
-                let single = ids.count == 1 ? ids.first : nil
+                let isAmbiguous = ids.count > 1 || undecided.contains(kind)
+                if isAmbiguous { outcome.ambiguous.insert(kind) }
+                let single = ids.count == 1 && !isAmbiguous ? ids.first : nil
                 if kind == .correspondent { outcome.correspondent = single } else { outcome.documentType = single }
             }
             return outcome

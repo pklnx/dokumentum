@@ -134,26 +134,65 @@ struct MatchingImportTests {
         #expect(row.documentType == "Abrechnung")
     }
 
-    /// N6: a rule edited between the snapshot and the write is evaluated again in the write, on the fetched rules
-    /// (counter-proof: apply the snapshot's outcome without comparing).
-    @Test func aRuleEditedBetweenTheSnapshotAndTheWriteIsEvaluatedAgain() async throws {
+    /// N6: a rule whose pattern alone is edited between the snapshot and the write is evaluated again in the write,
+    /// on the fetched rules; the set of rule records is the same (counter-proofs: apply the snapshot's outcome
+    /// without comparing; compare only the rules' ids; review A N1, review B N4 of #205).
+    @Test(arguments: [false, true])
+    func aRulePatternEditedBetweenTheSnapshotAndTheWriteIsEvaluatedAgain(toMatch: Bool) async throws {
         let store = try ProcessingStore()
         defer { store.remove() }
         let clock = TestClock()
         let id = try insertPending(store)
-        let correspondent = try store.insertRule(.correspondent, "Stadtwerke", .any, "Telekom")
-        let tag = try store.insertRule(.tag, "Strom", .any, "Strom")
+        let correspondent = try store.insertRule(.correspondent, "Stadtwerke", .any, toMatch ? "Telekom" : "Stadtwerke")
+        let tag = try store.insertRule(.tag, "Strom", .any, toMatch ? "Gas" : "Strom")
         let hooks = ProcessingQueue.Hooks(afterRules: {
-            try? store.setRule(.correspondent, correspondent, .any, "Stadtwerke")
-            try? store.setRule(.tag, tag, .none, "")
+            try? store.setRule(.correspondent, correspondent, .any, toMatch ? "Stadtwerke" : "Telekom")
+            try? store.setRule(.tag, tag, .any, toMatch ? "Strom" : "Gas")
         })
 
         let report = await store.queue(deviceA, stage: textStage(), clock: clock, hooks: hooks).run()
 
         #expect(report.done == 1)
         let row = try store.matched(id)
-        #expect(row.correspondent == "Stadtwerke", "the edited rule matches now")
-        #expect(row.tags.isEmpty, "the removed rule no longer applies")
+        #expect(row.correspondent == (toMatch ? "Stadtwerke" : nil), "decided on the edited pattern")
+        #expect(row.tags == (toMatch ? ["Strom"] : []))
+    }
+
+    /// N6: a rule removed between the snapshot and the write no longer applies.
+    @Test func aRuleRemovedBetweenTheSnapshotAndTheWriteNoLongerApplies() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try insertPending(store)
+        let tag = try store.insertRule(.tag, "Strom", .any, "Strom")
+        let hooks = ProcessingQueue.Hooks(afterRules: { try? store.setRule(.tag, tag, .none, "") })
+
+        let report = await store.queue(deviceA, stage: textStage(), clock: clock, hooks: hooks).run()
+
+        #expect(report.done == 1)
+        #expect(try store.matched(id).tags.isEmpty)
+    }
+
+    /// Review A of #205, B1: copies of a rule record sharing an `instanceID` (a merge's loser and its live copy, or two
+    /// live copies) never make the text write back off for ever: a record with copies is no rule and never linked, so
+    /// the check never has to meet one of them (counter-proofs: the live copy first in keeper order, as before; the
+    /// first copy read, which a fetch does not return in a stable order).
+    @Test(arguments: [false, true])
+    func aCopiedRuleRecordDoesNotKeepTheTextWriteFromLanding(tombstoneFirst: Bool) async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try insertPending(store)
+        try store.insertCopiedCorrespondent(tombstoneFirst: tombstoneFirst)
+        let queue = store.queue(deviceA, stage: textStage(), clock: TestClock())
+
+        let first = await queue.run()
+        let second = await queue.run()
+
+        #expect(first.done == 1)
+        #expect(first.backedOff == 0)
+        #expect(second.done == 0, "nothing left to do")
+        #expect(try store.text(of: id).text == billText)
+        #expect(try store.matched(id).correspondent == nil, "a record with copies is no rule")
     }
 
     /// §5: the rule's correspondent stays when the classifier suggests another, and the classifier still fills the

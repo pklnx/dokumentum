@@ -214,4 +214,100 @@ struct MatchingRunTests {
             #expect(try store.matched(id).correspondent == nil)
         }
     }
+
+    // MARK: Fix round 1 of #205
+
+    /// Review A, B2: a rename and a rule edit of the correspondent and tag the batch links, saved in the batch's
+    /// window, survive: the batch backs off and its documents are written one by one (counter-proof: leave the linked
+    /// metadata rows out of the batch's and the single write's checks).
+    @Test func anEditOfALinkedRecordInTheBatchsWindowSurvives() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let correspondent = try store.insertRule(.correspondent, "Stadtwerke", .any, "Stadtwerke")
+        let tag = try store.insertRule(.tag, "Strom", .any, "Strom")
+        let ids = try (0..<2).map { _ in try store.insertWithText(Self.text) }
+        let hooks = MatchingRun.Hooks(
+            beforeCheck: once({ $0 == MatchingRun.Write.batch }) {
+                try store.renameMetadata(.correspondent, correspondent, to: "Stadtwerke GmbH")
+                try store.setRule(.correspondent, correspondent, .any, "Stadtwerke GmbH")
+                try store.renameMetadata(.tag, tag, to: "Strom neu")
+            })
+
+        let report = try #require(await store.matchingRun(hooks: hooks).run())
+
+        #expect(report.changed == 2)
+        #expect(report.saves == 2, "one by one after the batch met the edits")
+        #expect(try store.metadataName(.correspondent, correspondent) == "Stadtwerke GmbH")
+        #expect(try store.rawRule(.correspondent, correspondent)?.pattern == "Stadtwerke GmbH")
+        #expect(try store.metadataName(.tag, tag) == "Strom neu")
+        for id in ids { #expect(try store.matched(id).tags == ["Strom neu"]) }
+    }
+
+    /// The same edits in a single write's window (after the batch met a document edit): that write backs off, its
+    /// document is skipped, the edits survive and the other document is written (counter-proof as above).
+    @Test func anEditOfALinkedRecordInASingleWritesWindowSurvives() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let correspondent = try store.insertRule(.correspondent, "Stadtwerke", .any, "Stadtwerke")
+        let tag = try store.insertRule(.tag, "Strom", .any, "Strom")
+        let ids = try (0..<2).map { _ in try store.insertWithText(Self.text) }
+        let edited = Mutex(false)
+        let hooks = MatchingRun.Hooks(beforeCheck: { write in
+            switch write {
+            case .batch:
+                try store.edit(ids[0]) { document, _ in document.title = "Edited" }
+            case .single:
+                let first = edited.withLock { edited in
+                    defer { edited = true }
+                    return !edited
+                }
+                guard first else { return }
+                try store.renameMetadata(.correspondent, correspondent, to: "Stadtwerke GmbH")
+                try store.setRule(.correspondent, correspondent, .any, "Stadtwerke GmbH")
+                try store.renameMetadata(.tag, tag, to: "Strom neu")
+            }
+        })
+
+        let report = try #require(await store.matchingRun(hooks: hooks).run())
+
+        #expect(report.changed == 1)
+        #expect(report.skipped == 1)
+        #expect(try store.metadataName(.correspondent, correspondent) == "Stadtwerke GmbH")
+        #expect(try store.rawRule(.correspondent, correspondent)?.pattern == "Stadtwerke GmbH")
+        #expect(try store.metadataName(.tag, tag) == "Strom neu")
+        #expect(try ids.map { try store.matched($0).tags }.sorted { $0.count < $1.count } == [[], ["Strom neu"]])
+    }
+
+    /// Review A, B1 (P5): copies of a rule record sharing an `instanceID` never make the run skip a document on every
+    /// run; a record with copies is no rule (counter-proofs as for the text write).
+    @Test(arguments: [false, true])
+    func aCopiedRuleRecordDoesNotMakeTheRunSkipForEver(tombstoneFirst: Bool) async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        try store.insertCopiedCorrespondent(tombstoneFirst: tombstoneFirst)
+        let id = try store.insertWithText(Self.text)
+
+        let first = try #require(await store.matchingRun().run())
+        let second = try #require(await store.matchingRun().run())
+
+        #expect(first.skipped == 0)
+        #expect(second.skipped == 0)
+        #expect(second.changed == 0)
+        #expect(try store.matched(id).correspondent == nil)
+    }
+
+    /// Review B, N3: a merged-away correspondent's rule does not count, also not for P2: next to a live record that
+    /// matches too, the live one is set (counter-proof: no tombstone filter in `MatchingStore.readRules`).
+    @Test func aTombstonesRuleDoesNotMakeALiveMatchAmbiguous() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let keeper = try store.insertRule(.correspondent, "Stadtwerke München", .any, "München")
+        try store.insertRule(.correspondent, "Stadtwerke alt", .any, "Stadtwerke", mergedInto: keeper)
+        let id = try store.insertWithText(Self.text)
+
+        let report = try #require(await store.matchingRun().run())
+
+        #expect(report.ambiguous == 0)
+        #expect(try store.matched(id).correspondent == "Stadtwerke München")
+    }
 }

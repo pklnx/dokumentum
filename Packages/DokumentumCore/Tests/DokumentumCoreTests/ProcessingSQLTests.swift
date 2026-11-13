@@ -287,14 +287,16 @@ struct ProcessingSQLTests {
         for statement in statements { #expect(!SQLLog.statement(statement, names: "ZDOCUMENT"), "\(statement)") }
     }
 
-    /// With a rule, the text write fetches the metadata once more in its context (`MetadataFill`), and still reads
-    /// no blob but the text by key.
+    /// With a rule, the text write fetches the metadata exactly once more in its context (`MetadataFill`), and still
+    /// reads no blob but the text by key. Counted as whole-table fetches of the correspondent and type tables (tag
+    /// selects also come from relationship faults).
     @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
     func withARuleTheTextWriteFetchesTheMetadataOnce() throws {
         let store = try ProcessingStore()
         defer { store.remove() }
         let plain = try store.insert(device: deviceA, claimedAt: processingStart)
         let ruled = try store.insert(device: deviceA, claimedAt: processingStart)
+        try store.insertRule(.correspondent, "Stadtwerke", .any, "Strom")
         try store.insertRule(.tag, "Strom", .any, "Strom")
         let rules = try #require(ProcessingQueue.textWriteRules(on: "Strom", in: store.container))
 
@@ -320,11 +322,18 @@ struct ProcessingSQLTests {
         }
 
         #expect(try store.matched(ruled).tags == ["Strom"])
+        #expect(try store.matched(ruled).correspondent == "Stadtwerke")
         #expect(try store.matched(plain).tags.isEmpty)
-        let metadataSelects = { (statements: [String]) in
-            statements.filter { $0.contains("SELECT") && namesMetadata($0) }.count
+        // Whole-table fetches only: a select by key (`WHERE t0.Z_PK = ?`) is a fault of the linked record.
+        let fetches = { (statements: [String]) in
+            statements.map { $0.trimmingCharacters(in: .whitespaces) }.filter {
+                $0.hasSuffix("FROM ZCORRESPONDENT t0") || $0.hasSuffix("FROM ZDOCUMENTTYPE t0")
+            }.count
         }
-        #expect(metadataSelects(with) > metadataSelects(without), "\(with)")
+        // The check's fetch of both tables, and with the rules exactly one more: `MetadataFill.live()` keeps what it
+        // fetched (review A of #205, N2; counter-proof: no cache in `live()`).
+        #expect(fetches(without) == 2, "\(without)")
+        #expect(fetches(with) == 4, "\(with)")
         for statement in with {
             #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
             #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")

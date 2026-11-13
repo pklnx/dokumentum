@@ -48,4 +48,16 @@ struct MatchingRuleValidationTests {
             #expect(MatchingRuleValidation.probe(regex: pattern) == nil, "\(pattern)")
         }
     }
+
+    /// Review B of #205, N1: a back-reference can overshoot the budget by seconds, so it is refused; an escaped
+    /// backslash before a digit is no reference (counter-proof: drop the back-reference check).
+    @Test func aBackReferenceIsRefused() {
+        #expect(MatchingRuleValidation.check(mode: .regex, pattern: "(a+)\\1b") == .backReference)
+        #expect(MatchingRuleValidation.check(mode: .regex, pattern: "(-+)\\1x") == .backReference)
+        #expect(MatchingRuleValidation.check(mode: .regex, pattern: "(?<n>a+)\\k<n>b") == .backReference)
+        #expect(MatchingRuleValidation.probe(regex: "(?<n>a+)\\k<n>b") == .backReference)
+        #expect(MatchingRuleValidation.check(mode: .regex, pattern: "C:\\\\1") == nil, "a literal backslash and 1")
+        #expect(MatchingRuleValidation.check(mode: .regex, pattern: "\\d{2}\\.\\d{2}") == nil)
+        #expect(MatchingRuleValidation.check(mode: .any, pattern: "\\1") == nil, "only regular expressions")
+    }
 }

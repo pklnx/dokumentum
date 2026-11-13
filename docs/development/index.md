@@ -738,11 +738,18 @@ budget:)` is a pure function of the text and the set of rules, never of their or
   and digits mean what they say, and accents and ae/oe/ue count as written (`Müller` does not find "Mueller"; write
   `M(ü|ue)ller`). Only the first match is looked for.
 - **Several records of one kind (P2): none.** More than one matching correspondent (or type) leaves the field empty;
-  detection (#11) or the classifier may fill it. Every matching tag applies.
+  detection (#11) or the classifier may fill it. Every matching tag applies. **A correspondent or type rule whose
+  regular expression timed out** (or that the bulk run skips after a time-out) **makes its kind ambiguous too**:
+  whether it matches is unknown, so none of that kind is set, and a faster and a slower device never set different
+  values (review A of #205, N4). A timed-out tag rule only leaves its own tag out.
 
 **Regex safety** (T8). A pattern can arrive by sync, invalid or written by a newer build, so it is validated and
 compiled at every use, and a failure means "skipped", never a crash (`MatchingRuleValidation.check`: at most 1,000
-characters, and a regular expression must compile). At run time `enumerateMatches(options: .reportProgress)` stops a
+characters, and a regular expression must compile and must not use a **back-reference**, `\1`–`\9` or `\k<name>`;
+an escaped backslash before a digit is no reference). A back-reference step compares a whole capture, so on a long run
+of one character ICU's steps between two progress callbacks take seconds and the guard would stop far beyond its
+budget (review B of #205, N1: `(a+)\1b` took 1.4 s on 20,000 × "a" and 20 s on 100,000); the editor shows the error,
+and a synced rule with one is skipped as invalid. At run time `enumerateMatches(options: .reportProgress)` stops a
 match once the **budget** is spent: 100 ms per rule and document on the clock (`MatchingBudget.production`; the clock is
 read every 8th progress callback). The rule then does not match that document. The progress block runs once per start
 position (an ordinary no-match on a 500,000-byte text calls it about 500,000 times), so a budget that counts callbacks
@@ -765,18 +772,26 @@ fetched differ from the snapshot (a rule added, edited, merged or removed in bet
 fetched ones. Its check reads every metadata row it links again together with the document row, so a rule edited,
 renamed or merged in the window makes the write back off, and the next run decides again; a rule edited after the
 check applies from the next text write or bulk run, and so does one added between the snapshot and the write of a
-store that had none. **Without rule records the write fetches no metadata at all** (re-review N4,
-`ProcessingSQLTests`). `ProcessingReport` counts `rulesApplied` and `rulesAmbiguous`. Older documents are not touched
+store that had none. **Without rule records the write fetches no more metadata than a text write before #10** (its
+check, `RowState.read`, reads every tag, correspondent and type as it always did; re-review N4, `ProcessingSQLTests`).
+With rules it fetches them exactly once more, in the fill. `ProcessingReport` counts `rulesApplied` and `rulesAmbiguous`. Older documents are not touched
 automatically: "Apply Matching Rules" covers them.
 
 **The shared fill** (`MetadataFill`, `DokumentumCore/Matching/MatchingStore.swift`; plan §4a). The one seam the text
 write and the bulk run share, and #11's detection extends: one fetch of the live correspondents, types and tags in the
-write's context (keeper order), **rules first**, then detection on the row as the rules left it; one related-row map
+write's context, **rules first**, then detection on the row as the rules left it; one related-row map
 of every metadata row a step links, which the write's check reads again. A link writes the record's inverse
 relationship, so a linked row must be one the write read. The rows a document had linked before are not in the map:
 no decision of a fill reads them (emptiness is the document row's link, which the check compares). On the `classify`
 path, detection fills after the classifier (#11's Q3), so #11 part 2 calls the fill from both classification exits as
-well; the rules stay first.
+well; the rules stay first. **A record with copies sharing its `instanceID`** is treated like a tombstone everywhere
+in matching (the fill, the rule snapshot, the editor): never a rule, never linked (`MatchingStore.withoutCopies`,
+review A of #205, B1). The write's check reads a key through `RowRecords`, which keeps the first copy read, and the
+order of a fetch without sort descriptors is not stable between contexts (measured: of two live copies, the write's
+context read the younger one first in 3 of 10 runs and the check's context the older one). So a fill that linked any
+copy could meet another copy in its check, and the text write would back off for ever, redoing its OCR each run.
+Copies are rare (a copied record, or a merge's loser and its copy, which the repair leaves alone, see "Copies sharing
+an `instanceID`" above).
 
 **Precedence** (T5, P1): a user's edit > rules > detection (#11) > classifier (#8). Correspondent, type and date: each
 later step fills only what is still empty when it writes. Tags: the classifier adds its tags unless the document has a

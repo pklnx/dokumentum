@@ -190,6 +190,51 @@ struct MatchingRulesTests {
         }
     }
 
+    // MARK: Fix round 1 of #205
+
+    /// A synced rule with a back-reference is skipped as invalid (review B, N1).
+    @Test func aBackReferenceRuleIsInvalidAtRunTime() {
+        let rule = Self.rule(.regex, "(Strom)\\1")
+        let outcome = MatchingRules.evaluate(text: "StromStrom", rules: [rule])
+        #expect(outcome.invalid == [rule.id])
+        #expect(outcome.tags.isEmpty)
+    }
+
+    static let slowText = "Stadtwerke München " + String(repeating: "a", count: 26) + "!"
+
+    /// Review A, N4: a correspondent rule that times out makes the kind ambiguous, so the other matching record is not
+    /// set alone and the value does not depend on the device's speed (counter-proof: a timed-out rule counts as no
+    /// match). The type is decided as usual.
+    @Test func aTimedOutCorrespondentRuleMakesTheKindAmbiguous() {
+        let matching = Self.rule(.any, "Stadtwerke", kind: .correspondent)
+        let slow = Self.rule(.regex, "(a+)+$", kind: .correspondent)
+        let type = Self.rule(.any, "München", kind: .documentType)
+        let outcome = MatchingRules.evaluate(
+            text: Self.slowText, rules: [matching, slow, type], budget: .progressCallbacks(1_000))
+        #expect(outcome.timedOut == [slow.id])
+        #expect(outcome.correspondent == nil)
+        #expect(outcome.ambiguous == [.correspondent])
+        #expect(outcome.documentType == type.id)
+    }
+
+    /// Review B, N2: a rule in `skipping` is not run (counter-proof: ignore `skipping`); a skipped correspondent rule
+    /// makes its kind ambiguous, as a time-out does (counter-proof: a skipped rule counts as no match).
+    @Test func aSkippedRuleIsNotRunAndASkippedCorrespondentRuleIsAmbiguous() {
+        let slowTag = Self.rule(.regex, "(a+)+$")
+        let strom = Self.rule(.any, "München")
+        let matching = Self.rule(.any, "Stadtwerke", kind: .correspondent)
+        let slowCorrespondent = Self.rule(.regex, "(a+)+$", kind: .correspondent)
+        let prepared = MatchingRules.Prepared([slowTag, strom, matching, slowCorrespondent])
+
+        let outcome = prepared.evaluate(
+            text: Self.slowText, budget: .progressCallbacks(1_000), skipping: [slowTag.id, slowCorrespondent.id])
+
+        #expect(outcome.timedOut.isEmpty, "skipped rules are not run")
+        #expect(outcome.tags == [strom.id])
+        #expect(outcome.correspondent == nil)
+        #expect(outcome.ambiguous == [.correspondent])
+    }
+
     static func permutations<T>(_ items: [T]) -> [[T]] {
         guard items.count > 1 else { return [items] }
         return items.indices.flatMap { index in

@@ -8,19 +8,36 @@ import SwiftData
 /// The rule records of the store as values.
 enum MatchingStore {
     /// The live rule records (a `matchModeRaw` that is not `""`, not merged away), in a context that ends with the
-    /// read: one fetch per entity with a predicate, so a store without rules reads no row (review N4). Copies
-    /// sharing an `instanceID` keep the first read, as `RowRecords` does.
+    /// read: one fetch per entity with a predicate on the rule field, so a store without rules reads no row (review
+    /// N4). A tombstone is never a rule (T10), and neither is a record with **copies sharing its `instanceID`**
+    /// (`withoutCopies`, review A of #205, B1).
     static func readRules(in container: ModelContainer) throws -> [MatchingRule] {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         let none = MatchMode.none.storedValue ?? ""
-        let tags = try context.fetch(
-            FetchDescriptor<Tag>(predicate: #Predicate { $0.matchModeRaw != none && $0.mergedIntoID == nil }))
+        let tags = try context.fetch(FetchDescriptor<Tag>(predicate: #Predicate { $0.matchModeRaw != none }))
         let correspondents = try context.fetch(
-            FetchDescriptor<Correspondent>(predicate: #Predicate { $0.matchModeRaw != none && $0.mergedIntoID == nil }))
+            FetchDescriptor<Correspondent>(predicate: #Predicate { $0.matchModeRaw != none }))
         let types = try context.fetch(
-            FetchDescriptor<DocumentType>(predicate: #Predicate { $0.matchModeRaw != none && $0.mergedIntoID == nil }))
-        return unique(tags.map(rule) + correspondents.map(rule) + types.map(rule))
+            FetchDescriptor<DocumentType>(predicate: #Predicate { $0.matchModeRaw != none }))
+        return withoutCopies(tags, \.instanceID).filter(\.isLive).map(rule)
+            + withoutCopies(correspondents, \.instanceID).filter(\.isLive).map(rule)
+            + withoutCopies(types, \.instanceID).filter(\.isLive).map(rule)
+    }
+
+    /// `records` without every record whose `instanceID` another record of `records` shares (review A of #205, B1).
+    ///
+    /// Why not the first one read, as `RowRecords` keeps it: the order of a fetch without sort descriptors is not
+    /// stable between contexts (measured: of two live copies, the write's context read the younger one first in 3 of
+    /// 10 runs, the check's context the older one), so the fill would link one copy and the check read the other, and
+    /// the write would back off on every attempt. A record with copies is therefore treated like a tombstone in
+    /// matching: never a rule, never linked, so no check ever has to meet it. Copies are rare (a copied record, or a
+    /// merge's loser and its copy); a copy without a rule next to one with a rule is not fetched here, so the snapshot
+    /// keeps that rule, and the text write's re-evaluation on the fill's records drops it.
+    static func withoutCopies<T>(_ records: [T], _ instanceID: KeyPath<T, UUID>) -> [T] {
+        var counts: [UUID: Int] = [:]
+        for record in records { counts[record[keyPath: instanceID], default: 0] += 1 }
+        return records.filter { counts[$0[keyPath: instanceID]] == 1 }
     }
 
     /// The rules of live records among `records`: what the write context fetched, as values.
@@ -103,8 +120,9 @@ struct RuleFill: Equatable, Sendable {
 ///   document had linked before are not in it: no decision of a fill reads them (emptiness is the document row's
 ///   link, which the check compares).
 struct MetadataFill {
-    /// The live records of the write's context, by `instanceID`: the first in keeper order (oldest `createdAt`, then
-    /// the smaller `instanceID.uuidString`), as the repair keeps them.
+    /// The live records of the write's context, by `instanceID`, without records that have copies sharing their
+    /// `instanceID` (`MatchingStore.withoutCopies`, review A of #205, B1): for one of those the write's check
+    /// (`RowState.read`) could read another copy than the fill linked, and the write would back off for ever.
     struct Live {
         var tags: [UUID: Tag] = [:]
         var correspondents: [UUID: Correspondent] = [:]
@@ -125,16 +143,13 @@ struct MetadataFill {
         if let fetched { return fetched }
         let metadata = try RowRecords.fetchMetadata(in: context)
         var live = Live()
-        for record in keeperOrder(metadata.tags.filter(\.isLive), \.createdAt, \.instanceID)
-        where live.tags[record.instanceID] == nil {
+        for record in MatchingStore.withoutCopies(metadata.tags, \.instanceID) where record.isLive {
             live.tags[record.instanceID] = record
         }
-        for record in keeperOrder(metadata.correspondents.filter(\.isLive), \.createdAt, \.instanceID)
-        where live.correspondents[record.instanceID] == nil {
+        for record in MatchingStore.withoutCopies(metadata.correspondents, \.instanceID) where record.isLive {
             live.correspondents[record.instanceID] = record
         }
-        for record in keeperOrder(metadata.documentTypes.filter(\.isLive), \.createdAt, \.instanceID)
-        where live.documentTypes[record.instanceID] == nil {
+        for record in MatchingStore.withoutCopies(metadata.documentTypes, \.instanceID) where record.isLive {
             live.documentTypes[record.instanceID] = record
         }
         fetched = live
