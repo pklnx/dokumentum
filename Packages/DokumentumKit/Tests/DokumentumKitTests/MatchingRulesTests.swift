@@ -62,7 +62,8 @@ struct MatchingRulesTests {
     }
 
     @Test func noneAnEmptyPatternAndUnknownNeverMatch() {
-        let text = "Stadtwerke München \"\" "
+        // Double spaces: a whitespace-only regular expression would match them.
+        let text = "Stadtwerke  München  \"\"  "
         #expect(!Self.matches(.none, "Stadtwerke", text))
         #expect(!Self.matches(.unknown, "Stadtwerke", text))
         for mode in [MatchMode.any, .all, .exact, .regex] {

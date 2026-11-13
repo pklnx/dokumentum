@@ -21,14 +21,16 @@ public enum MatchingRuleValidation {
         case tooSlow
     }
 
-    /// The synchronous checks: length (every mode with a pattern) and compilation (regular expressions).
+    /// The synchronous checks: length (every mode with a pattern) and compilation (regular expressions). An empty or
+    /// whitespace-only pattern is no problem: it never matches.
     public static func check(mode: MatchMode, pattern: String) -> Problem? {
         switch mode {
         case .none, .unknown:
             return nil
         case .any, .all, .exact, .regex:
             guard pattern.count <= MatchingLimits.patternLength else { return .tooLong }
-            guard mode == .regex else { return nil }
+            // An empty pattern never matches and has nothing to compile.
+            guard mode == .regex, !pattern.allSatisfy(\.isWhitespace) else { return nil }
             return RegexMatcher.compile(pattern) == nil ? .invalidRegularExpression : nil
         }
     }

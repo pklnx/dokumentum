@@ -9,6 +9,8 @@ struct MatchingRuleValidationTests {
         #expect(MatchingRuleValidation.probe(regex: "Stadtwerke\\s+M(ü|ue)nchen") == nil)
         #expect(await MatchingRuleValidation.probeConcurrently(regex: "IBAN\\s*DE\\d{20}") == nil)
         #expect(MatchingRuleValidation.check(mode: .any, pattern: "(abc") == nil, "a word pattern is not compiled")
+        #expect(
+            MatchingRuleValidation.check(mode: .regex, pattern: "") == nil, "empty: never matches, nothing to check")
     }
 
     @Test func anInvalidRegularExpressionIsReported() {

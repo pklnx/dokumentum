@@ -169,7 +169,16 @@ struct MatchingRunTests {
         try store.insertWithText(Self.text)
         let batch = Checkpoint()
         defer { batch.release() }
-        let matching = store.matchingRun(hooks: MatchingRun.Hooks(afterBatch: { _ in await batch.pass() }))
+        // Only the first batch stops: a second run that is not refused then finishes and fails the test, never hangs.
+        let stopped = Mutex(false)
+        let matching = store.matchingRun(
+            hooks: MatchingRun.Hooks(afterBatch: { _ in
+                let first = stopped.withLock { stopped in
+                    defer { stopped = true }
+                    return !stopped
+                }
+                if first { await batch.pass() }
+            }))
 
         let run = Task { await matching.run() }
         await batch.reached()

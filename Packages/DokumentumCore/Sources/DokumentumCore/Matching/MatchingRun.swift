@@ -31,6 +31,11 @@ public final class MatchingRun: Sendable {
     public struct Progress: Sendable, Equatable {
         public var done: Int
         public var total: Int
+
+        public init(done: Int, total: Int) {
+            self.done = done
+            self.total = total
+        }
     }
 
     /// What a run did. Rule names are the user's data: shown, never logged.
