@@ -1,6 +1,7 @@
 # Development
 
-How to work on Dokumentum. Product and architecture: [plan.md](./plan.md).
+How to work on Dokumentum. Product and architecture: [plan.md](./plan.md). TestFlight releases, the CloudKit
+Production deploy and the device checklist: [release.md](./release.md).
 Workflow, roles and review rules: `CLAUDE.md` and
 [pklnx/dev-process](https://github.com/pklnx/dev-process).
 
@@ -12,9 +13,9 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 | Where | Used for |
 |---|---|
 | The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
-| The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
+| The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. Release archives and the TestFlight uploads (manual, [release.md](./release.md), M6; #9, P2). The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
-| Xcode Cloud | Kept for the TestFlight uploads (step 8). It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). Configured by the maintainer in Xcode and App Store Connect. |
+| Xcode Cloud | Not used for v1. It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). TestFlight uploads are manual from the MacBook Air (#9, P2), and its workflows `PR` and `Main` are switched off by the maintainer before the quota resets on 6 December ([release.md](./release.md), M0). |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
 ## Setup on the development Mac
@@ -309,7 +310,9 @@ decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.m
 
 **Production freezes a version.** Until step 8 nothing is in Production, and V1 may still change in place (with
 its snapshot, in the same PR, with the reason; a non-additive change also needs "Reset Development
-Environment" in the CloudKit Console, a maintainer step). The PR that records step 8's deploy adds `1` to
+Environment" in the CloudKit Console, a maintainer step). Before the deploy the Development schema is exported and
+compared field by field with the snapshot (`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The
+PR that records step 8's deploy adds `1` to
 `Schema/production-versions.txt`; from then on `check-schema-snapshots.py --base <sha>` fails if that snapshot
 changes. Deploying the schema to Production is the maintainer's.
 
@@ -1183,14 +1186,14 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). The self-tests include `scripts/check-cloudkit-schema.py`, which compares an exported CloudKit schema with a snapshot before a Production deploy ([release.md](./release.md), M3); it runs on an export only in M3, not in `lint`. |
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
 | `app-ios` | GitHub Actions, `app.yml` | Required. The PR check for build and app tests since 2026-11-12 (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. A pull request that changes only docs and process files skips it and passes with a note in the job summary. |
 | `app-macos` | GitHub Actions, `app.yml` | Required. The same on macOS. |
 | `scope` | GitHub Actions, `app.yml` | Runs `scripts/app-scope.py` and its self-test; decides what `app-ios` and `app-macos` do. Not required. |
-| `release-ios`, `release-macos` | GitHub Actions, `release.yml` | Started by hand (`workflow_dispatch`) before a TestFlight build: the full `Default` plan and the `UISmoke` plan on iOS and on macOS. A build goes out only after a green run at the release commit (checklist in #9). |
+| `release-ios`, `release-macos` | GitHub Actions, `release.yml` | Started by hand (`workflow_dispatch`) before a TestFlight build: the full `Default` plan and the `UISmoke` plan on iOS and on macOS, then an unsigned build of the Release configuration on each platform (iOS `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, macOS through `Unsigned.xcconfig`). A build goes out only after a green run at the release commit ([release.md](./release.md), "Gates"). |
 
 Run the Python checks from the repository root:
 
@@ -1207,6 +1210,7 @@ python3 scripts/check-logging.py --self-test
 python3 scripts/check-logging.py
 python3 scripts/check-schema-snapshots.py --self-test
 python3 scripts/check-schema-snapshots.py --base origin/main
+python3 scripts/check-cloudkit-schema.py --self-test
 ```
 
 `--catalog` only reads the catalogs. `python3 scripts/check-localization.py <derived data path>` also
@@ -1245,7 +1249,10 @@ artifact (kept 7 days). The workflows need no secrets and only `contents: read`.
 preview image whose default Xcode is newer than the pin.
 
 **Before a TestFlight build**, start `.github/workflows/release.yml` (`workflow_dispatch`) on the release commit: it
-runs the full `Default` plan and the `UISmoke` plan on iOS and on macOS (`release-ios`, `release-macos`).
+runs the full `Default` plan and the `UISmoke` plan on iOS and on macOS (`release-ios`, `release-macos`), then an
+unsigned build of the Release configuration on each platform, the configuration TestFlight ships (the tests build
+Debug). The Release build runs even after a failed test step, so every run shows whether Release compiles. The whole
+gate: [release.md](./release.md), "Gates".
 
 **UISmoke on the hosted runners does not pass yet** (first runs 2026-11-12, run 43314705135, attempts 1 and 2; the
 `Default` plan passed on macOS both times). On macOS, 12 of 13 UI tests pass and `ScanSmokeTests.testScanAndCleanupLandInInbox`
@@ -1258,11 +1265,13 @@ there. The tests are not weakened; the workflow stays as the intended gate, and 
 
 ### Xcode Cloud
 
-Kept for the TestFlight uploads (step 8). It was the PR check until 2026-11-12, when its monthly usage
-limit was reached and every build was cancelled; the repository is public, so GitHub Actions macOS runners
-are free and took over (plan.md, section 6, question 1). The maintainer sets up the workflows in Xcode
-and App Store Connect (plan on #1, maintainer step 6); the repository holds only the shared scheme and
-`ci_scripts/`. The workflows `PR` and `Main` below are no longer required checks.
+Not used for v1. It was the PR check until 2026-11-12, when its monthly usage limit was reached and every
+build was cancelled; the repository is public, so GitHub Actions macOS runners are free and took over (plan.md,
+section 6, question 1). TestFlight uploads are manual from the MacBook Air (#9, P2; [release.md](./release.md),
+M6), not an Xcode Cloud workflow. The maintainer switches off the workflows `PR` and `Main` below before the quota
+resets on 6 December ([release.md](./release.md), M0); they are no longer required checks. The repository holds
+only the shared scheme and `ci_scripts/`; what follows describes them as they were set up (plan on #1, maintainer
+step 6), and stays valid if a workflow is switched on again.
 
 - Workflow `PR` (Pull Request Changes, target `main`, no file filter) and workflow `Main` (Branch
   Changes on `main`): Test action, scheme `Dokumentum`, test plan `Default`, once for one iPhone
@@ -1274,7 +1283,7 @@ and App Store Connect (plan on #1, maintainer step 6); the repository holds only
   refuses to launch an ad hoc test host with `com.apple.developer.*` keys ("Runningboard has returned
   error 5", "Launchd job spawn failed"). So for the workflows `PR`, `Main` or `main`,
   `ci_post_clone.sh` copies `Config/Unsigned.xcconfig` to `Config/Local.xcconfig`, and prints that it
-  did. Any other workflow, such as step 8's `Release`, keeps the real signing settings, and the script
+  did. Any other workflow, such as an archive workflow if one is ever added (#9, P2 b), keeps the real signing settings, and the script
   prints that it left them alone. Under Xcode Cloud without `CI_WORKFLOW` it fails.
 - `ci_scripts/ci_post_xcodebuild.sh` runs the localisation check's build mode on
   `$CI_DERIVED_DATA_PATH` after `build`, `build-for-testing` and `archive`, unless `xcodebuild` failed.
