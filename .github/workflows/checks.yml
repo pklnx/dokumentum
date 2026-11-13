@@ -33,6 +33,7 @@ jobs:
           python3 scripts/check-test-waits.py --self-test
           python3 scripts/check-logging.py --self-test
           python3 scripts/check-schema-snapshots.py --self-test
+          python3 scripts/check-cloudkit-schema.py --self-test
           python3 scripts/app-scope.py --self-test
       - name: Labels file
         run: python3 scripts/check-labels.py

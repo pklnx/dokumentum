@@ -257,8 +257,9 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   distribution build needs the team stays for step 8). macOS refuses to launch an ad
   hoc test host with `com.apple.developer.*` keys, so `ci_scripts/ci_post_clone.sh`
   applies `Config/Unsigned.xcconfig` in the workflows `PR` and `Main`, never in
-  step 8's `Release`. So macOS tests in Xcode Cloud and in local builds run without the
-  entitlements and outside the sandbox; only the maintainer's signed build
+  any other workflow (such as an archive workflow, #9 P2 b). So macOS tests in
+  Xcode Cloud and in local builds run without the entitlements and outside the
+  sandbox; only the maintainer's signed build
   exercises them.
 - State of the signed check: part 3 of step 0 merged on unsigned local evidence,
   Xcode Cloud and its reviews, with the signed output deferred (2026-11-07). On
@@ -277,6 +278,13 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
   [index.md](./index.md).
 - Releases: TestFlight builds from a tag, version `YY.MM.N` (e.g. `26.11.1`);
   every TestFlight upload needs the maintainer's OK, like releases elsewhere.
+  The upload is manual (decided 2026-11-13, #9 P2): the maintainer archives both
+  platforms on the MacBook Air from a clean clone of the release commit, validates
+  them in Organizer, then tags `vYY.MM.N` and distributes with "TestFlight Internal
+  Only" (internal testing only, P8). The gate before it is `release.yml` (tests plus
+  an unsigned Release build) at the release commit. Runbook, the CloudKit
+  Production deploy, the soak test and the device checklist:
+  [release.md](./release.md).
 
 ## 5. Roadmap
 
@@ -343,7 +351,12 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
    every build, and as the repository is public, GitHub Actions macOS runners
    cost nothing. Build and app tests now run there (`app.yml`, jobs `app-ios`
    and `app-macos`, the PR check); Xcode Cloud is kept for the TestFlight
-   uploads.
+   uploads. **Changed 2026-11-13** (#9, P2): v1's TestFlight uploads are manual
+   from the MacBook Air, not an Xcode Cloud workflow, and the maintainer
+   disabled Xcode Cloud's `PR` and `Main` workflows on 2026-11-13, before the
+   quota resets on 6 December ([release.md](./release.md), M0 and M6).
+   Archiving on GitHub Actions stays rejected: it would need signing certificates
+   and an App Store Connect key as secrets in a public repository.
 
 To settle inside the steps: the minimum OS against the CI runners' Xcode (step 0), what
 `pklnx/design-system` offers for a native app (step 8; it may only have web
