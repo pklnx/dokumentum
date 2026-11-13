@@ -8,6 +8,8 @@ For each manifest in MANIFESTS:
   NSPrivacyAccessedAPITypes.
 - Every entry of NSPrivacyAccessedAPITypes names a known category once, with at least one reason, and every
   reason is one of Apple's codes for that category (REASONS).
+- The declared categories and reasons are exactly the reviewed ones (DECLARED, maintainer decision P5 on #9):
+  another reason, even one Apple allows for the category, or another category is a change here, on purpose.
 - The Swift sources the target ships (its folder and the library sources of the packages it links; never the
   test-support targets) are searched for the required-reason APIs of SYMBOLS. A category that the code uses but
   the manifest does not declare fails, and so does one that the manifest declares but the code does not use.
@@ -85,6 +87,12 @@ MANIFESTS = {
     "Dokumentum/PrivacyInfo.xcprivacy": ["Dokumentum", CORE, KIT],
     "DokumentumShare/PrivacyInfo.xcprivacy": ["DokumentumShare", KIT],
 }
+# P5 on #9: each manifest's categories and reasons, exactly. A change is a change here, on purpose.
+DECLARED = {
+    "Dokumentum/PrivacyInfo.xcprivacy": {FILE_TIMESTAMP: ["C617.1"], USER_DEFAULTS: ["CA92.1"]},
+    "DokumentumShare/PrivacyInfo.xcprivacy": {FILE_TIMESTAMP: ["C617.1"]},
+}
+assert set(DECLARED) == set(MANIFESTS)
 # P5: no tracking, no tracking domains, no collected data. A change is a change here, on purpose.
 EXPECTED_FIXED = {
     "NSPrivacyTracking": False,
@@ -172,13 +180,17 @@ def read_manifest(root, name):
     return declared, problems
 
 
-def check_manifest(root, name, folders):
-    """(problems, report lines) for one manifest."""
+def check_manifest(root, name, folders, reviewed):
+    """(problems, report lines) for one manifest; `reviewed` is its row of DECLARED."""
     declared, problems = read_manifest(root, name)
     found, scan_problems = uses(root, folders)
     problems += scan_problems
     if declared is None:
         return problems, []
+    for category in sorted(set(declared) | set(reviewed)):
+        if declared.get(category) != reviewed.get(category):
+            problems.append(f"{name}: {category} declares {declared.get(category)}, the reviewed reasons are "
+                            f"{reviewed.get(category)} (DECLARED, maintainer decision P5 on #9)")
     used = set()
     for categories, where in sorted(found.items(), key=lambda item: sorted(item[0])):
         used |= categories
@@ -196,10 +208,11 @@ def check_manifest(root, name, folders):
     return problems, report
 
 
-def check(root):
+def check(root, declared_rows=None):
+    """(problems, report lines). `declared_rows` replaces DECLARED in the self-test only."""
     problems, report = [], []
     for name, folders in MANIFESTS.items():
-        more, lines = check_manifest(root, name, folders)
+        more, lines = check_manifest(root, name, folders, (declared_rows or DECLARED)[name])
         problems += more
         report += lines
     return problems, report
@@ -216,8 +229,8 @@ def manifest_bytes(categories, **overrides):
     return plistlib.dumps(content)
 
 
-APP_FIXTURE = {FILE_TIMESTAMP: ["C617.1"], USER_DEFAULTS: ["CA92.1"]}
-SHARE_FIXTURE = {FILE_TIMESTAMP: ["C617.1"]}
+APP_FIXTURE = DECLARED["Dokumentum/PrivacyInfo.xcprivacy"]
+SHARE_FIXTURE = DECLARED["DokumentumShare/PrivacyInfo.xcprivacy"]
 
 
 def write_fixture(root):
@@ -303,7 +316,21 @@ def self_test():
         ("a getattrlist hit with disk space declared", both(
             write(f"{KIT}/Queue.swift", "let r = getattrlist(path, &list, &buffer, size, 0)\n"),
             manifest(share, {DISK_SPACE: ["E174.1"]}),
-            manifest(app, {DISK_SPACE: ["E174.1"], USER_DEFAULTS: ["CA92.1"]})), None),
+            manifest(app, {DISK_SPACE: ["E174.1"], USER_DEFAULTS: ["CA92.1"]})), None,
+         {share: {DISK_SPACE: ["E174.1"]}, app: {DISK_SPACE: ["E174.1"], USER_DEFAULTS: ["CA92.1"]}}),
+        # The reviewed reasons (P5): another code Apple allows for the category fails too.
+        ("DDA9.1 instead of C617.1 in the extension", manifest(share, {FILE_TIMESTAMP: ["DDA9.1"]}),
+         f"{share}: {FILE_TIMESTAMP} declares ['DDA9.1'], the reviewed reasons are ['C617.1']"),
+        ("DDA9.1 instead of C617.1 in the app", manifest(app, {FILE_TIMESTAMP: ["DDA9.1"], USER_DEFAULTS: ["CA92.1"]}),
+         f"{app}: {FILE_TIMESTAMP} declares ['DDA9.1'], the reviewed reasons are ['C617.1']"),
+        ("a second reason", manifest(app, {FILE_TIMESTAMP: ["C617.1", "3B52.1"], USER_DEFAULTS: ["CA92.1"]}),
+         "declares ['C617.1', '3B52.1'], the reviewed reasons are ['C617.1']"),
+        ("the app group's UserDefaults reason", manifest(app, {FILE_TIMESTAMP: ["C617.1"], USER_DEFAULTS: ["1C8F.1"]}),
+         f"{USER_DEFAULTS} declares ['1C8F.1'], the reviewed reasons are ['CA92.1']"),
+        ("an unreviewed category that the code uses", both(
+            write(f"{CORE}/Clock.swift", "let t = ProcessInfo.processInfo.systemUptime\n"),
+            manifest(app, {**APP_FIXTURE, SYSTEM_BOOT_TIME: ["35F9.1"]})),
+         f"{app}: {SYSTEM_BOOT_TIME} declares ['35F9.1'], the reviewed reasons are None"),
         ("fileModificationDate", both(write(f"{KIT}/Queue.swift", "let d = attributes.fileModificationDate()\n"),
                                       manifest(share, {})), f"the code uses {FILE_TIMESTAMP}"),
         ("a disk-space key", write("Dokumentum/Space.swift", "let k = URLResourceKey.volumeAvailableCapacityKey\n"),
@@ -325,12 +352,12 @@ def self_test():
         ("a folder without Swift files", remove("DokumentumShare/Share.swift"),
          "DokumentumShare: no Swift files found"),
     ]
-    for description, mutate, expected in cases:
+    for description, mutate, expected, *rows in cases:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             write_fixture(root)
             mutate(root)
-            problems, _ = check(root)
+            problems, _ = check(root, rows[0] if rows else None)
             if expected is None:
                 assert not problems, f"{description}: expected no problem, got {problems}"
             else:
