@@ -199,7 +199,10 @@ compatible with its version 1.x.
 Import → PDF (images become PDF pages) → store → background processing:
 text from the PDF, else Vision OCR (German and English) → invisible text
 layer → thumbnail → page count → (from step 7) classification, the same run
-classifying a document right after its text. A processing queue with one job
+classifying a document right after its text; from step 9 the matching rules
+(#10) set an empty correspondent and type and add tags in the text's write,
+before the classification, and "Apply Matching Rules" applies them to every
+document on request. A processing queue with one job
 at a time across the Vision and the model stage (the plan of #8, T6: the
 system runs model requests one after the other anyway). Classification runs
 once per document (state `classify`, then `done`).

@@ -100,6 +100,18 @@ public final class StoreLibrarySource: Sendable {
     }
 }
 
+extension StoreLibrarySource {
+    /// The rule of the live record of `kind` with `instanceID` in `context`, for the rule sheet (#10, part 2); `nil`
+    /// when there is no live record.
+    public static func matchingRule(of kind: MetadataKind, _ instanceID: UUID, in context: ModelContext) throws
+        -> MatchingRuleValue?
+    {
+        try MatchingRuleEditor.live(kind, instanceID, in: context).map {
+            MatchingRuleValue(mode: $0.matchMode, pattern: $0.matchPattern)
+        }
+    }
+}
+
 /// Calls `onSave` after every save of a context of one container, until cancelled or released. `onSave` runs
 /// synchronously on the saving thread, inside `save()`.
 final class SaveObservation: Sendable {

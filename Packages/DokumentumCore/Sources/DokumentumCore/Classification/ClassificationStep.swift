@@ -119,8 +119,8 @@ extension ProcessingQueue {
             suggestions[id] = CachedSuggestion(text: input.text, answer: .suggestion(checked))
         }
         let outcome = Self.writeClassification(
-            id, expecting: held, suggestion: checked, now: now(), calendar: calendar, in: container,
-            beforeCheck: hooks.beforeCheck)
+            id, expecting: held, suggestion: checked, text: input.extractedText, now: now(), calendar: calendar,
+            in: container, beforeCheck: hooks.beforeCheck)
         switch outcome {
         case .saved:
             forget(id)
@@ -407,17 +407,21 @@ extension ProcessingQueue {
     /// The classification's result write (T3), one synchronous call under the queue's discipline:
     /// 1. a fresh context fetches the document and re-checks state `classify`, the exact claim, not trashed and the
     ///    same text record (`held`);
-    /// 2. it decides each field's emptiness on this row (`ClassificationFields`);
+    /// 2. it decides each field's emptiness on this row (`ClassificationFields`). Tags (#10, T13, P1): the tags are
+    ///    empty unless the document has a user tag, a tag whose own rule does not match `text` (the text record
+    ///    `held` names, as the step read it); only the rules of the document's own tags are evaluated (review N1),
+    ///    and a tag whose rule is invalid, times out or sits on a tombstone is a user tag (N2);
     /// 3. it resolves the names against the live records it fetches (`MetadataMatcher`): an existing correspondent
     ///    or type is linked, else one is inserted (P1); a tag only when exactly one live tag has the name, never a
-    ///    new one;
+    ///    new one, and the tags are added to the document's rule tags;
     /// 4. it sets only the fields it fills and `done`, and never calls `touch()`;
     /// 5. it reads the document row and every metadata row it found linked or links again in a second fresh
     ///    context (`RowState.read`) and saves only if all are unchanged (a linked record must still be live under
-    ///    the same name); otherwise it rolls back and writes nothing.
+    ///    the same name, and the rule of each of the document's tags unchanged); otherwise it rolls back and writes
+    ///    nothing.
     static func writeClassification(
-        _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, now: Date, calendar: Calendar,
-        in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?
+        _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, text: String, now: Date,
+        calendar: Calendar, in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?
     ) -> WriteOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -434,13 +438,17 @@ extension ProcessingQueue {
             if let record = document.documentType {
                 related[RowKey(entity: .documentType, instanceID: record.instanceID)] = RowState.capture(record)
             }
-            for tag in document.tags ?? [] {
+            // Every tag of the document, with its rule (T13): a rule edited in the window makes the write back off.
+            let tags = document.tags ?? []
+            for tag in tags {
                 related[RowKey(entity: .tag, instanceID: tag.instanceID)] = RowState.capture(tag)
             }
+            // T13: only needed when there are tags to add to.
+            let hasUserTags = !tags.isEmpty && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: text))
             let fields = ClassificationFields(
                 title: document.title, createdAt: document.createdAt, modifiedAt: document.modifiedAt,
                 documentDate: document.documentDate, hasCorrespondent: document.correspondent != nil,
-                hasDocumentType: document.documentType != nil, hasTags: !(document.tags ?? []).isEmpty)
+                hasDocumentType: document.documentType != nil, hasTags: !tags.isEmpty, hasUserTags: hasUserTags)
             if fields.titleIsEmpty, let title = suggestion.title, document.title != title {
                 document.title = title
             }
@@ -485,12 +493,14 @@ extension ProcessingQueue {
                 for name in suggestion.tags {
                     guard let id = MetadataMatcher.tag(name, among: candidates),
                         !linked.contains(where: { $0.instanceID == id }),
+                        !tags.contains(where: { $0.instanceID == id }),
                         let record = live.first(where: { $0.instanceID == id })
                     else { continue }
                     related[RowKey(entity: .tag, instanceID: id)] = RowState.capture(record)
                     linked.append(record)
                 }
-                if !linked.isEmpty { document.tags = linked }
+                // Added to the rule tags the document may have (P1), never replacing them.
+                if !linked.isEmpty { document.tags = tags + linked }
             }
             document.processingState = .done
             try beforeCheck?(.classification)
@@ -510,14 +520,14 @@ extension ProcessingQueue {
         }
     }
 
-    /// `records` in the repair's keeper order: oldest `createdAt`, then the smaller `instanceID.uuidString`.
-    private static func keeperOrder<T>(_ records: [T], _ createdAt: KeyPath<T, Date>, _ instanceID: KeyPath<T, UUID>)
-        -> [T]
-    {
-        records.sorted { lhs, rhs in
-            lhs[keyPath: createdAt] != rhs[keyPath: createdAt]
-                ? lhs[keyPath: createdAt] < rhs[keyPath: createdAt]
-                : lhs[keyPath: instanceID].uuidString < rhs[keyPath: instanceID].uuidString
-        }
+    /// T13: whether `tags` (a document's, not empty) hold a user tag, one that its own rule does not explain on
+    /// `text`. Only these tags' rules are evaluated (review N1), so an edit of an unrelated rule never makes the
+    /// write back off. A tag without a rule, on a tombstone (N2), with an invalid rule or one that timed out (the
+    /// outcome leaves it out) is a user tag.
+    static func hasUserTag(_ tags: [Tag], text: String) -> Bool {
+        let rules = tags.compactMap(MatchingStore.liveRule)
+        guard !rules.isEmpty else { return true }
+        let ruleTags = MatchingRules.evaluate(text: text, rules: rules, budget: .production).tags
+        return tags.contains { !ruleTags.contains($0.instanceID) }
     }
 }
