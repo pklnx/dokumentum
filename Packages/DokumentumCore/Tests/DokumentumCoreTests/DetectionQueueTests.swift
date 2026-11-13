@@ -167,6 +167,21 @@ struct DetectionQueueTests {
         #expect(try store.correspondents() == ["Stadtwerke Musterstadt"])
     }
 
+    /// A structural name is resolved with `MetadataMatcher` (an equal name, else the longest word prefix): a live
+    /// record whose name the letter does not show, but whose words start with the found name's, is linked.
+    @Test func aStructuralNameIsResolvedByWordPrefix() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try insertPending(store)
+        let netze = try store.insertMetadata(.correspondent, "Stadtwerke Musterstadt GmbH Netze")
+
+        let report = await store.detectingQueue(stage: LetterStage(stadtwerkeLetter), clock: TestClock()).run()
+
+        #expect(report.detectedCorrespondents == 1)
+        #expect(report.createdCorrespondents == 0)
+        #expect(try store.detected(id).correspondentID == netze)
+    }
+
     /// Two documents of one new sender in one run share one new correspondent: the second write fetches the first's.
     @Test func aNewSenderIsCreatedOnceForTwoDocuments() async throws {
         let store = try ProcessingStore()
