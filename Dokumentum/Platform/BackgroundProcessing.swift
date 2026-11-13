@@ -4,22 +4,30 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The task identifiers of the background work (plan of #6, T13 and N4). They do not overlap: the continued tasks'
-/// wildcard covers only identifiers under `continued.`, never the processing task's. `Config/Info-iOS.plist`
-/// permits exactly these two (`BGTaskSchedulerPermittedIdentifiers`; `scripts/check-project.py` pins the list).
+/// The task identifiers of the background work (plan of #6, T13 and N4; #194). They do not overlap: the continued
+/// tasks' wildcard covers only identifiers under `continued.`, never the processing task's. `Config/Info-iOS.plist`
+/// permits exactly `permitted` (`BGTaskSchedulerPermittedIdentifiers`; `scripts/check-project.py` pins the list).
 enum BackgroundTaskIdentifier {
-    /// The prefix of every continued-processing task; each request gets a new suffix.
+    /// The prefix of every continued-processing task. Each request registers and submits its own identifier,
+    /// `continuedPrefix` followed by a new UUID, just before its submission (#194).
     static let continuedPrefix = "space.pklnx.Dokumentum.continued."
-    /// What the app registers for continued processing (wildcard notation of the SDK).
+    /// The wildcard the Info.plist permits for continued processing (wildcard notation of the SDK). It is never
+    /// registered or submitted itself: the SDK refuses to register it, and a submission looks the handler up by the
+    /// exact identifier (#194).
     static let continued = continuedPrefix + "*"
     /// The one processing task for what is left when the app goes to the background.
     static let processing = "space.pklnx.Dokumentum.backgroundProcessing"
 
-    /// Every identifier the app registers, once each.
-    static let all = [continued, processing]
+    /// Exactly the Info.plist's `BGTaskSchedulerPermittedIdentifiers`.
+    static let permitted = [continued, processing]
+    /// What `BackgroundProcessing.register()` registers at launch: only the processing task. The SDK exempts
+    /// continued-processing registrations from the launch deadline, and each continued request registers its own.
+    static let registeredAtLaunch = [processing]
 }
 
-/// The task identifiers registered with the system in this process (`process`); tests pass their own.
+/// The launch identifiers `BackgroundProcessing.register()` has already asked for in this process (`process`), so a
+/// second instance asks for none again; tests pass their own. Nothing else consults it: what is registered with the
+/// real SDK is `SystemBackgroundTasks`' own set, which alone guards submissions and second registrations.
 @MainActor
 final class BackgroundTaskRegistry {
     /// The one registry of the process.
@@ -42,7 +50,8 @@ protocol BackgroundTaskHandle: AnyObject {
 /// `BGTaskScheduler` behind a protocol, so app tests use a fake (`SystemBackgroundTasks` on iOS).
 @MainActor
 protocol BackgroundTaskScheduling: AnyObject {
-    /// Registers `launchHandler` for `identifier`; `false` when the system refuses (not permitted).
+    /// Registers `launchHandler` for exactly `identifier`; `false` when the system refuses (not permitted, the
+    /// wildcard itself, or already registered).
     func register(_ identifier: String, launchHandler: @escaping @MainActor (any BackgroundTaskHandle) -> Void) -> Bool
     /// Submits a continued-processing request with the strategy `.fail`: it throws when the system cannot start the
     /// task now.
@@ -66,7 +75,9 @@ protocol BackgroundTaskScheduling: AnyObject {
 ///   it, the scheduler resumes until the runs drain.
 /// - **Expiry:** the scheduler is paused, which gives the running attempt back (`interruptNow()`, part 1), and the
 ///   task completes with failure. In the foreground the queue goes on at once.
-/// - Each identifier is registered once per process: the SDK kills an app that registers one twice.
+/// - **Registration (#194):** launch registers only the processing task. Each continued request registers its own
+///   `continued.<UUID>` just before it is submitted, and is submitted only when that registration succeeded. Each
+///   identifier is registered once per process: the SDK kills an app that registers one twice.
 @MainActor
 final class BackgroundProcessing {
     private let scheduler: ProcessingScheduler
@@ -79,10 +90,13 @@ final class BackgroundProcessing {
 
     /// The user's documents of the continued task that is asked for or running.
     private(set) var tracked: Set<UUID> = []
+    /// The identifier of the continued request that was registered and submitted and has not started or failed yet.
+    private var requestedContinued: String?
     /// Whether a continued request was submitted and has not started or failed yet.
-    private(set) var isContinuedRequested = false
-    /// The running continued-processing task.
+    var isContinuedRequested: Bool { requestedContinued != nil }
+    /// The running continued-processing task, and its identifier (for the log).
     private var continued: (any BackgroundTaskHandle)?
+    private var continuedIdentifier = ""
     /// The running processing task.
     private var processing: (any BackgroundTaskHandle)?
     /// Whether the application itself is in the foreground (`UIApplication.applicationState != .background` in the
@@ -119,13 +133,12 @@ final class BackgroundProcessing {
         scheduler.didDrain = { [weak self] in self?.drained() }
     }
 
-    /// Registers the launch handlers, each identifier once per process. Call before the app finishes launching.
+    /// Registers the processing task's launch handler, once per process. Call before the app finishes launching.
+    /// Continued requests register their own identifiers in `userImported`.
     func register() {
-        for identifier in BackgroundTaskIdentifier.all where registry.registered.insert(identifier).inserted {
-            let isContinued = identifier == BackgroundTaskIdentifier.continued
-            let accepted = tasks.register(identifier) { [weak self] task in
-                if isContinued { self?.continuedStarted(task) } else { self?.processingStarted(task) }
-            }
+        for identifier in BackgroundTaskIdentifier.registeredAtLaunch
+        where registry.registered.insert(identifier).inserted {
+            let accepted = tasks.register(identifier) { [weak self] task in self?.processingStarted(task) }
             if !accepted {
                 Log.processing.error("Background task not registered: \(identifier, privacy: .public)")
             }
@@ -142,19 +155,33 @@ final class BackgroundProcessing {
             return
         }
         guard !isContinuedRequested else { return }
-        isContinuedRequested = true
+        // After every guard: a new identifier per request, registered just before its submission (#194). The SDK
+        // looks the handler up by the exact identifier and raises an exception for one without a handler.
         let identifier = BackgroundTaskIdentifier.continuedPrefix + UUID().uuidString
+        let accepted = tasks.register(identifier) { [weak self] task in
+            self?.continuedStarted(task, identifier: identifier)
+        }
+        guard accepted else {
+            // Nothing is submitted; the foreground runs or the processing task do the work, the next import asks
+            // again with a new identifier.
+            Log.processing.error("Background task not registered: \(identifier, privacy: .public)")
+            tracked = []
+            didSubmit?(identifier, false)
+            return
+        }
+        requestedContinued = identifier
         let (title, subtitle) = Self.texts(completed: 0, total: tracked.count)
         let tasks = tasks
         Task {
             do {
                 try await tasks.submitContinued(identifier: identifier, title: title, subtitle: subtitle)
+                Log.processing.notice("Continued processing requested: \(identifier, privacy: .public)")
                 didSubmit?(identifier, true)
             } catch {
                 // `.fail`: the system cannot start it now. The foreground runs or the processing task do the work.
                 Log.processing.notice("Continued processing not started: \(Log.code(of: error), privacy: .public)")
                 if continued == nil {
-                    isContinuedRequested = false
+                    requestedContinued = nil
                     tracked = []
                 }
                 didSubmit?(identifier, false)
@@ -193,9 +220,19 @@ final class BackgroundProcessing {
 
     // MARK: - Tasks
 
-    private func continuedStarted(_ task: any BackgroundTaskHandle) {
-        isContinuedRequested = false
+    /// The system started the continued task registered as `identifier`. A launch of a request that is no longer
+    /// asked for (an earlier one that failed, #194 T2) completes at once and changes nothing, so two continued tasks
+    /// never interleave.
+    private func continuedStarted(_ task: any BackgroundTaskHandle, identifier: String) {
+        guard identifier == requestedContinued else {
+            Log.processing.notice("Continued processing launch ignored: \(identifier, privacy: .public)")
+            task.complete(success: false)
+            return
+        }
+        Log.processing.notice("Continued processing started: \(identifier, privacy: .public)")
+        requestedContinued = nil
         continued = task
+        continuedIdentifier = identifier
         task.onExpiration { [weak self, weak task] in
             guard let self, let task else { return }
             self.expired(task)
@@ -225,6 +262,8 @@ final class BackgroundProcessing {
             let success = openDocuments(tracked) == 0
             self.continued = nil
             tracked = []
+            Log.processing.notice(
+                "Continued processing ended: \(self.continuedIdentifier, privacy: .public) success=\(success)")
             continued.complete(success: success)
         }
         if let processing {
@@ -237,6 +276,7 @@ final class BackgroundProcessing {
     /// The system ended `task` early: the attempt is given back, the task fails.
     private func expired(_ task: any BackgroundTaskHandle) {
         if task === continued {
+            Log.processing.notice("Continued processing expired: \(self.continuedIdentifier, privacy: .public)")
             continued = nil
             tracked = []
         } else if task === processing {
