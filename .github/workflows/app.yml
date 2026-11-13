@@ -49,6 +49,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
+          exit 1 # throwaway: scope fails
           python3 scripts/app-scope.py --self-test
           if [ "$EVENT" = pull_request ]; then
             python3 scripts/app-scope.py --base "$BASE" --head "$HEAD"
