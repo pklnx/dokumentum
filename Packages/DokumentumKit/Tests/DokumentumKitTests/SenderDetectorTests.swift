@@ -187,7 +187,8 @@ struct SenderDetectorTests {
     @Test func aLabelAloneCoversItsColumnBlockDownToAGap() {
         let lines = [
             L("Contoso Supplies LLC", x: 21.6, top: 14, size: 14), L("Packing Slip", x: 21.6, top: 40, size: 14),
-            L("Ship To:", x: 130, top: 40, size: 10), L("John Smith", x: 130, top: 45, size: 10),
+            L("Warehouse: Springfield, IL 62701", x: 21.6, top: 48, size: 10), L("Ship To:", x: 130, top: 40, size: 10),
+            L("John Smith", x: 130, top: 45, size: 10),
             L("45 Oak Avenue", x: 130, top: 49.5, size: 10),
         ]
         #expect(detect(lines, known: ["John Smith"]) == .name("Contoso Supplies LLC"))
@@ -362,6 +363,35 @@ struct SenderDetectorTests {
         #expect(letterhead("eBay GmbH") == .name("eBay GmbH"))
     }
 
+    @Test(arguments: [
+        "Muster AG & Co. KGaA", "Muster SE & Co. KGaA", "Muster GmbH & Co. KGaA", "Muster Ltd. & Co. KG",
+        "Muster GmbH + Co. KG", "dm-drogerie markt GmbH + Co. KG", "Muster UG (haftungsbeschränkt) & Co. KG",
+        "Bäckerei am Markt GmbH", "Verein zur Förderung der Musik e.V.", "Bank of Muster PLC",
+    ])
+    func aCombinedLegalFormIsOneName(name: String) {
+        // DN1 of #204.
+        #expect(detect([L(name, x: 25, top: 12, size: 12)] + Self.recipient) == .name(name), "\(name)")
+    }
+
+    @Test func aLeftBlockWithoutAPostcodeKeepsTheRightWindow() {
+        // DB2 of #204: a left reference block or place line is no recipient block.
+        let block = [
+            L("Herr", x: 125, top: 53, size: 11), L("Max Mustermann", x: 125, top: 58, size: 11),
+            L("Seestrasse 5", x: 125, top: 63, size: 11), L("8002 Zürich", x: 125, top: 68, size: 11),
+        ]
+        let references = [
+            L("Ihr Kontakt: Erika Beispiel", x: 20, top: 50, size: 9),
+            L("Telefon 044 123 45 67", x: 20, top: 55, size: 9),
+        ]
+        let letterhead = L("Muster AG", x: 20, top: 15, size: 20)
+        #expect(detect([letterhead] + references + block) == .name("Muster AG"))
+        // A left block with a postcode is the recipient block: the right block is info-block letterhead again.
+        let leftAddress = [
+            L("Familie Mustermann", x: 20, top: 50, size: 11), L("8002 Zürich", x: 20, top: 55, size: 11),
+        ]
+        #expect(describe(detect([letterhead] + leftAddress + block)) == "known Max Mustermann")
+    }
+
     // MARK: Review cases and page sizes
 
     /// The review's S1–S9 (6863747860): none of S1–S8 yields the recipient, the bank or the court.
@@ -380,7 +410,8 @@ struct SenderDetectorTests {
         ("S3c-labelled", "structural Muster Shop GmbH"), ("S3c-info-block", "structural Muster Shop GmbH"),
         ("ship-to-only", "structural Contoso Supplies LLC"), ("din-b-letterhead-40", "known Muster Versicherung AG"),
         ("din-b-letterhead-no-return", "none"), ("swiss-right-window-125", "structural Muster AG"),
-        ("swiss-right-window-130", "structural Muster AG"), ("us-letterhead-springfield", "known Contoso Supplies"),
+        ("swiss-right-window-130", "structural Muster AG"), ("swiss-left-references", "structural Muster AG"),
+        ("swiss-left-date", "structural Muster AG"), ("us-letterhead-springfield", "known Contoso Supplies"),
         ("us-legal-letterhead-springfield", "known Contoso Supplies"),
         ("uk-letterhead-oxford", "known Brightwater Opticians"),
         ("din-a-small-recipient", "structural Muster Versicherung AG"),

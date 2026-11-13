@@ -401,6 +401,7 @@ public enum SyntheticLetters {
             [
                 L("Contoso Supplies LLC", x: 21.6, top: 14, size: 14),
                 L("Packing Slip", x: 21.6, top: 40, size: 14),
+                L("Warehouse: Springfield, IL 62701", x: 21.6, top: 48, size: 10),
                 L("Ship To", x: 130, top: 40, size: 10), L("John Smith", x: 130, top: 45, size: 10),
                 L("45 Oak Avenue", x: 130, top: 49.5, size: 10), L("Portland, OR 97201", x: 130, top: 54, size: 10),
                 L("Order Date: November 1, 2026", x: 21.6, top: 100, size: 10),
@@ -494,6 +495,18 @@ public enum SyntheticLetters {
         // Fix round 1 of #204 (review B1, B2, N3, N11).
         swissWindow(at: 125, letterhead: "Muster", returnLine: true, id: "swiss-right-window-125"),
         swissWindow(at: 130, letterhead: "Muster AG", returnLine: false, id: "swiss-right-window-130"),
+        // Fix round 2 of #204 (DB2): left lines in the field area, but none with a postcode.
+        swissWindow(
+            at: 125, letterhead: "Muster AG", returnLine: false, id: "swiss-left-references",
+            left: [
+                L("Ihr Kontakt: Erika Beispiel", x: 20, top: 50, size: 9),
+                L("Telefon 044 123 45 67", x: 20, top: 55, size: 9),
+                L("Zürich, 13. November 2026", x: 20, top: 60, size: 9),
+            ], note: "; a left reference block at 50–60 mm (X1)"),
+        swissWindow(
+            at: 125, letterhead: "Muster AG", returnLine: false, id: "swiss-left-date",
+            left: [L("Zürich, 13. November 2026", x: 20, top: 80, size: 11)], note: "; the place and date at 80 mm (X2)"
+        ),
         letter(
             "us-letterhead-springfield",
             "B2: a US letterhead's small `Springfield, IL 62701` line in form A's zone: a town, not a name",
@@ -559,7 +572,10 @@ public enum SyntheticLetters {
     ]
 
     /// A Swiss right-window letter (review B1 of #204): the recipient block at `x`, nothing in the left field.
-    static func swissWindow(at x: Double, letterhead: String, returnLine: Bool, id: String) -> SyntheticLetter {
+    static func swissWindow(
+        at x: Double, letterhead: String, returnLine: Bool, id: String,
+        left: [L] = [L("Zürich, 13. November 2026", x: 20, top: 90, size: 11)], note: String = ""
+    ) -> SyntheticLetter {
         let window: [L] =
             (returnLine ? [L("Muster AG, Bahnhofstrasse 1, 8001 Zürich", x: x, top: 48, size: 7)] : []) + [
                 L("Herr", x: x, top: 53, size: 11), L("Max Mustermann", x: x, top: 58, size: 11),
@@ -568,10 +584,8 @@ public enum SyntheticLetters {
         return letter(
             id,
             "B1: a Swiss right-window letter at \(Int(x)) mm, letterhead `\(letterhead)`"
-                + (returnLine ? ", with a return-address line" : ""),
+                + (returnLine ? ", with a return-address line" : "") + note,
             recipient: owner, sender: .structural("Muster AG"), date: november13,
-            [
-                L(letterhead, x: 20, top: 15, size: 20), L("Zürich, 13. November 2026", x: 20, top: 90, size: 11),
-            ] + window + germanBody)
+            [L(letterhead, x: 20, top: 15, size: 20)] + left + window + germanBody)
     }
 }

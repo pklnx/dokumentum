@@ -259,6 +259,30 @@ struct IssueDateDetectorTests {
         #expect(detect(bezugszeichen) == Self.november13)
     }
 
+    /// DB1 of #204: a cue that is not at the previous line's end, or a date with its own label, stops nothing.
+    @Test(arguments: [
+        "Ihr Zeichen: AB-1\nDatum: 13.11.2026", "Your ref: 4711\nDate: 13 November 2026",
+        "Termin: nach Vereinbarung\nDatum: 13.11.2026", "Bitte antworten Sie bis Ende des Monats.\nMünchen, 13.11.2026",
+        "Eingang\nRechnungsdatum 13.11.2026", "Ihr Zeichen: AB-1\n13.11.2026",
+        "Thank you, the balance is due on receipt.\nNovember 13, 2026",
+    ])
+    func aCueOnlyAtThePreviousLinesEndStopsAnUnlabelledDate(text: String) {
+        #expect(detect(text) == Self.november13, "\(text)")
+    }
+
+    /// Both dates are standalone in the first half; only the cue at the previous line's end leaves one.
+    @Test func aCueWithAPrepositionOrColonAtTheLineEndStops() {
+        #expect(detect("13.11.2026\nZahlbar bis:\n27.11.2026\nText\nText\nText") == Self.november13)
+        #expect(detect("13.11.2026\nPayable by\nNovember 27, 2026\nText\nText\nText") == Self.november13)
+        #expect(detect("13.11.2026\nGeburtsdatum:\n05.03.1980\nText\nText\nText") == Self.november13)
+    }
+
+    @Test func aDayAndMonthWithoutAYearTakeNoPlace() {
+        // DN3 of #204 (C4): `13.11.` alone or after a label is no date form and blocks no tier.
+        #expect(detect("13.11.\nRechnung vom 13.11.2026") == Self.november13)
+        #expect(detect("Datum: 13.11.\nRechnung vom 13.11.2026") == Self.november13)
+    }
+
     @Test func aRelaxedPreviousLineLabelNeedsAPlainDatum() {
         // N8.
         let birth = "Max Mustermann Geb.-Datum\nMusterweg 2 05.03.1980\nRechnung vom 13.11.2026"

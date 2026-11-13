@@ -18,9 +18,9 @@ import Foundation
 /// **Plausible:** a valid Gregorian date from 1900-01-01 to `createdAt` + 31 days (`DetectionLimits.dateWindowDays`).
 ///
 /// **Ignored:** a date with a cue (`germanCues`, `englishCues`, and `germanSuffixCues` as word endings; all apply to
-/// every document) between the previous date of its line (or the line's start) and itself; a date that ends its line
-/// when the previous line, after its last date, holds a cue and does not end with a label (`Fällig am` /
-/// `27.11.2026`, review N7 of #204); and both dates of a range (`01.10.2026 – 31.10.2026`, `01.10.–31.10.2026`,
+/// every document) between the previous date of its line (or the line's start) and itself; a date with no label of its
+/// own that ends its line when the previous line **ends** with a cue, optionally followed by `:` and one preposition
+/// (`Fällig am` / `27.11.2026`, `… Geb.-Datum` / `Musterweg 2 05.03.1980`; review N7 and DB1 of #204); and both dates of a range (`01.10.2026 – 31.10.2026`, `01.10.–31.10.2026`,
 /// `… bis …`, `… to …`). `Liefer-Datum` reads as `Lieferdatum` (review N8 of #204).
 ///
 /// **Not a date but a position (review B3 of #204):** a form that is ambiguous (`05/06/2026`), invalid (`31.11.2026`)
@@ -121,13 +121,14 @@ public enum IssueDateDetector {
                 let segmentStart = position > 0 ? found[position - 1].end : 0
                 let segment = String(characters[segmentStart..<item.start])
                 let endsLine = after.isEmpty || after == "."
-                if isRange(found, at: position, in: characters) || hasCue(segment) || (endsLine && previousCue) {
+                let ownLabel = endsWithLabel(before, strict: true) || (endsLine && isPlaceLine(before))
+                if isRange(found, at: position, in: characters) || hasCue(segment)
+                    || (endsLine && !ownLabel && previousCue)
+                {
                     continue
                 }
                 let date = item.date.flatMap { window.contains($0) ? $0 : nil }
-                if endsWithLabel(before, strict: true) || (endsLine && isPlaceLine(before))
-                    || (endsLine && previous.map(labelsNextLine) == true)
-                {
+                if ownLabel || (endsLine && previous.map(labelsNextLine) == true) {
                     labelled.append(date)
                 } else if before.allSatisfy(\.isWhitespace), endsLine || after == ",", index < firstHalf {
                     standalone.append(date)
@@ -135,7 +136,7 @@ public enum IssueDateDetector {
                 if item.isStrong { strong.append(date) }
             }
             let trailing = String(characters[(found.last?.end ?? 0)...])
-            previousCue = hasCue(trailing) && !labelsNextLine(line)
+            previousCue = endsWithCue(trailing)
         }
         for tier in [labelled, standalone, strong] where !tier.isEmpty {
             guard let first = tier[0], tier.allSatisfy({ $0 == first }) else { return nil }
@@ -167,6 +168,23 @@ public enum IssueDateDetector {
     static func hasCue(_ folded: String) -> Bool {
         foldedCues.contains { Folded.containsBounded($0, in: folded) }
             || germanSuffixCues.contains { endsAWord($0, in: folded) }
+    }
+
+    /// The prepositions a cue may have after it at a line's end (`Fällig am`, `Ihr Schreiben vom`).
+    static let cuePrepositions: Set<String> = ["am", "vom", "zum", "bis", "on", "by", "of"]
+
+    /// Whether the folded text ends with a cue (whole words, a German suffix cue, or a cue inside its last word such
+    /// as `geb.-datum`), optionally followed by `:` and one preposition (review DB1 of #204).
+    static func endsWithCue(_ folded: String) -> Bool {
+        var text = Substring(folded).trimmingSuffix(\.isWhitespace)
+        if text.last == ":" { text = text.dropLast().trimmingSuffix(\.isWhitespace) }
+        if let last = text.split(separator: " ").last, cuePrepositions.contains(String(last)) {
+            text = text.dropLast(last.count).trimmingSuffix(\.isWhitespace)
+        }
+        if text.last == ":" { text = text.dropLast().trimmingSuffix(\.isWhitespace) }
+        if foldedCues.contains(where: { endsWithWord(text, $0) }) { return true }
+        guard let last = text.split(separator: " ").last else { return false }
+        return hasCue(String(last))
     }
 
     /// Whether some word of `text` ends with `suffix` (no letter or digit right after it).

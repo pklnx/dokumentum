@@ -42,8 +42,8 @@ public enum DetectedSender: Equatable, Sendable {
 /// 2. else a structural name: the return-address line's first segment, unless it is a street, a post box or holds
 ///    a postcode, or the next segment is only a postcode (a town: `Springfield, IL 62701`, review B2 of #204); in the
 ///    letterhead (topmost first) and the footer, a segment with a legal form, cut after it, with a leading `©` and
-///    years dropped, unless the words before the form read as a sentence (a lowercase word that is no name
-///    particle) or hold another legal form (two names joined, review N5 of #204). It must be 2–80 characters, at
+///    years dropped, unless the words before the form read as a sentence (`readsAsSentence`) or hold another legal
+///    form (two names joined, review N5 of #204; combined forms such as `AG & Co. KGaA` are one form, DN1). It must be 2–80 characters, at
 ///    most 8 words, with a letter, and no placeholder.
 ///
 /// **Limits** (review N6 of #204): a recipient block that starts left of 10 mm, or one above 27 mm, is no recipient
@@ -74,7 +74,8 @@ public enum SenderDetector {
     ]
     /// Legal forms, as words; a word's trailing `.`, `,`, `;` or `:` is ignored when comparing.
     public static let legalForms = [
-        "GmbH & Co. KG", "UG (haftungsbeschränkt)", "PartG mbB", "GmbH", "gGmbH", "mbH", "AG", "KG", "KGaA", "OHG",
+        "GmbH & Co. KGaA", "AG & Co. KGaA", "SE & Co. KGaA", "GmbH & Co. KG", "GmbH + Co. KG", "Ltd. & Co. KG",
+        "UG (haftungsbeschränkt)", "PartG mbB", "GmbH", "gGmbH", "mbH", "AG", "KG", "KGaA", "OHG",
         "GbR", "e.V.", "eG", "e.K.", "SE", "PartG", "mbB", "Ltd", "Limited", "LLC", "Inc.", "Corp.", "PLC", "LLP",
     ]
 
@@ -183,7 +184,7 @@ public enum SenderDetector {
             let dropped = company.words.prefix(while: isYearOrCopyright).count
             guard dropped < company.formStart else { continue }
             let head = company.words[dropped..<company.formStart]
-            guard !head.contains(where: isSentenceWord), !head.contains(where: isLegalFormWord) else { continue }
+            guard !readsAsSentence(head), !head.contains(where: isLegalFormWord) else { continue }
             names.append(company.words.dropFirst(dropped).joined(separator: " "))
         }
         return names
@@ -220,6 +221,16 @@ public enum SenderDetector {
         guard let first = letters.first, first.isLetter, first.isLowercase else { return false }
         return letters.allSatisfy { $0.isLetter && $0.isLowercase } && !nameParticles.contains(letters)
     }
+
+    /// The words before a legal form read as a sentence: two lowercase words that are no name particles, or one of
+    /// `sentenceMarkers` (`Ihre Bestellung bei Beispiel GmbH`). One lowercase word alone (`dm-drogerie markt GmbH + Co.
+    /// KG`) is a name (review DN1 of #204).
+    static func readsAsSentence(_ words: ArraySlice<String>) -> Bool {
+        let lowercase = words.filter(isSentenceWord)
+        return lowercase.count >= 2 || lowercase.contains { sentenceMarkers.contains($0) }
+    }
+
+    static let sentenceMarkers: Set<String> = ["bei", "mit", "to", "from", "with", "by", "via", "per"]
 
     /// A word that is a one-word legal form (`GmbH` in `Muster Versand GmbH Commerzbank AG`).
     static func isLegalFormWord(_ word: String) -> Bool {
@@ -387,7 +398,9 @@ struct Zone {
 struct Page {
     let geometry: PageGeometry
     let lines: [PageLine]
-    /// No line starts in the left field's x-range within the union area: the recipient sits in a right window.
+    /// No line with a postcode starts in the left field's x-range within the union area: the recipient sits in a right
+    /// window. A left reference block or a place-and-date line has no postcode; a DIN recipient block always has one
+    /// (review DB2 of #204).
     let hasRightWindow: Bool
 
     init(_ layout: PageLayout) {
@@ -404,7 +417,7 @@ struct Page {
         self.lines = lines
         hasRightWindow = !lines.contains { line in
             DetectionLimits.acceptedFieldX.contains(line.box.minX)
-                && DetectionLimits.recipientArea.contains(line.box.midY)
+                && DetectionLimits.recipientArea.contains(line.box.midY) && SenderDetector.hasPostcode(line.text)
         }
     }
 
