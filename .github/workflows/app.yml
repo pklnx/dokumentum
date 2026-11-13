@@ -105,3 +105,17 @@ jobs:
           destination: 'platform=macOS'
           plans: Default
           artifact: app-macos-xcresult
+      # DokumentumCore once on a cooperative pool of ONE thread (#174, docs/development/index.md, "Waiting in tests"):
+      # a test that blocks a pool thread hangs here at once, instead of freezing at random on a 3-CPU runner. The two
+      # real-model tests fail fast in this mode by design (the framework's `.noRoom`), so they are skipped. The step
+      # has its own time bound: a hang ends it after 10 minutes, not after the job timeout. It runs in the required
+      # job `app-macos`, after the Default plan, and so only when that plan runs (not for docs-only pull requests).
+      - name: Core tests on a one-thread cooperative pool
+        if: needs.scope.outputs.scope != 'docs'
+        timeout-minutes: 10
+        env:
+          LIBDISPATCH_COOPERATIVE_POOL_STRICT: "1"
+          DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/DokumentumCore --skip FoundationModelsRealModelTests
