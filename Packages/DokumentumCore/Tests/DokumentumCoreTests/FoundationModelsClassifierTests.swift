@@ -162,25 +162,40 @@ struct FoundationModelsClassifierTests {
 /// where the model is available (the development Mac, also its iOS simulator on #138); skips wherever it is not
 /// (the plan's probe P-m found the simulator without it).
 ///
-/// The simulator of a GitHub Actions macOS runner reports the model as available but has no model assets: a request
-/// can fail with `ModelManagerServices.ModelManagerError` 1026 (#170). The framework throws that as an `NSError` of
-/// the domain `FoundationModels.LanguageModelError`, code -1, with the 1026 error among its underlying errors; it is
-/// not a `LanguageModelError` value, so `catch let error as LanguageModelError` does not match it. The tests first
-/// ask the model one trivial question, and both that request and the classification are cancelled with the reason
-/// when they fail with 1026 (`missingAssets(_:)`), at any point. Every other error, and every wrong result, fails.
+/// The simulator of a GitHub Actions macOS runner reports the model as available but lacks model assets: a request
+/// can fail with `ModelManagerServices.ModelManagerError` 1026 (#170) or 1019 (#177). The framework throws that as an
+/// `NSError` of the domain `FoundationModels.LanguageModelError`, code -1, with the `ModelManagerError` among its
+/// underlying errors; it is not a `LanguageModelError` value, so `catch let error as LanguageModelError` does not
+/// match it. The tests first ask the model one trivial question, and both that request and the classification are
+/// cancelled with the reason when they fail for missing assets (`missingAssets(_:)`), at any point. Every other
+/// error, and every wrong result, fails.
 struct FoundationModelsRealModelTests {
     static let availability = SystemLanguageModel.default.availability
     static let skipReason = Comment(rawValue: "The on-device model is not available here: \(availability)")
 
-    /// The model's `ModelManagerError` "assets not available".
     static let missingAssetsDomain = "ModelManagerServices.ModelManagerError"
-    static let missingAssetsCode = 1026
 
-    /// Whether `error`, or any error under it (`NSError.underlyingErrors`, at any depth), is `ModelManagerError`
-    /// 1026. Read through `NSError`, which the thrown error is (#170); the framework has no public type for it.
+    /// The `ModelManagerError` codes that say an asset of the model is not on this machine (#177). The framework's
+    /// own descriptions (macOS 27.0.1, read through its `Decodable` and `CustomNSError` conformances):
+    ///
+    /// | Code | Case | Description |
+    /// |---|---|---|
+    /// | 1018 | `assetBundleNotFound` | "Asset bundle … not found in Model Catalog" |
+    /// | 1019 | `assetNotFound` | "Asset … not found in Model Catalog" (seen on the runner, #177) |
+    /// | 1026 | `modelCatalogError` | "Model Catalog error: …" (seen on the runner with "There are no underlying assets", #170) |
+    /// | 1028 | `assetNotAvailableInModelCatalog` | "Asset … is not available in Model Catalog" |
+    ///
+    /// Not included, so they fail: every other code, also those near these, such as 1020 (an asset type the model
+    /// manager does not know), 1025 (an asset without dynamic mode), 1029 and 1031 (a policy), 1030 (device not
+    /// eligible: the availability says that).
+    static let missingAssetsCodes: Set<Int> = [1018, 1019, 1026, 1028]
+
+    /// Whether `error`, or any error under it (`NSError.underlyingErrors`, at any depth), is a `ModelManagerError` of
+    /// `missingAssetsCodes`. Read through `NSError`, which the thrown error is (#170); the framework has no public
+    /// type for it.
     static func missingAssets(_ error: any Error) -> Bool {
         let error = error as NSError
-        if error.domain == missingAssetsDomain && error.code == missingAssetsCode { return true }
+        if error.domain == missingAssetsDomain && missingAssetsCodes.contains(error.code) { return true }
         return error.underlyingErrors.contains(where: missingAssets)
     }
 
@@ -195,7 +210,7 @@ struct FoundationModelsRealModelTests {
     }
 
     static func cancelWithoutAssets(_ error: any Error) throws -> Never {
-        try Test.cancel("The on-device model is available but has no assets here (ModelManagerError 1026): \(error)")
+        try Test.cancel("The on-device model is available but lacks assets here (ModelManagerError): \(error)")
     }
 
     /// Cancels the test when the model reports itself available but cannot answer a trivial question for lack of
@@ -255,24 +270,36 @@ struct FoundationModelsRealModelTests {
         #expect(SuggestionRules.check(suggestion, text: text, now: Date()).issueDate != nil, "\(suggestion)")
     }
 
-    /// #170: the check matches 1026 in the shape the runner's simulator throws it, also nested deeper, and nothing
-    /// else: not another code or domain, not the framework's own errors. Runs everywhere, without the model.
-    @Test func onlyModelManagerError1026MeansMissingAssets() {
+    /// #170, #177: the check matches the missing-asset codes in the shape the runner's simulator throws them, also
+    /// nested deeper, and nothing else: not another code or domain, not the framework's own errors. Runs everywhere,
+    /// without the model.
+    @Test func onlyTheMissingAssetCodesMeanMissingAssets() {
         func error(_ domain: String, _ code: Int, under: [NSError] = []) -> NSError {
             NSError(domain: domain, code: code, userInfo: under.isEmpty ? [:] : [NSMultipleUnderlyingErrorsKey: under])
         }
         let assets = error(Self.missingAssetsDomain, 1026)
         let wrapper = "FoundationModels.LanguageModelError"
-        #expect(Self.missingAssets(error(wrapper, -1, under: [assets])), "as on the runner (#170)")
+        #expect(Self.missingAssetsCodes == [1018, 1019, 1026, 1028])
+        for code in [1018, 1019, 1026, 1028] {
+            #expect(
+                Self.missingAssets(error(wrapper, -1, under: [error(Self.missingAssetsDomain, code)])),
+                "as on the runner (#170, #177): \(code)")
+        }
         #expect(Self.missingAssets(assets))
         #expect(Self.missingAssets(error(wrapper, -1, under: [error("Other", 1, under: [assets])])), "nested")
         #expect(
             Self.missingAssets(
                 NSError(domain: wrapper, code: -1, userInfo: [NSUnderlyingErrorKey: assets])), "single underlying")
-        let others: [any Error] = [
+        var others: [any Error] = [
             error(wrapper, -1),
-            error(wrapper, -1, under: [error(Self.missingAssetsDomain, 1025)]),
+            error(wrapper, 1019),
             error(wrapper, -1, under: [error("com.apple.UnifiedAssetFramework", 1026)]),
+            error(wrapper, -1, under: [error("com.apple.UnifiedAssetFramework", 1019)]),
+        ]
+        for code in [1017, 1020, 1025, 1027, 1029, 1030, 1031] {
+            others.append(error(wrapper, -1, under: [error(Self.missingAssetsDomain, code)]))
+        }
+        others += [
             LanguageModelError.guardrailViolation(.init(debugDescription: "guardrail")),
             LanguageModelError.timeout(.init(debugDescription: "timeout")),
             SystemLanguageModel.Error.assetsUnavailable(.init(debugDescription: "assets")),
