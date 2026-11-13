@@ -1,7 +1,8 @@
 import XCTest
 
 /// The trash on the sample documents (`-UITestSeed`, in memory; plan of #3, part 4): a document moves into the
-/// trash and back, and Empty Trash asks first and deletes only the trash's documents.
+/// trash and back, and Empty Trash asks first and deletes only the trash's documents. On the iPhone the restore swipe
+/// action shows the accent's fill under white, at 4.5:1 or more (#9, P4).
 final class TrashSmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test cannot see the
     // app's code.
@@ -43,6 +44,16 @@ final class TrashSmokeTests: XCTestCase {
         XCTAssertTrue(ui.element("trash.empty").waitForExistence(timeout: 10), "no Empty Trash in the trash")
         XCTAssertFalse(ui.element("import.menu").exists, "the trash offers Import")
         ui.attachWindowScreenshot("2-trash", to: self)
+        #if os(iOS)
+            // The restore swipe action is the accent's fill with white on it (#9, P4), measured on its own screenshot.
+            row.swipeLeft()
+            let restore = ui.element("documentList.swipe.restore")
+            XCTAssertTrue(restore.waitForExistence(timeout: 10), "no restore swipe action")
+            ui.attachWindowScreenshot("2a-restore-swipe", to: self)
+            ui.assertTextContrast("documentList.swipe.restore", in: self)
+            row.swipeRight()
+            waitForDisappearance(of: restore, "the restore swipe action stayed open")
+        #endif
 
         // A trashed document's detail is read only and offers Restore.
         ui.activate(Self.documentRow(Self.electricityBill))

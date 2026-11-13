@@ -1,0 +1,22 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:0.08627,0.08627,0.08627,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "dokumentum-icon-layer-star.svg",
+          "name" : "star"
+        },
+        {
+          "image-name" : "dokumentum-icon-layer-ink.svg",
+          "name" : "ink"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}
