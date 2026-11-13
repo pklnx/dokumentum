@@ -198,6 +198,19 @@ test runs its nonisolated work (`SearchIndexer.Hooks.executor`, used by `Blockin
 queue: on the 3-CPU runners, tasks blocked on the pool kept even a `DispatchQueue.global()` timer from
 running. `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking, and
 gives up with an issue after its timeout, so a missing `release()` fails the test instead of hanging it.
+
+**The strict-pool step (#174).** The rule above is checked, not only written down: the `app-macos` job runs the
+`DokumentumCore` package tests a second time, after the Default plan, with `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`
+(`swift test --package-path Packages/DokumentumCore --skip FoundationModelsRealModelTests`). In that mode the
+cooperative pool has one thread, so a test that blocks a pool thread hangs at once on any machine, instead of
+freezing at random on a small runner. The step has its own time bound of 10 minutes (it takes about 4 with the
+build), so a hang fails the job in 10 minutes and not after the job's 30. The two `FoundationModelsRealModelTests`
+are skipped there: they fail fast in this debug mode by design (the framework's `.noRoom`). The step is part of the
+required job `app-macos`, so the check names are unchanged, and it runs only when the Default plan runs (not for
+docs-only pull requests). To try it locally: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --package-path
+Packages/DokumentumCore --skip FoundationModelsRealModelTests`. Counter-proof: a throwaway test that detaches a task and
+then blocks its own pool thread on a semaphore the task signals passes in the Default plan and hangs the step (see
+the pull request that added it).
 `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns such a block into a
 certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows it on any Mac.
 
