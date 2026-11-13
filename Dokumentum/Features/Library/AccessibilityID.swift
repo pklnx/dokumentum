@@ -40,6 +40,8 @@ enum AccessibilityID {
     static let detailProcessingRunning = "documentDetail.processing.running"
     static let detailProcessingFailed = "documentDetail.processing.failed"
     static let detailProcessingRetry = "documentDetail.processing.retry"
+    /// The line while suggestions are made for the document (#8, part 3).
+    static let detailProcessingClassify = "documentDetail.processing.classify"
 
     /// The detail's toolbar button that shows the info panel.
     static let detailShowInfo = "documentDetail.showInfo"
@@ -119,6 +121,15 @@ enum AccessibilityID {
         case .all: "search.scope.all"
         }
     }
+
+    /// The settings (#8, part 3): the view, the iPhone sidebar's button that opens it and the sheet's "Done", and the
+    /// "Suggestions" section's switch, availability note and privacy statement.
+    static let settings = "settings"
+    static let settingsOpen = "settings.open"
+    static let settingsDone = "settings.done"
+    static let settingsSuggestionsSwitch = "settings.suggestions.switch"
+    static let settingsSuggestionsAvailability = "settings.suggestions.availability"
+    static let settingsSuggestionsPrivacy = "settings.suggestions.privacy"
 
     /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
     static let debugMenu = "debug.menu"
