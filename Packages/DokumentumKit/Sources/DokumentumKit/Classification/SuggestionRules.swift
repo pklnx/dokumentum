@@ -148,19 +148,9 @@ enum Folded {
 
 /// The written forms of a date that count as "the text says it" (plan of #8, Approach 4): `14.01.2026`, `14.1.26`,
 /// `2026-01-14`, `14. Januar 2026` (also `Jänner`, without the dot, or `Jan.`), `14 January 2026`,
-/// `January 14, 2026`. Matched in folded text (case and diacritics ignored), never inside a longer number.
+/// `January 14, 2026`. Matched in folded text (case and diacritics ignored), never inside a longer number. The
+/// month names are `MonthNames`, the table `IssueDateDetector` parses with.
 public enum DateForms {
-    static let german = [
-        ["januar", "janner", "jan"], ["februar", "feber", "feb"], ["marz", "mar"], ["april", "apr"], ["mai"],
-        ["juni", "jun"], ["juli", "jul"], ["august", "aug"], ["september", "sept", "sep"], ["oktober", "okt"],
-        ["november", "nov"], ["dezember", "dez"],
-    ]
-    static let english = [
-        ["january", "jan"], ["february", "feb"], ["march", "mar"], ["april", "apr"], ["may"], ["june", "jun"],
-        ["july", "jul"], ["august", "aug"], ["september", "sept", "sep"], ["october", "oct"],
-        ["november", "nov"], ["december", "dec"],
-    ]
-
     /// Every form of `date` this check looks for, folded.
     public static func forms(of date: SuggestedDate) -> [String] {
         let days = Set(["\(date.day)", String(format: "%02d", date.day)])
@@ -173,9 +163,8 @@ public enum DateForms {
             }
         }
         forms.append(String(format: "%04d-%02d-%02d", date.year, date.month, date.day))
-        let names = german[date.month - 1] + english[date.month - 1]
         for day in days {
-            for name in Set(names) {
+            for name in MonthNames.names(of: date.month) {
                 for separator in [". ", " ", "."] {
                     forms.append("\(day)\(separator)\(name) \(date.year)")
                     forms.append("\(day)\(separator)\(name). \(date.year)")
