@@ -86,7 +86,8 @@ live in `Packages/`.
   NO` (P6 on #9: no encryption of its own) and `LSApplicationCategoryType = public.app-category.productivity`
   (P7; a Mac upload needs it). The scene manifest and the launch screen stay generated, through a variable only
   the app sets (a `_Generation` setting that resolves empty adds no key). `CFBundleDisplayName` is the one
-  project-wide key that every target carries on purpose: the share sheet shows the extension under that name. The share extension and the test
+  project-wide key that every target carries on purpose: the share sheet shows the extension under that name.
+  `check-project.py` allows no other `INFOPLIST_KEY_*` setting in `Project.xcconfig`, and none in the `.pbxproj`. The share extension and the test
   bundles carry none of these keys; `check-project.py` pins the files and the per-target values.
 - **Privacy manifests** (`Dokumentum/PrivacyInfo.xcprivacy`, `DokumentumShare/PrivacyInfo.xcprivacy`, P5 on
   #9): no tracking, no tracking domains, no collected data. The app declares UserDefaults (`CA92.1`: its own

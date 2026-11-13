@@ -62,10 +62,10 @@ PRODUCT_BUNDLE_IDENTIFIER = space.pklnx.Dokumentum$(DOKUMENTUM_BUNDLE_ID_SUFFIX_
 // - Config/Info-macOS.plist: the same two App Store keys (a Mac upload needs LSApplicationCategoryType);
 // - Config/DokumentumShare-Info.plist: the extension's NSExtension.
 // They live in Config/: a plist inside a synchronized folder fails with "Multiple commands produce". The settings
-// below are the INFOPLIST_KEY_ settings this file has, and none is app-only: CFBundleDisplayName goes into every
-// target on purpose (the share sheet shows the extension under that name), and the scene manifest and the launch
-// screen are generated for the app only, through a variable only the app sets (a _Generation setting that resolves
-// empty adds no key).
+// below are the only INFOPLIST_KEY_ settings this file may have (check-project.py allows no other), and none is
+// app-only: CFBundleDisplayName goes into every target on purpose (the share sheet shows the extension under that
+// name), and the scene manifest and the launch screen are generated for the app only, through a variable only the
+// app sets (a _Generation setting that resolves empty adds no key).
 GENERATE_INFOPLIST_FILE = YES
 DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
 DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] = Config/Info-macOS.plist
