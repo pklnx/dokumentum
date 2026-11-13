@@ -570,10 +570,18 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   runs drain. While a task holds the work, the background does not pause. An **expiry** pauses (the attempt is given
   back) and fails the task; in the foreground the queue goes on at once. The foreground is the application's state
   (`UIApplication.applicationState`), not assumed: a launch in the background for the processing task brings no scene
-  phase. Each identifier is registered once per
-  process, at launch (the SDK kills an app that registers one twice). `Config/Info-iOS.plist` permits exactly the
-  two identifiers and the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under
-  another one's wildcard. The Mac has neither task. The real tasks cannot run on the simulator: maintainer step M5.
+  phase. **Registration** (#194): the processing task is registered at launch. Each continued request registers its
+  own `continued.<UUID>` just before it is submitted, and is submitted only when that registration succeeded: the SDK
+  exempts continued tasks from the launch deadline, refuses to register the wildcard itself, and raises an uncatchable
+  exception for a submission whose exact identifier has no handler. Each identifier is registered once per process
+  (the SDK kills an app that registers one twice). `SystemBackgroundTasks` submits nothing it has not registered: it
+  keeps the identifiers it registered, refuses a second registration and throws `notRegistered` for a submission
+  without one. A launch of a continued request that is no longer asked for completes at once. `Config/Info-iOS.plist`
+  permits exactly the two identifiers (`BackgroundTaskIdentifier.permitted`: the wildcard and the processing task) and
+  the `processing` mode; `scripts/check-project.py` pins it and rejects an identifier under another one's wildcard.
+  The Mac has neither task. The real tasks cannot run on the simulator, but registration and submission are tested
+  there (`SystemBackgroundTasksTests`, against the real `BGTaskScheduler`): maintainer step M5 and #194's device
+  check.
 - **Classification** (#8, parts 1 and 2; plan of #8, T1–T13, T17). A second step after the text, one document at a
   time, with the queue's claims, attempts, backoff, watchdog and interruptions. The queue runs it only with a
   classifier (`DocumentClassifying`); the app passes the on-device model (`FoundationModelsClassifier`, below) to
