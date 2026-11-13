@@ -202,7 +202,10 @@ layer → thumbnail → page count → (from step 7) classification, the same ru
 classifying a document right after its text; from step 9 the matching rules
 (#10) set an empty correspondent and type and add tags in the text's write,
 before the classification, and "Apply Matching Rules" applies them to every
-document on request. A processing queue with one job
+document on request; from step 10 detection (#11) fills an empty
+correspondent and issue date from the first page's sender block and text:
+in the text's write when no classification follows, otherwise after the
+classifier, in the classification's write (Apple Intelligence wins). A processing queue with one job
 at a time across the Vision and the model stage (the plan of #8, T6: the
 system runs model requests one after the other anyway). Classification runs
 once per document (state `classify`, then `done`).
@@ -236,7 +239,7 @@ a local SQLite FTS5 index per device replaces it behind the same interface.
 ### 3.6 Porting from document-archive
 | Ported (cleaned up, tests along) | Rebuilt | Dropped |
 |---|---|---|
-| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, field/date detection (later steps), test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, the on-device classifier with its limits (step 7, #8: the predecessor was not readable, so its limits were measured again; P0, no refusal note in v1, P8), import flows, image cleanup and scanner wrapper (built in step 4, #5; the predecessor's code was not read, maintainer decision M1); new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
+| PDF building from images, text layer (`TextLayer`), Vision OCR (`DocumentRecognition`), tag hierarchy with duplicate merge and cycle repair, `StoreChangeObserver`/`SyncMonitor`, test infrastructure (`ProcessingEnvironment` task-local seam, `TestSupport.waitUntil`, `VisionGate` probes, `Checkpoint`, rendered test pages) | store setup, list/detail/sidebar UI for two device classes, settings, the on-device classifier with its limits (step 7, #8: the predecessor was not readable, so its limits were measured again; P0, no refusal note in v1, P8), import flows, image cleanup and scanner wrapper (built in step 4, #5; the predecessor's code was not read, maintainer decision M1), sender and date detection (step 10, #11: the old `FieldDetector` was not readable, so it was designed fresh); new: the share extension and its queue (the old app never built them, #4) | iPad paths, `LegacyMigration`, container migration, weak linking and `#available` branches, `MistralClient` and all Mistral code, watch folder (for now), the old app's undo stash (step 15 has only an undo notice for a delete) |
 
 ## 4. Development process
 - Workflow, roles, labels and review rules as in `pklnx/dev-process`; the
@@ -325,7 +328,7 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
 | # | Step | Content | Size |
 |---|---|---|---|
 | 9 | Matching rules | Rules on tags, correspondents and types (any word, all words, exact phrase, regex), applied on import and on request | M |
-| 10 | Sender and date detection | Correspondent from the sender block, issue date from the text (port `FieldDetector`) | M |
+| 10 | Sender and date detection | Correspondent from the sender block, issue date from the text (rebuilt; the old `FieldDetector` was not readable) | M |
 
 ### Milestone 3: Deadlines and reminders
 | # | Step | Content | Size |

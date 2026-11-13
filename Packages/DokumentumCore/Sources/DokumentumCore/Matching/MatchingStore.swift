@@ -159,8 +159,9 @@ struct RuleFill: Equatable, Sendable {
 /// - **Rules first** (`applyRules`): the correspondent and the type only when the document has none, matching tags
 ///   added; nothing is removed or replaced, `touch()` is never called, and an outcome that changes nothing writes
 ///   nothing (T4). Only live records are linked.
-/// - **Detection second** (#11, part 2) adds its step here, on the row as the rules left it: on the `done` path in
-///   the text write, on the `classify` path after the classifier, in both classification exits (#11's Q3).
+/// - **Detection** (#11, part 2; `applyDetection`, `DetectionFill.swift`) runs on the row as the rules left it: on
+///   the `done` path in the text write, on the `classify` path after the classifier, in both classification exits
+///   (#11's Q3: the classifier wins).
 /// - **One related-row map** (`related`) collects every metadata row a step links. A link writes the record's
 ///   inverse relationship, so the write's check reads each of them again with the document row
 ///   (`RowState.read`); a rule edited, renamed or merged in the window makes the write back off. The rows a
@@ -176,19 +177,39 @@ struct MetadataFill {
         var documentTypes: [UUID: DocumentType] = [:]
     }
 
+    /// Every tag, correspondent and type of the write's context, tombstones and copies included.
+    typealias Records = (tags: [Tag], correspondents: [Correspondent], documentTypes: [DocumentType])
+
     let context: ModelContext
     /// Every metadata row a step linked, as this context read it.
     private(set) var related: [RowKey: RowState] = [:]
+    private var fetchedRecords: Records?
     private var fetched: Live?
 
     init(context: ModelContext) {
         self.context = context
     }
 
+    /// Every metadata record of the write's context, fetched once per fill (`RowRecords.fetchMetadata`): the
+    /// classification write resolves the classifier's names on them, and `live()` is built from them, so a write
+    /// with both fetches once (review A of #205 for #11).
+    mutating func records() throws -> Records {
+        if let fetchedRecords { return fetchedRecords }
+        let records = try RowRecords.fetchMetadata(in: context)
+        fetchedRecords = records
+        return records
+    }
+
+    /// Links a live correspondent to `document` and adds its row to `related`, so the write's check reads it again.
+    mutating func link(_ record: Correspondent, to document: Document) {
+        related[RowKey(entity: .correspondent, instanceID: record.instanceID)] = RowState.capture(record)
+        document.correspondent = record
+    }
+
     /// The live records, fetched once per fill.
     mutating func live() throws -> Live {
         if let fetched { return fetched }
-        let metadata = try RowRecords.fetchMetadata(in: context)
+        let metadata = try records()
         var live = Live()
         for record in MatchingStore.withoutCopies(metadata.tags, \.instanceID) where record.isLive {
             live.tags[record.instanceID] = record
@@ -223,8 +244,7 @@ struct MetadataFill {
         guard outcome.correspondent != nil || outcome.documentType != nil || !outcome.tags.isEmpty else { return fill }
         let live = try live()
         if document.correspondent == nil, let id = outcome.correspondent, let record = live.correspondents[id] {
-            related[RowKey(entity: .correspondent, instanceID: id)] = RowState.capture(record)
-            document.correspondent = record
+            link(record, to: document)
             fill.changed = true
         }
         if document.documentType == nil, let id = outcome.documentType, let record = live.documentTypes[id] {

@@ -2,14 +2,26 @@ import XCTest
 
 /// The real app starts on a local store on disk and shows its root view, on iOS and on macOS. The store
 /// is a new one in the app's temporary directory (`-UITestLocalStore`), never the archive's path.
+///
+/// Detection (#11, part 2) on the same launch, where the processing queue runs: `-UITestImportLetter` imports a
+/// synthetic letter as a text PDF, and `-UITestClassifierAvailability deviceNotEligible` makes it the `done` path,
+/// where only detection fills fields. The letter's info shows the detected correspondent and date. It extends this
+/// test, so the suite keeps its count (plan §4); the `classify` path is covered by the queue tests (N10).
 final class LaunchSmokeTests: XCTestCase {
     /// `DokumentumApp.rootIdentifier`; a UI test cannot see the app's code.
     private let rootIdentifier = "dokumentum.root"
+    /// What detection finds on `din-a-stadtwerke` (`SyntheticLetters`): sample data, the same in every language.
+    private static let letter = "din-a-stadtwerke"
+    private static let sender = "Stadtwerke Musterstadt GmbH"
 
     @MainActor
     func testTheAppLaunchesAndShowsItsRootView() {
         let launched = UITestApp()
-        launched.launch(.localOnDisk(name: "LaunchSmoke"))
+        launched.launch(
+            .localOnDisk(name: "LaunchSmoke"),
+            extraArguments: [
+                "-UITestImportLetter", Self.letter, "-UITestClassifierAvailability", "deviceNotEligible",
+            ])
         defer { quit(launched.app) }
         XCTAssertTrue(launched.element(rootIdentifier).waitForExistence(timeout: 60), "The root view did not appear")
         #if os(macOS)
@@ -17,6 +29,39 @@ final class LaunchSmokeTests: XCTestCase {
             XCTAssertTrue(launched.element("sidebar.syncOff").waitForExistence(timeout: 10), "no “Sync off” line")
             launched.attachWindowScreenshot("1-local-store-sync-off", to: self)
         #endif
+        showsTheDetectedSenderAndDate(launched)
+    }
+
+    /// The imported letter's info: the correspondent and the date that detection filled.
+    @MainActor
+    private func showsTheDetectedSenderAndDate(_ ui: UITestApp) {
+        let row = ui.app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "documentList.row.")
+        ).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: UITestApp.timeout(60)), "the letter was not imported")
+        #if os(macOS)
+            row.click()
+        #else
+            row.tap()
+        #endif
+        ui.activate("documentDetail.showInfo")
+        let correspondent = ui.element("documentInfo.correspondent")
+        XCTAssertTrue(correspondent.waitForExistence(timeout: 20), "no info")
+        let detected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", Self.sender, Self.sender),
+            object: correspondent)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [detected], timeout: UITestApp.timeout(120)), .completed,
+            "no detected correspondent: \(correspondent.label) \(String(describing: correspondent.value))")
+        // 13.11.2026 in any of the app's date formats: the day, the month (as a number or a name) and the year.
+        let date = ui.element("documentInfo.date")
+        let shown =
+            [date.label, date.value as? String ?? ""].joined(separator: " ")
+            + date.descendants(matching: .any).allElementsBoundByIndex.map {
+                [$0.label, $0.value as? String ?? ""].joined(separator: " ")
+            }.joined(separator: " ")
+        XCTAssertTrue(shown.contains("13") && shown.contains("2026"), "not the detected date: \(shown)")
+        ui.attachWindowScreenshot("2-detected-sender-and-date", to: self)
     }
 
     /// Ends the launch. On the Mac a normal quit (⌘Q), so the app removes its `-UITestLocalStore` folder in

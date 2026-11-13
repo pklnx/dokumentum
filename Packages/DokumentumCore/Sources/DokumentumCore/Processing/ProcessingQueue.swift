@@ -48,6 +48,13 @@ public struct ProcessingReport: Equatable, Sendable {
     public var rulesApplied = 0
     /// Text result writes that left a correspondent or type empty because several records' rules matched (P2).
     public var rulesAmbiguous = 0
+    /// Writes in which detection (#11) filled an empty correspondent, an existing one or a new one: the text write on
+    /// the `done` path, the classification write on the `classify` path.
+    public var detectedCorrespondents = 0
+    /// …of them, the correspondents detection created (the maintainer's Q1).
+    public var createdCorrespondents = 0
+    /// Writes in which detection filled an empty date.
+    public var detectedDates = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
@@ -166,6 +173,17 @@ public protocol ProcessingRunning: Sendable {
 /// again only when the live rules it fetched differ from the snapshot, and its check reads every metadata row it
 /// links again with the document row. Without rule records it fetches no metadata at all (review N4).
 ///
+/// **Detection (#11, part 2).** The text result write also detects the sender and the issue date (`MetadataFill`,
+/// `DetectionFill.swift`), after the rules and only into empty fields, and never calls `touch()`. The maintainer's
+/// Q3 (Apple Intelligence wins) decides where:
+/// - the write sets **`done`**: detection fills the date (`IssueDateDetector` on the text it stores) and the
+///   correspondent (`SenderDetector` on the stage's `firstPageLayout` and the live correspondents; a structural name
+///   is resolved with `MetadataMatcher`, else a new correspondent is created) in the same save;
+/// - the write sets **`classify`**: detection fills nothing. Right before the save the sender is written to this
+///   device's `DetectionStash`, and both exits of the classification step fill detection after the classifier.
+///
+/// Neither field empty: no fetch and no detector run (N6). The check reads every correspondent it links again.
+///
 /// **Write discipline (T6, #56's principle: a background writer never writes over a row state it has not read).**
 /// The claim write and the result write each run in one synchronous call (`write`), with no `await` from its first
 /// step to its last and never a compensating write:
@@ -252,6 +270,8 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     let classifier: (any DocumentClassifying)?
     let classificationFailures: ProcessingFailures
     let classificationSettings: ClassificationSettings
+    /// The sender detection found in a text write that set `classify` (#11, Q3), per device.
+    nonisolated let detectionStash: DetectionStash
     let calendar: Calendar
     /// The matching rules' regex budget (#10): `.production` in the app; tests pass a generous clock, so a loaded
     /// runner never times out an ordinary rule (review A of #205, B4).
@@ -275,13 +295,17 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     ///     text counter's defaults suite.
     ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite. With
     ///     a classifier, the cut-off is recorded now if there is none yet (P9).
-    ///   - calendar: the calendar a suggested date is stored in (the detail's date picker uses the current one).
+    ///   - detectionStash: the detected senders of documents in `classify` (#11); by default in the failure counter's
+    ///     defaults suite.
+    ///   - calendar: the calendar a suggested or detected date is stored in (the detail's date picker uses the
+    ///     current one).
     ///   - matchingBudget: the matching rules' regex budget per rule and document (#10).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
         stage: any ProcessingStage = DocumentStage(), requeue: ProcessingRequeue? = nil,
         classifier: (any DocumentClassifying)? = nil, classificationFailures: ProcessingFailures? = nil,
-        classificationSettings: ClassificationSettings? = nil, calendar: Calendar = .current,
+        classificationSettings: ClassificationSettings? = nil, detectionStash: DetectionStash? = nil,
+        calendar: Calendar = .current,
         matchingBudget: MatchingBudget = .production,
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
         stallTimeout: Duration = ProcessingQueue.stallTimeout,
@@ -306,6 +330,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
                 defaultsSuite: failures.defaultsSuite, key: ProcessingFailures.classificationDefaultsKey)
         let settings = classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
         self.classificationSettings = settings
+        self.detectionStash = detectionStash ?? DetectionStash(defaultsSuite: failures.defaultsSuite)
         self.calendar = calendar
         self.matchingBudget = matchingBudget
         stages = StageTracker(onWait: hooks.waitsForStage)
@@ -364,7 +389,8 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
         let candidates: [Candidate]
         do {
             try Self.forgetCounters(
-                [failures, classificationFailures], sightings: sightings, requeue: requeue, in: container)
+                [failures, classificationFailures], sightings: sightings, requeue: requeue, stash: detectionStash,
+                in: container)
             candidates = try Self.scan(in: container)
         } catch {
             Log.processing.error("Processing scan failed: \(Log.code(of: error), privacy: .public)")
@@ -500,15 +526,32 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             let rules = text.flatMap { Self.textWriteRules(on: $0.1.text, in: container, budget: matchingBudget) }
             if rules != nil { hooks.afterRules?() }
             var ruleFill = RuleFill()
-            let outcome = write(
-                .result, id, expecting: held, checksText: text != nil, checksFile: layered != nil,
-                fill: rules.map { rules -> MetadataFillStep in
-                    { document, context in
-                        var fill = MetadataFill(context: context)
-                        ruleFill = try fill.applyRules(rules, to: document)
-                        return fill.related
+            var detected = DetectionFill()
+            let layout = result.firstPageLayout
+            let stash = detectionStash
+            let (writeTime, writeCalendar) = (now(), calendar)
+            // Rules first, then detection (#11): with a text, the fill always runs; it fetches the metadata only when
+            // a rule or an empty correspondent with a layout needs it (N4, N6).
+            let fill: MetadataFillStep? = text.map { _, capped in
+                { document, context in
+                    var fill = MetadataFill(context: context)
+                    if let rules { ruleFill = try fill.applyRules(rules, to: document) }
+                    if nextState == .classify {
+                        // Q3: nothing detected is filled now. The sender goes to the stash, always written (N-r1).
+                        guard let textID = document.text?.instanceID else { return fill.related }
+                        let sender =
+                            document.correspondent == nil ? try layout.flatMap { try fill.detectSender(in: $0) } : nil
+                        stash.write(DetectionStash.Entry(text: textID, sender: sender), for: id)
+                    } else {
+                        detected = try fill.applyDetection(
+                            text: capped.text, layout: layout, to: document, now: writeTime,
+                            calendar: writeCalendar)
                     }
+                    return fill.related
                 }
+            }
+            let outcome = write(
+                .result, id, expecting: held, checksText: text != nil, checksFile: layered != nil, fill: fill
             ) { document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
                 if let (source, capped) = text {
@@ -540,6 +583,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
                 if ruleFill.changed { report.rulesApplied += 1 }
                 if ruleFill.ambiguous { report.rulesAmbiguous += 1 }
                 Self.log(ruleFill)
+                count(detected, into: &report)
                 if backfills { requeue?.forgetThumbnailBackfill([id]) }
                 if let (_, capped) = text, capped.isCapped {
                     report.textsCapped += 1
@@ -610,6 +654,24 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
         }
         if fill.changed { Log.processing.notice("Matching rules: rules.applied") }
         if fill.ambiguous { Log.processing.notice("Matching rules: rules.ambiguous") }
+    }
+
+    /// Adds what detection did in a saved write to `report`, and logs it: fixed codes and counts only (T10); a
+    /// name, a date or any text of the document is never logged.
+    func count(_ fill: DetectionFill, into report: inout ProcessingReport) {
+        if fill.correspondent {
+            report.detectedCorrespondents += 1
+            Log.processing.notice("Detection: detection.correspondent")
+        }
+        if fill.created {
+            report.createdCorrespondents += 1
+            Log.processing.notice("Detection: detection.created")
+        }
+        if fill.date {
+            report.detectedDates += 1
+            Log.processing.notice("Detection: detection.date")
+        }
+        if fill.noStash { Log.processing.notice("Detection: detection.noStash") }
     }
 
     /// A failed attempt (thrown or timed out): below the limit nothing is written and the backoff starts; the third
@@ -729,7 +791,9 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             to classify \(report.toClassify, privacy: .public), classified \(report.classified, privacy: .public), \
             declined \(report.declined, privacy: .public), classification skipped \
             \(report.classificationSkipped, privacy: .public), rules applied \(report.rulesApplied, privacy: .public), \
-            rules ambiguous \(report.rulesAmbiguous, privacy: .public)
+            rules ambiguous \(report.rulesAmbiguous, privacy: .public), detected correspondents \
+            \(report.detectedCorrespondents, privacy: .public), created correspondents \
+            \(report.createdCorrespondents, privacy: .public), detected dates \(report.detectedDates, privacy: .public)
             """)
     }
 }
@@ -815,14 +879,16 @@ extension ProcessingQueue {
         return candidates
     }
 
-    /// Removes the failure counters (the text step's and the classification step's, review N3 of #8), claim sightings
-    /// and thumbnail-backfill records of documents that are `done` or gone, so the keys do not grow.
+    /// Removes the failure counters (the text step's and the classification step's, review N3 of #8), claim sightings,
+    /// thumbnail-backfill records and detection stash entries (#11) of documents that are `done` or gone, so the keys
+    /// do not grow.
     static func forgetCounters(
         _ counters: [ProcessingFailures], sightings: ClaimSightings, requeue: ProcessingRequeue? = nil,
-        in container: ModelContainer
+        stash: DetectionStash? = nil, in container: ModelContainer
     ) throws {
         let backfill = requeue?.thumbnailBackfill ?? []
-        let tracked = Array(Set(counters.flatMap(\.documents) + sightings.documents).union(backfill))
+        let tracked = Array(
+            Set(counters.flatMap(\.documents) + sightings.documents + (stash?.documents ?? [])).union(backfill))
         guard !tracked.isEmpty else { return }
         let context = ModelContext(container)
         let documents = try context.fetch(
@@ -832,6 +898,7 @@ extension ProcessingQueue {
         guard !gone.isEmpty else { return }
         for counter in counters { counter.forget(gone) }
         sightings.forget(gone)
+        stash?.forget(gone)
         requeue?.forgetThumbnailBackfill(Set(gone).intersection(backfill))
     }
 

@@ -118,15 +118,22 @@ extension ProcessingQueue {
             }
             suggestions[id] = CachedSuggestion(text: input.text, answer: .suggestion(checked))
         }
-        let outcome = Self.writeClassification(
-            id, expecting: held, suggestion: checked, text: input.extractedText, now: now(), calendar: calendar,
-            budget: matchingBudget, in: container, beforeCheck: hooks.beforeCheck)
+        // Detection after the classifier (#11, Q3): the date recomputed from the text the step read, outside the
+        // write's window; the sender from this device's stash.
+        let detection = ClassificationDetection(
+            date: .detected(
+                IssueDateDetector.detect(in: input.extractedText, createdAt: input.createdAt, calendar: calendar)),
+            stashed: detectionStash.entry(for: id))
+        let (outcome, detected) = Self.classificationWrite(
+            id, expecting: held, suggestion: checked, text: input.extractedText, detection: detection, now: now(),
+            calendar: calendar, budget: matchingBudget, in: container, beforeCheck: hooks.beforeCheck)
         switch outcome {
         case .saved:
             forget(id)
             report.saves += 1
             report.done += 1
             report.classified += 1
+            count(detected, into: &report)
         case .metAnotherSave:
             // Kept: the next run decides the fields again and writes without asking the model (T3).
             report.backedOff += 1
@@ -142,10 +149,12 @@ extension ProcessingQueue {
     /// The documents the queue keeps something in memory for (a cached answer, a wait for the model). For tests.
     var classificationMemory: Set<UUID> { Set(suggestions.keys).union(modelWaits.keys) }
 
-    /// Drops what the queue keeps in memory for a document: its cached answer and its wait for the model.
+    /// Drops what the queue keeps for a document: its cached answer, its wait for the model, and its detection stash
+    /// entry (#11).
     func forget(_ id: UUID) {
         suggestions[id] = nil
         modelWaits[id] = nil
+        detectionStash.forget([id])
     }
 
     /// Keeps the memory only for documents still in `classify` (review B N-5 of #146): one that another device
@@ -339,15 +348,21 @@ extension ProcessingQueue {
         return claimed
     }
 
-    /// Writes `done` without suggestions. `reason` (a fixed code) counts it as skipped and logs it; `nil` leaves
-    /// the counting to the caller. `true` when it saved.
+    /// Writes `done` without suggestions: the classification write with an empty suggestion (#11, Approach 5), so
+    /// detection still fills the empty date (recomputed from the text record, read by key only then) and the empty
+    /// correspondent (from this device's stash). `reason` (a fixed code) counts it as skipped and logs it; `nil`
+    /// leaves the counting to the caller. `true` when it saved.
     @discardableResult
     private func finish(_ id: UUID, expecting held: Held, reason: String?, into report: inout ProcessingReport) -> Bool
     {
-        let outcome = write(.classification, id, expecting: held) { $0.processingState = .done }
+        let (outcome, detected) = Self.classificationWrite(
+            id, expecting: held, suggestion: CheckedSuggestion(), text: nil,
+            detection: ClassificationDetection(date: .fromText, stashed: detectionStash.entry(for: id)), now: now(),
+            calendar: calendar, budget: matchingBudget, in: container, beforeCheck: hooks.beforeCheck)
         // A write that met another save keeps the cached answer (a decline) for the next run.
         if outcome == .saved || outcome == .changed { forget(id) }
         guard count(outcome, into: &report) else { return false }
+        count(detected, into: &report)
         report.done += 1
         if let reason {
             report.classificationSkipped += 1
@@ -365,6 +380,8 @@ struct ClassificationInput: Sendable {
     var text: PersistentIdentifier
     var extractedText: String
     var known: KnownMetadata
+    /// The document's `createdAt`: detection's date window and two-digit years (#11, Approach 5).
+    var createdAt: Date
 }
 
 extension ProcessingQueue {
@@ -397,7 +414,9 @@ extension ProcessingQueue {
                 tags: ranked(
                     records.tags.filter(\.isLive).map { ($0.name, $0.documents?.count ?? 0) },
                     limit: ClassificationLimits.knownTags))
-            return ClassificationInput(text: text.persistentModelID, extractedText: text.extractedText, known: known)
+            return ClassificationInput(
+                text: text.persistentModelID, extractedText: text.extractedText, known: known,
+                createdAt: document.createdAt)
         } catch {
             Log.processing.error("Could not read a document's text: \(Log.code(of: error), privacy: .public)")
             return nil
@@ -414,22 +433,48 @@ extension ProcessingQueue {
     /// 3. it resolves the names against the live records it fetches (`MetadataMatcher`): an existing correspondent
     ///    or type is linked, else one is inserted (P1); a tag only when exactly one live tag has the name, never a
     ///    new one, and the tags are added to the document's rule tags;
-    /// 4. it sets only the fields it fills and `done`, and never calls `touch()`;
-    /// 5. it reads the document row and every metadata row it found linked or links again in a second fresh
+    /// 4. with `detection` (#11, Approach 5), detection then fills the date and the correspondent if they are still
+    ///    empty: the classifier's values win (the maintainer's Q3), and a new correspondent is created only when the
+    ///    classifier left the correspondent empty. The metadata is fetched once for both (`MetadataFill`), and only
+    ///    when a name is resolved;
+    /// 5. it sets only the fields it fills and `done`, and never calls `touch()`;
+    /// 6. it reads the document row and every metadata row it found linked or links again in a second fresh
     ///    context (`RowState.read`) and saves only if all are unchanged (a linked record must still be live under
     ///    the same name, and the rule of each of the document's tags unchanged); otherwise it rolls back and writes
     ///    nothing.
+    ///
+    /// `text` is the text the step read; `nil` (the step's `finish`) reads the text record by key, only when the tags
+    /// or the date need it.
     static func writeClassification(
-        _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, text: String, now: Date,
-        calendar: Calendar, budget: MatchingBudget = .production, in container: ModelContainer,
-        beforeCheck: (@Sendable (Write) throws -> Void)?
+        _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, text: String?,
+        detection: ClassificationDetection? = nil, now: Date, calendar: Calendar, budget: MatchingBudget = .production,
+        in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?
     ) -> WriteOutcome {
+        classificationWrite(
+            instanceID, expecting: held, suggestion: suggestion, text: text, detection: detection, now: now,
+            calendar: calendar, budget: budget, in: container, beforeCheck: beforeCheck
+        ).outcome
+    }
+
+    /// `writeClassification`, with what detection filled.
+    static func classificationWrite(
+        _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, text: String?,
+        detection: ClassificationDetection?, now: Date, calendar: Calendar, budget: MatchingBudget = .production,
+        in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?
+    ) -> (outcome: WriteOutcome, detection: DetectionFill) {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         do {
             guard let document = try fetch(instanceID, in: context), held.matches(document) else {
                 Log.processing.notice("A document changed since the queue decided; nothing written")
-                return .changed
+                return (.changed, DetectionFill())
+            }
+            /// The stored text: `text`, or the text record's, read by key on first use.
+            var storedText: String?
+            let textOfDocument = { () -> String in
+                if let text { return text }
+                if storedText == nil { storedText = document.text?.extractedText ?? "" }
+                return storedText ?? ""
             }
             let read = RowState.capture(document)
             var related: [RowKey: RowState] = [:]
@@ -446,7 +491,8 @@ extension ProcessingQueue {
             }
             // T13: only needed when there are tags to add to.
             let hasUserTags =
-                !tags.isEmpty && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: text, budget: budget))
+                !tags.isEmpty
+                && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: textOfDocument(), budget: budget))
             let fields = ClassificationFields(
                 title: document.title, createdAt: document.createdAt, modifiedAt: document.modifiedAt,
                 documentDate: document.documentDate, hasCorrespondent: document.correspondent != nil,
@@ -461,8 +507,10 @@ extension ProcessingQueue {
             {
                 document.documentDate = stored
             }
-            let metadata = try RowRecords.fetchMetadata(in: context)
+            // One fetch of the metadata for the classifier's names and detection (review A of #205 for #11).
+            var fill = MetadataFill(context: context)
             if fields.correspondentIsEmpty, let name = suggestion.correspondent {
+                let metadata = try fill.records()
                 let live = keeperOrder(metadata.correspondents.filter(\.isLive), \.createdAt, \.instanceID)
                 if let id = MetadataMatcher.match(name, among: live.map { .init(id: $0.instanceID, name: $0.name) }),
                     let record = live.first(where: { $0.instanceID == id })
@@ -476,6 +524,7 @@ extension ProcessingQueue {
                 }
             }
             if fields.documentTypeIsEmpty, let name = suggestion.documentType {
+                let metadata = try fill.records()
                 let live = keeperOrder(metadata.documentTypes.filter(\.isLive), \.createdAt, \.instanceID)
                 if let id = MetadataMatcher.match(name, among: live.map { .init(id: $0.instanceID, name: $0.name) }),
                     let record = live.first(where: { $0.instanceID == id })
@@ -489,7 +538,7 @@ extension ProcessingQueue {
                 }
             }
             if fields.tagsAreEmpty, !suggestion.tags.isEmpty {
-                let live = metadata.tags.filter(\.isLive)
+                let live = try fill.records().tags.filter(\.isLive)
                 let candidates = live.map { MetadataMatcher.Record(id: $0.instanceID, name: $0.name) }
                 var linked: [Tag] = []
                 for name in suggestion.tags {
@@ -504,6 +553,13 @@ extension ProcessingQueue {
                 // Added to the rule tags the document may have (P1), never replacing them.
                 if !linked.isEmpty { document.tags = tags + linked }
             }
+            // Detection last (#11, Q3), on the row as the classifier left it; its links join the related rows.
+            var detected = DetectionFill()
+            if let detection {
+                detected = try fill.applyDetection(
+                    detection, text: textOfDocument, to: document, now: now, calendar: calendar)
+                related.merge(fill.related) { current, _ in current }
+            }
             document.processingState = .done
             try beforeCheck?(.classification)
             let key = RowKey(entity: .document, instanceID: instanceID)
@@ -511,14 +567,14 @@ extension ProcessingQueue {
             guard stored[key] == read, related.allSatisfy({ stored[$0.key] == $0.value }) else {
                 context.rollback()
                 Log.processing.notice("A classification write met another save of its document and wrote nothing")
-                return .metAnotherSave
+                return (.metAnotherSave, DetectionFill())
             }
             try context.save()
-            return .saved
+            return (.saved, detected)
         } catch {
             context.rollback()
             Log.processing.error("A classification write failed: \(Log.code(of: error), privacy: .public)")
-            return .failed
+            return (.failed, DetectionFill())
         }
     }
 

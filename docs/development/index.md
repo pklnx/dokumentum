@@ -710,8 +710,71 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     `done` without suggestions at the next run (the settings request one); a request already running finishes and
     writes its answer. The settings say so below the switch (a row below the section on the iPhone, the section's
     footer on the Mac).
+- **Detection** (#11, plan of #11 Revisions 1 and 2; the maintainer's Q1–Q3). The correspondent from the sender
+  block and the issue date from the text, both on-device and deterministic (Kit: `SenderDetector`,
+  `IssueDateDetector`, `DetectionLimits`; their rules are in their doc comments). No settings and no switch (Q2);
+  detection fills only empty fields and never calls `touch()`, and the Inbox stays the review step.
+  - **The layout** (`PageLayoutReader`, `ProcessingResult.firstPageLayout`): the stage reads where the lines of the
+    **first page with text** are, and no other page. Boxes are normalised to the visible page (crop box and
+    `/Rotate` applied, origin top left), and the layout carries the visible page's size in points, so the detector
+    measures DIN 5008 millimetres against the page's real size (N-r4). A recognised page gives Vision's lines,
+    flipped. A text page gives PDFKit's lines (`selectionsByLine()`), each **split at column gaps** (a gap wider than
+    twice the line's median character width, or two spaces), because PDFKit sometimes joins two columns on one
+    baseline (B2). Per-character bounds come from one-character selections, not `PDFPage.characterBounds(at:)`:
+    measured on macOS 27, that index skips the line breaks of `page.string`, so from the second line on it returns
+    another character's bounds, and its boxes are glyph ink rather than the font's line box. At most 300 lines; the
+    top zone and the footer are kept, the middle is cut (N5).
+  - **Rules first, then the classifier, then detection** for correspondent and date: user edit > #10 rules > #8
+    classifier > #11 detection (Q3, Apple Intelligence wins). Where it runs depends on the state the text result
+    write sets:
+    - **`done`** (no classifier, the switch off, the model unavailable, a document before #8's cut-off): the text write
+      fills the date (`IssueDateDetector` on the text it stores) and the correspondent (`SenderDetector` on the
+      layout and the write's live correspondents) after the rules, in the same save, through the shared fill
+      (`MetadataFill.applyDetection`, `DetectionFill.swift`).
+    - **`classify`**: the text write fills nothing detected. Right before the save it writes the sender to this
+      device's **detection stash** (`DetectionStash`: per-device `UserDefaults` under `detectionStash`, next to the
+      failure counters, never synced; keyed by the document, holding the text record's `instanceID`, the name and,
+      for a known record, its `instanceID` as a hint, or "nothing found"). The entry is always written, so one left by
+      a save that backed off is replaced by the next text write (N-r1). **Both exits of the classification step** apply
+      the classifier first and then detection to what is still empty, in one write (`classificationWrite`; `finish`
+      is that write with an empty suggestion): the date is recomputed from the text (`ClassificationInput.createdAt`;
+      `finish` reads the text record by key only while the date is empty), and the sender comes from the stash entry
+      when it was found with the document's current text record. It is re-resolved: the hinted record while it is
+      live under that name, else `MetadataMatcher` by name, else a new correspondent, so a new correspondent is
+      created only when the classifier left the field empty. Without an entry (another device took the document over,
+      a document already in `classify` when this build arrived, a swapped text record) the date is filled and the
+      sender is not, logged as `detection.noStash`. The entry goes when the classification write saved, and with the
+      failure counters when the document is `done` or gone. Keying by the text record does not catch a text rewritten
+      in place; no path rewrites the text of a document in `classify`.
+  - **Cost on the `classify` path:** detected values appear only when classification ends: normally seconds later in
+    the same run (T7 of #8), but as late as the `notReady` wait (6 hours) or a rate-limit pause.
+  - **What a fill does:** emptiness by #8's rules (`ClassificationFields`: the correspondent when none is set; the date
+    only while the document was never edited); the date stored as #8 stores it (the day in the queue's calendar,
+    the time of day kept); a known live correspondent linked and its row added to the write's check (renamed or merged
+    in the window: the write backs off), a structural name resolved with `MetadataMatcher` against the live
+    correspondents, else inserted (Q1). A tombstone or a record with copies is never linked (`MetadataFill.Live`).
+    Two documents of one new sender in one run share the record, because each write fetches the live records; across
+    devices the repair merges same-name records. With neither field empty the fill neither fetches nor detects (N6),
+    so a re-run (Try again, re-queue) is a no-op.
+  - **When:** on every text extraction (import, Try again, the re-queue pass), never again later: no backfill and no
+    "detect again" on request (N7). **Detection versus #8's cut-off (P9):** the classifier skips documents created
+    before its cut-off, while detection fills such a document on the `done` path when its text is first extracted.
+  - **Reads:** the text write fetches the metadata only when a rule exists or the correspondent is empty with a
+    layout; the classification write fetches it once for the classifier's names and detection together
+    (`MetadataFill.records()`), only when a name is resolved (`ProcessingSQLTests`).
+  - **Report and log:** `detectedCorrespondents`, `createdCorrespondents`, `detectedDates`; the log has counts and fixed
+    codes only (`detection.correspondent`, `detection.created`, `detection.date`, `detection.noStash`), never a
+    name, a date or any text of the document.
+  - **Tests:** the Kit detectors on layouts and the `SyntheticLetters` corpus (#204); every corpus letter rendered as
+    a text PDF through the real stage (`TestLetter`, `DetectionLetterTests`), five as scans through real Vision
+    (skipped where Vision cannot run). Vision misreads the 7 pt return-address line of two of them on macOS 27.2,
+    so their structural name is a recorded known issue there; their dates and the other three letters match. The
+    queue on both paths (`DetectionQueueTests`, `DetectionClassifyTests`), the app (`DetectionImportTests`) and the
+    UI smoke (`LaunchSmokeTests` with `-UITestImportLetter` and `-UITestClassifierAvailability deviceNotEligible`,
+    the `done` path).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
-  builds do not contain it.
+  builds do not contain it. `-UITestImportLetter <id>` imports a `SyntheticLetters` entry as a text PDF, only with
+  `-UITestLocalStore`: the queue runs only on stores on disk.
 
 ## Matching rules
 
@@ -738,7 +801,7 @@ budget:)` is a pure function of the text and the set of rules, never of their or
   and digits mean what they say, and accents and ae/oe/ue count as written (`Müller` does not find "Mueller"; write
   `M(ü|ue)ller`). Only the first match is looked for.
 - **Several records of one kind (P2): none.** More than one matching correspondent (or type) leaves the field empty;
-  detection (#11) or the classifier may fill it. Every matching tag applies. **A correspondent or type rule whose
+  the classifier (#8) or detection (#11) may fill it. Every matching tag applies. **A correspondent or type rule whose
   regular expression timed out on a document makes its kind ambiguous on that document**: whether it matches is
   unknown, so none of that kind is set there, and a faster and a slower device never set different values (review A
   of #205, N4). A timed-out tag rule only leaves its own tag out.
@@ -772,19 +835,20 @@ fetched differ from the snapshot (a rule added, edited, merged or removed in bet
 fetched ones. Its check reads every metadata row it links again together with the document row, so a rule edited,
 renamed or merged in the window makes the write back off, and the next run decides again; a rule edited after the
 check applies from the next text write or bulk run, and so does one added between the snapshot and the write of a
-store that had none. **Without rule records the write fetches no more metadata than a text write before #10** (its
+store that had none. **Without rule records the rules fetch no more metadata than a text write before #10** (its
 check, `RowState.read`, reads every tag, correspondent and type as it always did; re-review N4, `ProcessingSQLTests`).
-With rules it fetches them exactly once more, in the fill. `ProcessingReport` counts `rulesApplied` and `rulesAmbiguous`. Older documents are not touched
+With rules it fetches them exactly once more, in the fill; detection (#11) shares that one fetch and needs it only
+while the correspondent is empty. `ProcessingReport` counts `rulesApplied` and `rulesAmbiguous`. Older documents are not touched
 automatically: "Apply Matching Rules" covers them.
 
 **The shared fill** (`MetadataFill`, `DokumentumCore/Matching/MatchingStore.swift`; plan §4a). The one seam the text
 write and the bulk run share, and #11's detection extends: one fetch of the live correspondents, types and tags in the
-write's context, **rules first**, then detection on the row as the rules left it; one related-row map
+write's context, **rules first**, then detection on the row as the rules left it (on the `done` path); one related-row map
 of every metadata row a step links, which the write's check reads again. A link writes the record's inverse
 relationship, so a linked row must be one the write read. The rows a document had linked before are not in the map:
 no decision of a fill reads them (emptiness is the document row's link, which the check compares). On the `classify`
-path, detection fills after the classifier (#11's Q3), so #11 part 2 calls the fill from both classification exits as
-well; the rules stay first. **A record with copies sharing its `instanceID`** is treated like a tombstone everywhere
+path, detection fills after the classifier (#11's Q3), so the fill's detection step runs in both classification exits
+as well, its links merged into the classification write's related rows; the rules stay first. **A record with copies sharing its `instanceID`** is treated like a tombstone everywhere
 in matching (the fill, the rule snapshot, the editor): never a rule, never linked (`MatchingStore.withoutCopies`,
 review A of #205, B1). The write's check reads a key through `RowRecords`, which keeps the first copy read, and the
 order of a fetch without sort descriptors is not stable between contexts (measured: of two live copies, the write's
@@ -797,8 +861,10 @@ an `instanceID`" above), but such a rule silently never applies: the bulk run's 
 logged as `rules.copied`), the editor refuses the record (`noMetadata`), and **#200's rule sheet should show that
 state** ("This rule is not applied: the record exists twice") instead of a plain error.
 
-**Precedence** (T5, P1): a user's edit > rules > detection (#11) > classifier (#8). Correspondent, type and date: each
-later step fills only what is still empty when it writes. Tags: the classifier adds its tags unless the document has a
+**Precedence** (T5, P1; #11's Q3): a user's edit > rules > classifier (#8) > detection (#11). Correspondent, type and
+date: each later step fills only what is still empty when it writes. On the `classify` path detection fills after the
+classifier, in the classification write; on the `done` path it fills in the text write after the rules (see
+"Detection" under "The processing queue"). Tags: the classifier adds its tags unless the document has a
 user tag (T13, "Classification" above). A user's edit saved before the write's fetch makes the field non-empty; one
 saved in the window makes the write back off. "Rules beat the classifier" holds only for documents whose text is
 written after the rule exists: a rule added later and applied by "Apply Matching Rules" fills only empty fields, so it

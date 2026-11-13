@@ -340,4 +340,99 @@ struct ProcessingSQLTests {
             #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
         }
     }
+
+    // MARK: Detection (#11, part 2; plan Tests part 2)
+
+    /// Whole-table fetches of the correspondent and type tables (a select by key is a fault of a linked record).
+    private func metadataFetches(_ statements: [String]) -> Int {
+        statements.map { $0.trimmingCharacters(in: .whitespaces) }.filter {
+            $0.hasSuffix("FROM ZCORRESPONDENT t0") || $0.hasSuffix("FROM ZDOCUMENTTYPE t0")
+        }.count
+    }
+
+    /// The text write's detection fetches the correspondents once more than the check, only while a field it fills
+    /// is empty; with neither empty it fetches nothing (N6). It reads no blob but the text by key (counter-proof:
+    /// fetch the live records before the emptiness checks).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theTextWritesDetectionReadsTheCorrespondentsOnlyWhileAFieldIsEmpty() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let empty = try store.insert(device: deviceA, claimedAt: processingStart)
+        let filled = try store.insert(device: deviceA, claimedAt: processingStart)
+        let mine = try store.insertMetadata(.correspondent, "Meine Wahl")
+        try store.edit(filled) { document, context in
+            document.correspondent = try context.fetch(
+                FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == mine })
+            ).first
+            document.touch(processingStart.addingTimeInterval(60))
+        }
+        let letter = stadtwerkeLetter
+
+        func write(_ id: UUID) throws -> (statements: [String], fill: DetectionFill) {
+            let file = try #require(try store.fileIdentifier(of: id))
+            var detected = DetectionFill()
+            let recording = try SQLLog.Recording()
+            let outcome = ProcessingQueue.write(
+                .result, id,
+                expecting: .init(stateRaw: "pending", deviceID: deviceA, claimedAt: processingStart, file: file),
+                in: store.container, checksText: true, beforeCheck: nil,
+                fill: { document, context in
+                    var fill = MetadataFill(context: context)
+                    detected = try fill.applyDetection(
+                        text: letter.text, layout: letter.layout, to: document, now: processingStart,
+                        calendar: testCalendar)
+                    return fill.related
+                },
+                change: { document in
+                    document.text?.extractedText = letter.text
+                    document.processingState = .done
+                })
+            #expect(outcome == .saved)
+            return (try recording.statements(), detected)
+        }
+        let withEmpty = try write(empty)
+        let withFilled = try write(filled)
+
+        #expect(withEmpty.fill.correspondent && withEmpty.fill.date)
+        #expect(!withFilled.fill.correspondent && !withFilled.fill.date)
+        #expect(metadataFetches(withEmpty.statements) == 4, "the check's two and detection's two")
+        #expect(metadataFetches(withFilled.statements) == 2, "the check's only")
+        for statement in withEmpty.statements + withFilled.statements {
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
+        }
+    }
+
+    /// The classification write without an answer (`finish`) recomputes an empty date from the text record, read by
+    /// key, and fetches the correspondents only to resolve a stashed sender; never a file or a thumbnail.
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theClassificationWritesDetectionReadsTheTextByKeyAndNoFile() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insertClassify(text: stadtwerkeLetter.text)
+        let text = try #require(try ProcessingStore.fetch(id, in: ModelContext(store.container))?.text)
+        let held = ProcessingQueue.Held(
+            stateRaw: "classify", deviceID: deviceA, claimedAt: processingStart, file: nil, checksFile: false)
+        let entry = DetectionStash.Entry(text: text.instanceID, sender: .name(stadtwerkeName))
+
+        let recording = try SQLLog.Recording()
+        let (outcome, detected) = ProcessingQueue.classificationWrite(
+            id, expecting: held, suggestion: CheckedSuggestion(), text: nil,
+            detection: ClassificationDetection(date: .fromText, stashed: entry), now: processingStart,
+            calendar: testCalendar, in: store.container, beforeCheck: nil)
+        let statements = try recording.statements()
+
+        #expect(outcome == .saved)
+        #expect(detected.correspondent && detected.created && detected.date)
+        let textReads = statements.filter { SQLLog.statement($0, names: "ZDOCUMENTTEXT") && $0.contains("SELECT") }
+        #expect(!textReads.isEmpty)
+        #expect(
+            textReads.allSatisfy { $0.contains("t0.Z_PK = ?") || $0.contains("t0.Z_PK IN  (?)") },
+            "not by key: \(textReads)")
+        #expect(metadataFetches(statements) == 4, "the check's two and the fill's two")
+        for statement in statements {
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
+        }
+    }
 }
