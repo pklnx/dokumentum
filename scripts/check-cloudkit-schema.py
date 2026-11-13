@@ -2,7 +2,9 @@
 """Compares an exported CloudKit Development schema with a schema snapshot (docs/development/release.md, M3).
 
 Before the maintainer deploys the Development schema to Production, which copies every record type, field and
-index and can never be undone, the export is compared with the frozen snapshot `schema-v1.txt`. The export is
+index and can never be undone, the export is compared with a frozen snapshot: by default the newest one, the
+`schema-v<N>.txt` with the highest N in `Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema/` (the version
+the app's store and the schema initializer use, `DokumentumMigrationPlan.current`). The export is
 a CloudKit Schema Language file (`xcrun cktool export-schema ... --output-file <file>`, or the CloudKit
 Console's export pasted as text). The script passes only if:
 
@@ -19,7 +21,7 @@ Console's export pasted as text). The script passes only if:
   Schema into Your Workflow"). It is accepted only for an `int64` or `bool` attribute of the snapshot, whose
   expected type is INT64, and listed separately as "implicit"; anywhere else it fails like any other field
   (`PREFERRED AS DOUBLE` on an INT64 field is a wrong type, a NUMBER field outside the snapshot is a stray
-  field). `ENCRYPTED <type>` is read, and fails wherever it appears: V1 has no encrypted field;
+  field). `ENCRYPTED <type>` is read, and fails wherever it appears: no version has an encrypted field;
 - every attribute that is not transient and every to-one relationship of the snapshot has its field;
 - `CDMR` has only system fields, `CD_entityName` and its own fields (CDMR_FIELDS), and `Users` only system
   fields and `roles LIST<INT64>`;
@@ -36,7 +38,7 @@ written before the first real export. If the first real export differs in what t
 produces, the difference is reported on the issue and a PR changes this script before the deploy; a mismatch
 is never adjusted silently (release.md, M3, "Classifying a failed comparison").
 
-    python3 scripts/check-cloudkit-schema.py <export.ckdb>                     # from the repository root
+    python3 scripts/check-cloudkit-schema.py <export.ckdb>                     # from the repository root, newest
     python3 scripts/check-cloudkit-schema.py <export.ckdb> --snapshot <schema-vN.txt>
     python3 scripts/check-cloudkit-schema.py --self-test
 
@@ -49,7 +51,8 @@ import stat
 import sys
 import tempfile
 
-SNAPSHOT = "Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema/schema-v1.txt"
+SCHEMA_DIR = "Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema"
+SNAPSHOT_NAME = re.compile(r"^schema-v(\d+)\.txt$")
 # An export is a few kilobytes; a larger file is not a schema export.
 MAX_BYTES = 1_000_000
 
@@ -444,6 +447,17 @@ def render(snapshot_text: str, with_assets=True) -> str:
     return "\n".join(out)
 
 
+def latest_snapshot(directory=SCHEMA_DIR):
+    """The default snapshot: the `schema-v<N>.txt` in `directory` with the highest N, compared as a number (v10
+    comes after v9). None when the directory has none or cannot be read."""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    versions = [(int(match.group(1)), name) for name in names if (match := SNAPSHOT_NAME.match(name))]
+    return os.path.join(directory, max(versions)[1]) if versions else None
+
+
 def self_test() -> None:
     snapshot = (
         "# V1\n"
@@ -593,26 +607,56 @@ def self_test() -> None:
             except OSError:
                 pass
     count = len(cases) + 3
-    # The committed snapshot: a clean export of it passes with Apple's 12 string and 2 binary _ckAsset fields,
-    # and fails on an asset field of a date attribute. The cases above therefore use a format that exists.
-    if os.path.isfile(SNAPSHOT):
-        real = read_text(SNAPSHOT)
+    # The default snapshot is the newest schema-v<N>.txt, by number, and only files of exactly that name count.
+    with tempfile.TemporaryDirectory() as root:
+        layouts = [
+            ([], None),
+            (["schema-v1.txt"], "schema-v1.txt"),
+            (["schema-v1.txt", "schema-v2.txt"], "schema-v2.txt"),
+            (["schema-v1.txt", "schema-v2.txt", "schema-v9.txt", "schema-v10.txt"], "schema-v10.txt"),
+            (["schema-v1.txt", "schema-v3.txt.orig", "schema-vx.txt", "schema-v2.TXT", "production-versions.txt"],
+             "schema-v1.txt"),
+        ]
+        for number, (names, expected) in enumerate(layouts):
+            directory = os.path.join(root, str(number))
+            os.mkdir(directory)
+            for name in names:
+                with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
+                    handle.write("# empty\n")
+            found = latest_snapshot(directory)
+            want = None if expected is None else os.path.join(directory, expected)
+            assert found == want, f"latest_snapshot of {names}: expected {want}, got {found}"
+        assert latest_snapshot(os.path.join(root, "missing")) is None
+    count += len(layouts) + 1
+    # The committed snapshots: a clean export of the newest passes, with one _ckAsset field per string and binary
+    # attribute (V1: Apple's 12 string and 2 binary ones), and fails on an asset field of a date attribute. The
+    # cases above therefore use a format that exists.
+    snapshot = latest_snapshot()
+    if snapshot is not None:
+        v1 = os.path.join(SCHEMA_DIR, "schema-v1.txt")
+        v1_assets = [line for line in render(read_text(v1)).split("\n") if line.strip().endswith("_ckAsset ASSET,")]
+        assert len(v1_assets) == 14, f"{v1}: expected 12 string and 2 binary asset fields, got {v1_assets}"
+        real = read_text(snapshot)
         rendered = render(real)
         asset_lines = [line for line in rendered.split("\n") if line.strip().endswith("_ckAsset ASSET,")]
-        assert len(asset_lines) == 14, f"{SNAPSHOT}: expected 12 string and 2 binary asset fields, got {asset_lines}"
-        problems, _ = check(rendered, real, snapshot_label=SNAPSHOT)
-        assert problems == [], f"a clean export of {SNAPSHOT} fails: {problems}"
+        variable = [line for line in real.split("\n")
+                    if line.startswith("attribute ") and re.search(r" type=(string|binary) ", line)
+                    and " transient=no" in line]
+        assert len(asset_lines) == len(variable) >= 14, \
+            f"{snapshot}: expected {len(variable)} asset fields, got {asset_lines}"
+        problems, _ = check(rendered, real, snapshot_label=snapshot)
+        assert problems == [], f"a clean export of {snapshot} fails: {problems}"
         record = "    RECORD TYPE CD_Document (\n"
         problems, _ = check(rendered.replace(record, record + "        CD_documentDate_ckAsset ASSET,\n"), real,
-                            snapshot_label=SNAPSHOT)
+                            snapshot_label=snapshot)
         assert any("CD_documentDate_ckAsset" in problem for problem in problems), problems
-        count += 2
+        count += 3
     print(f"self-test passed ({count} cases)")
 
 
 def main(arguments) -> int:
     usage = "usage: check-cloudkit-schema.py <export> [--snapshot <schema-vN.txt>] | --self-test"
-    export, snapshot = None, SNAPSHOT
+    export, snapshot = None, None
     rest = list(arguments)
     while rest:
         argument = rest.pop(0)
@@ -626,6 +670,11 @@ def main(arguments) -> int:
     if export is None:
         print(usage)
         return 2
+    if snapshot is None:
+        snapshot = latest_snapshot()
+        if snapshot is None:
+            print(f"error: no schema-v<N>.txt in {SCHEMA_DIR}; run from the repository root or pass --snapshot")
+            return 2
     try:
         export_text = read_text(export)
         snapshot_text = read_text(snapshot)

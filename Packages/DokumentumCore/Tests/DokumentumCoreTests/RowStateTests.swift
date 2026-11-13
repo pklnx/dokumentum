@@ -26,9 +26,14 @@ struct RowStateTests {
                     isInbox: true, pageCount: 0, fileSize: 0, textSourceRaw: "", processingStateRaw: "",
                     processingDeviceID: "", contentHash: "", originalFileName: "", sourceRaw: "", tags: []))
         case "Tag":
-            return labels(RowState.TagRow(id: sample, instanceID: sample, name: "", colorHex: "", createdAt: date))
+            return labels(
+                RowState.TagRow(
+                    id: sample, instanceID: sample, name: "", colorHex: "", createdAt: date, matchModeRaw: "",
+                    matchPattern: ""))
         case "Correspondent", "DocumentType":
-            return labels(RowState.MetadataRow(id: sample, instanceID: sample, name: "", createdAt: date))
+            return labels(
+                RowState.MetadataRow(
+                    id: sample, instanceID: sample, name: "", createdAt: date, matchModeRaw: "", matchPattern: ""))
         case "DocumentText":
             return blob
         default:
@@ -36,8 +41,11 @@ struct RowStateTests {
         }
     }
 
+    /// Checked against the current schema (`DokumentumMigrationPlan.current`), so a new version's fields are
+    /// checked without an edit here.
     @Test func everyFieldOfEveryEntityIsCapturedOrExcluded() throws {
-        let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
+        let model = try #require(
+            NSManagedObjectModel.makeManagedObjectModel(for: DokumentumMigrationPlan.current.models))
         #expect(Set(model.entities.compactMap(\.name)) == Set(RowState.excluded.keys))
         for entity in model.entities {
             let name = try #require(entity.name)
@@ -47,5 +55,4 @@ struct RowStateTests {
             #expect(Self.captured(name).isDisjoint(with: excluded), "\(name)")
         }
     }
-
 }

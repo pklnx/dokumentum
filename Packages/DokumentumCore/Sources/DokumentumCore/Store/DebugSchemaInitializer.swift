@@ -20,10 +20,14 @@
                 .appending(path: "SchemaInit.store")
         }
 
-        /// The Core Data container for the current schema with its store at `url`, mirrored to the private
-        /// database of the app's CloudKit container. It loads nothing.
+        /// The Core Data container for the current schema (`DokumentumMigrationPlan.current`, the model of
+        /// `ArchiveStore.schema`) with its store at `url`, mirrored to the private database of the app's CloudKit
+        /// container. It loads nothing.
         public static func makeContainer(at url: URL) throws -> NSPersistentCloudKitContainer {
-            guard let model = NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models) else {
+            guard
+                let model = NSManagedObjectModel.makeManagedObjectModel(
+                    for: DokumentumMigrationPlan.current.models)
+            else {
                 throw CocoaError(.coreData)
             }
             let container = NSPersistentCloudKitContainer(name: "SchemaInit", managedObjectModel: model)

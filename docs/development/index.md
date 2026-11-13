@@ -273,16 +273,23 @@ runs, and under `swift test`.
 
 ## Data model and sync
 
-The model is `DokumentumSchemaV1` in `Packages/DokumentumCore/Sources/DokumentumCore/Model/`, seven
+The model is `DokumentumSchemaV2` in `Packages/DokumentumCore/Sources/DokumentumCore/Model/`, seven
 `@Model` classes that `NSPersistentCloudKitContainer` mirrors to the private database of
-`iCloud.space.pklnx.Dokumentum` (record types `CD_<entity>`). Features name the typealiases in `Model.swift`
-(`Document`, `Tag`, …), never a schema version. Fields and reasons: [plan.md](./plan.md), section 3.3.
+`iCloud.space.pklnx.Dokumentum` (record types `CD_<entity>`). V2 (#10, part 1a) is V1 plus the matching rule of a
+tag, correspondent or document type: `matchModeRaw` (frozen enum `MatchMode`, `""` for no rule) and `matchPattern`,
+both `String` with the default `""`; V1 stays in the code for the migration. Features name the typealiases in
+`Model.swift` (`Document`, `Tag`, …), never a schema version. Fields and reasons: [plan.md](./plan.md), section 3.3.
+
+**One source for the current version.** `DokumentumMigrationPlan.current` (the last of `schemas`) is the version
+`ArchiveStore.schema` opens, the model `DebugSchemaInitializer.makeContainer(at:)` creates the CloudKit Development
+schema from, and the model `RowStateTests` checks; `DebugSchemaInitializerModelTests` checks that the initializer's
+model is `ArchiveStore.schema`'s. A new version therefore needs no edit in those places.
 
 **CloudKit rules.** Every attribute has a default or is optional; every relationship is optional and has an
 inverse; nothing is `@Attribute(.unique)`; no delete rule is `deny`; no relationship is ordered. Synced enums
-are raw `String`s read through typed accessors with a fallback (`source`, `textSource`, `processingState`); a
-setter never writes a fallback back. `SchemaTests` checks the model, `scripts/check-schema-snapshots.py` the
-committed snapshots.
+are raw `String`s read through typed accessors with a fallback (`source`, `textSource`, `processingState`,
+`matchMode`); a setter never writes a fallback back. `SchemaTests` checks the model,
+`scripts/check-schema-snapshots.py` the committed snapshots.
 
 **Large data in records of their own.** `Document` holds no large field. The PDF (`DocumentFile`), the
 thumbnail (`DocumentThumbnail`) and the extracted text (`DocumentText`) are one each per document, behind
@@ -333,21 +340,28 @@ decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.m
 **Adding schema version N** (only with a real model change: identical versions have the same checksum):
 1. Copy the models into `DokumentumSchemaV<N>` (version `N.0.0`) and change them additively: new attributes
    optional or defaulted, new relationships optional with an inverse.
-2. Add it to `DokumentumMigrationPlan.schemas` with one `.lightweight(fromVersion:toVersion:)` stage. A
-   conversion of synced data is a one-time pass behind a flag, never a custom stage.
+2. Add it to the end of `DokumentumMigrationPlan.schemas` with one `.lightweight(fromVersion:toVersion:)` stage; it
+   becomes `DokumentumMigrationPlan.current`. A conversion of synced data is a one-time pass behind a flag, never a
+   custom stage.
 3. Move the typealiases in `Model.swift` to V(N).
 4. Write the snapshot: `DOKUMENTUM_SCHEMA_DUMP_DIRECTORY=$PWD/Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema
-   swift test --package-path Packages/DokumentumCore --filter SchemaTests` writes `schema-v1.txt`; add the
-   same for `schema-v<N>.txt` in `SchemaTests`. Review the diff: only added lines.
-5. Add a `StoreMigrationTests` case that writes a store with V(N-1) and opens it with V(N).
+   swift test --package-path Packages/DokumentumCore --filter SchemaTests` writes `schema-v<N>.txt` for every
+   version of the plan (`SchemaTests` compares each with its committed file). Review the diff against
+   `schema-v<N-1>.txt`: only added lines. `scripts/check-cloudkit-schema.py` then compares an export with the new
+   snapshot by default.
+5. Add a `StoreMigrationTests` case that writes a store with V(N-1) and opens it with V(N): `writeEveryAttribute`
+   sets every attribute and relationship of V(N-1) generically, and the case checks every value after the open.
+6. A change of an earlier version that is not in Production yet (release.md, M1, case C7) is made identically in
+   every later version, so each stage stays lightweight.
 
 **Production freezes a version.** Until step 8 nothing is in Production, and V1 may still change in place (with
-its snapshot, in the same PR, with the reason; a non-additive change also needs "Reset Development
-Environment" in the CloudKit Console, a maintainer step). Before the deploy the Development schema is exported and
-compared field by field with the snapshot (`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The
-PR that records step 8's deploy adds `1` to
-`Schema/production-versions.txt`; from then on `check-schema-snapshots.py --base <sha>` fails if that snapshot
-changes. Deploying the schema to Production is the maintainer's.
+its snapshot, in the same PR, with the reason, and identically in V2 and its snapshot, step 6 above; a non-additive
+change also needs "Reset Development Environment" in the CloudKit Console, a maintainer step). Before the deploy the
+Development schema is exported and compared field by field with the newest snapshot
+(`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The PR that records step 8's deploy adds every
+version up to the deployed one (`1` and `2` once V2 is in the build) to `Schema/production-versions.txt`; from then
+on `check-schema-snapshots.py --base <sha>` fails if one of those snapshots changes. V1 stays listed because the
+migration test writes a real V1 store. Deploying the schema to Production is the maintainer's.
 
 **Development schema.** CloudKit creates record types when records are first saved, or all at once through
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
