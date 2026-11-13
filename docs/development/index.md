@@ -163,7 +163,7 @@ target can import:
 
 | Tool | For | Instead of |
 |---|---|---|
-| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
+| `Checkpoint` | A handshake with any hook or stub: the hook stops at `pass()` (`passBlocking()` in a synchronous hook on a thread of its own, see below), the test awaits `reached()`, acts, and calls `release()`. Release in a `defer`, so a failing test does not leave the hook waiting | A stub delay or a sleep in a hook; `Task.yield()` and hoping the work got that far |
 | `ManualDebounce` | Code that sleeps through an injected function: the test sees each event start the quiet period (`waitForStarts`) and ends it with `fire()` | A short debounce and sleeping "twice the debounce" |
 | `TestSignal` | Any event: the hook calls `fire()`, the test awaits `wait(for:)`; `TestSignal.counting(stream)` counts the elements of a stream | Polling a counter |
 | `TestSupport.waitForCancellation` | A body that must keep running until its test stops it | Sleeping for a long time |
@@ -186,6 +186,20 @@ when nobody releases it; `WaitingTests` shows the pattern.
 
 **Tests never block the main actor** with synchronous work that can take long: they call the
 `@concurrent` API instead.
+
+**Tests never block a thread of the cooperative pool (#164).** Every task of a test process runs on one
+pool, as wide as the CPU count: 3 threads on the CI runners. A thread that blocks until the test acts (a
+semaphore, a lock held by a paused hook, `DispatchQueue.main.sync`) is gone for every task: the test's own,
+every safety net and Swift Testing's time limits included. Three such threads froze the whole
+`DokumentumCoreTests` process in parallel mode, with no output and no failure. Work that blocks runs on a
+thread of its own: `TestSupport.onOwnThread { … }`, or a `TestSupport.OwnThreadExecutor` as an actor's
+executor (`BusyActor` in `WaitingTests`) or as the executor preference of the task in which the code under
+test runs its nonisolated work (`SearchIndexer.Hooks.executor`, used by `BlockingHistory`). Not a dispatch
+queue: on the 3-CPU runners, tasks blocked on the pool kept even a `DispatchQueue.global()` timer from
+running. `Checkpoint.passBlocking()` records an issue on a pool thread instead of blocking, and
+gives up with an issue after its timeout, so a missing `release()` fails the test instead of hanging it.
+`LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` narrows the pool to one thread, which turns such a block into a
+certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>` shows it on any Mac.
 
 **The safety net waits with the waiter's actor.** A `TestSignal` wait (and `Checkpoint.reached`,
 `ManualDebounce.waitForStarts`) passes its caller's isolation (`#isolation`) to
@@ -1193,10 +1207,9 @@ requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app
 (`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
 (`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
 iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
-is set. The tests run serially (`-parallel-testing-enabled NO`) as a workaround for #164: in parallel mode the
-`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure, in one run of each job; the
-hosted app tests had finished; thread pool starvation is suspected, the trigger is not proven). Switch back to
-parallel mode when #164 is fixed. No per-test time allowance is set (it is not verified that it bounds Swift Testing
+is set. The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
+`DokumentumCoreTests` process froze on these runners (no output, no time-limit failure), because test hooks blocked
+all three threads of the cooperative pool ("Waiting in tests"). No per-test time allowance is set (it is not verified that it bounds Swift Testing
 tests, and a frozen pool stops `.timeLimit` too), so the bound of a stuck run is the job timeout of 30 minutes. A
 failed or cancelled run uploads its `.xcresult` bundles as an artifact (kept 7 days). The workflow needs no secrets and only
 `contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.

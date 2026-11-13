@@ -4,6 +4,7 @@ import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Synchronization
+import Testing
 
 /// One subscriber of `SearchIndexer.updates()`: records every state and signals each element and each `.ready`,
 /// so a test waits for the indexer's next element instead of for time.
@@ -104,7 +105,8 @@ final class FailingHistory: SearchHistoryReading {
 }
 
 /// The store's history, whose reads of changes stop at `checkpoint` while `armed` is on, on the thread of the reader
-/// (#132, N-d): an update then holds inside its history read.
+/// (#132, N-d): an update then holds inside its history read. That thread must not be one of the cooperative pool's
+/// (#164): the indexer runs on a `TestSupport.OwnThreadExecutor` (`SearchIndexer.Hooks.executor`).
 final class BlockingHistory: SearchHistoryReading {
     private let base: StoreSearchHistory
     private let armed: Armed

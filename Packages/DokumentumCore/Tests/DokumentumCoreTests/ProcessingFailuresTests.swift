@@ -119,9 +119,12 @@ struct ProcessingFailuresTests {
                 }
                 let refund: @Sendable () -> Void = { failures.refund(running) }
                 let (first, second) = refundFirst ? (refund, queueWrite) : (queueWrite, refund)
-                let firstDone = Task.detached { first() }
+                // Each on a thread of its own: the first blocks its thread inside the lock, the second blocks on
+                // the lock. On the cooperative pool, the three cases of this test held all three threads of a
+                // 3-CPU runner there, and nothing was left to run the `release()` below (#164).
+                let firstDone = Task { await TestSupport.onOwnThread(first) }
                 await paused.reached()
-                let secondDone = Task.detached { second() }
+                let secondDone = Task { await TestSupport.onOwnThread(second) }
                 paused.release()
                 await firstDone.value
                 await secondDone.value

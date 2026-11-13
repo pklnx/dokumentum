@@ -1,5 +1,6 @@
 import DokumentumCore
 import DokumentumKit
+import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Synchronization
@@ -15,6 +16,15 @@ struct RepairConcurrentSaveTests {
     private func repair(
         _ store: TemporaryStore, editingInTheWindow edit: @escaping (ModelContainer) throws -> Void
     ) throws -> (report: RepairReport, afterEdit: RepairSnapshot) {
+        let (report, afterEdit) = try run(store, editingInTheWindow: edit)
+        return (report, try #require(afterEdit, "no pass reached its check"))
+    }
+
+    /// `repair` without the check that a pass reached the edit: `afterEdit` is `nil` then. Records no issue, so it can
+    /// run on a thread of its own (`TestSupport.onOwnThread`), outside the test's task.
+    private func run(
+        _ store: TemporaryStore, editingInTheWindow edit: @escaping (ModelContainer) throws -> Void
+    ) throws -> (report: RepairReport, afterEdit: RepairSnapshot?) {
         var afterEdit: RepairSnapshot?
         let report = try RepairRun.perform(
             in: store.container, now: repairTime, hasCompletedImport: true,
@@ -23,7 +33,7 @@ struct RepairConcurrentSaveTests {
                 try edit(store.container)
                 afterEdit = try store.full()
             })
-        return (report, try #require(afterEdit, "no pass reached its check"))
+        return (report, afterEdit)
     }
 
     /// Saves `change` from a context of its own.
@@ -168,8 +178,10 @@ struct RepairConcurrentSaveTests {
         #expect(try Self.fetch(Document.self, 2, in: context).correspondent?.instanceID == uuid(12))
     }
 
-    /// The user's edit saved from the main context, on the main thread (review B's B11), as the app's UI saves.
-    @Test func aSaveFromTheMainContextStays() throws {
+    /// The user's edit saved from the main context, on the main thread (review B's B11), as the app's UI saves. The
+    /// repair runs on a thread of its own: the edit waits for the main thread with `DispatchQueue.main.sync`, which
+    /// must not hold a thread of the cooperative pool (#164). Its outcome is checked here, in the test's task.
+    @Test func aSaveFromTheMainContextStays() async throws {
         let store = try TemporaryStore()
         defer { store.remove() }
         try store.seed(
@@ -177,21 +189,25 @@ struct RepairConcurrentSaveTests {
                 documents: [document(1, correspondent: 11)],
                 metadata: [correspondent(10, "Telekom"), correspondent(11, "Telekom")]))
 
-        let (report, afterEdit) = try repair(store) { container in
+        let (report, edited, failure) = try await TestSupport.onOwnThread { [self] in
             var failure: String?
-            DispatchQueue.main.sync {
-                MainActor.assumeIsolated {
-                    do {
-                        let context = container.mainContext
-                        try Self.fetch(Document.self, 1, in: context).title = "From the main context"
-                        try context.save()
-                    } catch {
-                        failure = "\(error)"
+            let (report, afterEdit) = try run(store) { container in
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated {
+                        do {
+                            let context = container.mainContext
+                            try Self.fetch(Document.self, 1, in: context).title = "From the main context"
+                            try context.save()
+                        } catch {
+                            failure = "\(error)"
+                        }
                     }
                 }
             }
-            if let message = failure { Issue.record("the main context did not save: \(message)") }
+            return (report, afterEdit, failure)
         }
+        if let message = failure { Issue.record("the main context did not save: \(message)") }
+        let afterEdit = try #require(edited, "no pass reached its check")
         try expectSkipped(store, report, afterEdit: afterEdit)
         #expect(try Self.fetch(Document.self, 1, in: ModelContext(store.container)).title == "From the main context")
     }
