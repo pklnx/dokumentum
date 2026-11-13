@@ -2,8 +2,7 @@ name: App test
 description: >
   Builds the Dokumentum scheme unsigned and runs test plans on one destination, on a macOS runner
   (docs/development/index.md, "GitHub Actions macOS"). Selects the pinned Xcode, runs the toolchain check
-  and the localisation check, runs the tests serially (a workaround for #164: in parallel mode the
-  DokumentumCoreTests process froze on the 3-CPU runners), and uploads the result bundles when the run fails
+  and the localisation check, runs the tests in parallel, as the test plan sets (#164 is fixed), and uploads the result bundles when the run fails
   or is cancelled. Needs a checkout before it.
 inputs:
   destination:
@@ -54,7 +53,7 @@ runs:
       run: |
         set -o pipefail
         for plan in $PLANS; do
-          xcodebuild test-without-building -scheme Dokumentum -testPlan "$plan" -parallel-testing-enabled NO \
+          xcodebuild test-without-building -scheme Dokumentum -testPlan "$plan" \
             -destination "$DESTINATION" -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -resultBundlePath "$RUNNER_TEMP/test-$plan.xcresult"
         done

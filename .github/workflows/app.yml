@@ -8,8 +8,12 @@ name: App
 # no `paths` filter. The scope is decided in the `scope` job (scripts/app-scope.py): a pull request that changes
 # only docs and process files skips build and tests and passes with a note in the job summary; anything else, or
 # anything unknown, runs the full Default plan, and so does a failed `scope` job (its output is then empty). Every push to main and a nightly schedule run the full plan.
-# The tests run serially (#164, see the action). `xcode-27` is a preview runner image; it has Xcode 27.1 as the
-# default, so the action selects the pinned Xcode. A skipped run does not need it, so it uses a Linux runner.
+# The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
+# DokumentumCoreTests process froze on these 3-CPU runners, because test hooks blocked all three threads of
+# the cooperative pool; tests no longer block pool threads (docs/development/index.md, "Waiting in tests").
+# No per-test time allowance is set: it is not verified that -test-timeouts-enabled bounds Swift Testing tests,
+# and a frozen pool stops `.timeLimit` as well, so the bound of a stuck run is the job timeout.
+# `xcode-27` is a preview runner image; it has Xcode 27.1 as the default, so the action selects the pinned Xcode. A skipped run does not need it, so it uses a Linux runner.
 on:
   push:
     branches: [main]
