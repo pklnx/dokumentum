@@ -144,23 +144,11 @@ final class TrashSmokeTests: XCTestCase {
         #endif
     }
 
-    /// Scrolls the sidebar row into view: on the iPhone the list creates Trash, its last row, only once it is
-    /// scrolled into view, and Inbox and All Documents leave the view when it is. A bounded number of swipes.
+    /// Scrolls the sidebar row into full view (`UITestApp.revealSidebarRow`): on the iPhone the list creates Trash, its
+    /// last row, only once it is scrolled into view, and Inbox and All Documents leave the view when it is.
     @MainActor
     private func revealSidebarRow(_ identifier: String, _ ui: UITestApp) {
-        #if os(iOS)
-            let row = ui.element(identifier)
-            for _ in 0..<5 where !(row.exists && row.isHittable) {
-                // Slow, so the list does not keep scrolling: a tap on a list that still moves only stops it.
-                if identifier == "sidebar.trash" {
-                    ui.element("sidebar").swipeUp(velocity: .slow)
-                } else {
-                    ui.element("sidebar").swipeDown(velocity: .slow)
-                }
-            }
-            let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: row)
-            XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed, "\(identifier) is not in view")
-        #endif
+        ui.revealSidebarRow(identifier, missingTowards: identifier == "sidebar.trash" ? .bottom : .top)
     }
 
     /// Selects a sidebar row, scrolled into view first; on the iPhone that opens its list.

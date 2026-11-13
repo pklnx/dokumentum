@@ -70,6 +70,7 @@ final class LibrarySmokeTests: XCTestCase {
 
         // A chevron expands the tag's nested tags and does not select the tag.
         XCTAssertFalse(ui.element(Self.tagRow(Self.golf)).exists, "Golf is shown before Auto is expanded")
+        ui.revealSidebarRow(Self.tagDisclosure(Self.auto), missingTowards: .bottom)
         ui.activate(Self.tagDisclosure(Self.auto))
         XCTAssertTrue(ui.element(Self.tagRow(Self.golf)).waitForExistence(timeout: 10), "Golf did not appear")
         #if os(iOS)
@@ -83,6 +84,7 @@ final class LibrarySmokeTests: XCTestCase {
         ui.attachWindowScreenshot("3-tags-expanded", to: self)
 
         // Tax lists only its documents.
+        ui.revealSidebarRow(Self.tagRow(Self.tax), missingTowards: .bottom)
         ui.activate(Self.tagRow(Self.tax))
         XCTAssertTrue(ui.element(Self.documentRow(Self.waterBill)).waitForExistence(timeout: 10), "Tax not shown")
         XCTAssertTrue(ui.element(Self.documentRow(Self.electricityBill)).exists)
@@ -124,10 +126,14 @@ final class LibrarySmokeTests: XCTestCase {
             ui.assertTextContrast("documentDetail.unreadable", in: self)
             ui.assertTextContrast("documentDetail.unreadable.description", in: self)
         #else
-            // The annual statement is in the Inbox: back to the sidebar first.
+            // The annual statement is in the Inbox: back to the sidebar first. The Inbox row in full view before the
+            // tap, and the Inbox's list as the tap's signal (#168).
             goBack(ui)
             goBack(ui)
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
+            ui.revealSidebarRow("sidebar.inbox")
             ui.activate("sidebar.inbox")
+            XCTAssertTrue(ui.element("documentList").waitForExistence(timeout: 10), "the Inbox did not open")
         #endif
         ui.activate(Self.documentRow(Self.annualStatement))
         XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
@@ -378,7 +384,7 @@ final class LibrarySmokeTests: XCTestCase {
 
     /// Every sidebar row (Library, tags, correspondents, types, Trash) has a VoiceOver value that starts with
     /// its count ("3 documents", "1 Dokument"). On the iPhone the list creates its lower rows only once they are
-    /// scrolled into view, so it scrolls down to Trash (bounded) and back.
+    /// scrolled into view, so it scrolls down to Trash (bounded) and back up to the top, where the list opened.
     @MainActor
     private func assertEverySidebarRowHasACount(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
         var values: [String: String] = [:]
@@ -416,13 +422,9 @@ final class LibrarySmokeTests: XCTestCase {
         for (identifier, value) in values.sorted(by: { $0.key < $1.key }) {
             XCTAssertFalse(value.isEmpty, "\(identifier) has no count for VoiceOver", file: file, line: line)
         }
-        #if os(iOS)
-            // Back up to the tags, which the test uses next.
-            let auto = ui.element(Self.tagDisclosure(Self.auto))
-            for _ in 0..<5 where !(auto.exists && auto.isHittable) {
-                ui.element("sidebar").swipeDown(velocity: .slow)
-            }
-        #endif
+        // Back up to the top, with the Inbox in full view (#168). Scrolled back only until the tags were in view, the
+        // list left the Inbox under the status bar, and the later tap on it could land on the status bar.
+        ui.revealSidebarRow("sidebar.inbox", file: file, line: line)
     }
 
     #if os(macOS)
