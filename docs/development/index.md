@@ -889,7 +889,8 @@ layer above the ink layer, and shares one design between iOS and macOS (`"square
   `ICON_SOURCE` and `ICON_LAYERS` in `scripts/check-project.py`, which pins them.
 - **actool builds the renditions** at build time; none is in the repository. iOS: `Assets.car` with three 1024 × 1024
   `Icon Image` renditions (Any, Dark, Tintable) and a `MultiSized Image`, plus `AppIcon60x60@2x.png`. Mac:
-  `Contents/Resources/AppIcon.icns` and `Assets.car`. Both Info.plists get `CFBundleIconName = AppIcon`
+  `Contents/Resources/AppIcon.icns` and `Assets.car`. The iOS Info.plist gets `CFBundleIconName = AppIcon` under
+  `CFBundleIcons` → `CFBundlePrimaryIcon`, the Mac's at the top level, next to `CFBundleIconFile = AppIcon`
   (`xcrun assetutil --info <app>/Assets.car` lists them).
 - The app icon is the app's only: `ASSETCATALOG_COMPILER_APPICON_NAME` resolves to `AppIcon` for the app target and
   empty for the others (actool fails on the extension's catalog otherwise). An `AppIcon.appiconset` must not come back:
@@ -900,11 +901,15 @@ layer above the ink layer, and shares one design between iOS and macOS (`"square
 | Role | Light | Dark | Used by |
 |---|---|---|---|
 | **Tint**, `AccentColor` | `#6929c4`: 7.74:1 on `#ffffff`, 6.93:1 on `#f2f2f7` | `#be95ff`: 8.93:1 on `#000000`, 7.24:1 on `#1c1c1e`, 5.93:1 on `#2c2c2e` | tinted text and glyphs and the system controls on the iPhone (`.tint`, `Color.accentColor`) |
-| **Fill**, `AccentFill` | `#8a3ffc`, white on it 5.00:1 | the same | only where white sits on the colour: the restore swipe action (`TrashViews.swift`, `Color(.accentFill)`) |
+| **Fill**, `AccentFill` | `#8a3ffc`, white on it 5.00:1 | the same | only where white sits on the colour: the restore swipe action (`TrashViews.swift`) and the cleanup sheet's corner handles, a dot with a white ring (`PhotoCleanupView.swift`), both `Color(.accentFill)` |
 | **Extension**, `DokumentumShare/Assets.xcassets/AccentColor` | `#8a3ffc`, white on it 5.00:1 | the same | the share sheet's prominent OK button, its only accent use, so it carries the fill |
 
 - `check-project.py` computes these ratios from the colour sets and fails `lint` below 4.5:1 (see "Checks"). The UISmoke
-  audit does not see a closed swipe action; `TrashSmokeTests` measures the open one on the iPhone.
+  audit does not see a closed swipe action; `TrashSmokeTests` measures the open one on the iPhone and asserts that
+  its capsule is the fill and white on it reaches 4.5:1. The pixel count of `assertTextContrast` alone is not enough
+  there: the element's frame also holds the list around the capsule, and black there reaches 4.5:1 on any light
+  colour (review of #192). The corner handles were the tint at first; under their white ring the dark tint gave 2.35:1,
+  which the iPhone's audit reported as "Contrast failed".
 - **On the Mac the app keeps the user's system accent** (P4's fallback). The Mac's document list draws the selected row
   in a colour the system derives from the accent, with white text. Measured on #184 with the tint as the Mac accent:
   `#5418a9` in light (white on it 10.09:1) but `#9671d1` in dark, where white reaches only 3.76:1. So

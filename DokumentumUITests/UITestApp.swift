@@ -505,6 +505,13 @@ struct TextContrast: CustomStringConvertible {
         return 0.2126 * linear(rgb >> 16) + 0.7152 * linear(rgb >> 8) + 0.0722 * linear(rgb)
     }
 
+    /// Whether two sRGB colours differ by at most `tolerance` in every channel (rendering may shift a colour slightly).
+    static func isClose(_ first: UInt32, to second: UInt32, tolerance: Int = 6) -> Bool {
+        [16, 8, 0].allSatisfy { shift in
+            abs(Int(first >> UInt32(shift) & 0xff) - Int(second >> UInt32(shift) & 0xff)) <= tolerance
+        }
+    }
+
     static func ratio(_ first: Double, _ second: Double) -> Double {
         (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }

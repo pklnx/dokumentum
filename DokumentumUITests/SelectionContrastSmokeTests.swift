@@ -50,7 +50,10 @@ final class SelectionContrastSmokeTests: XCTestCase {
             attachment.name = UITestApp.attachmentName("selection-" + column)
             attachment.lifetime = .keepAlways
             add(attachment)
-            ui.assertTextContrast(identifier, in: self)
+            // The ratio itself too, not only the pixel count: other content in the row could reach 4.5:1 on its own.
+            if let contrast = ui.assertTextContrast(identifier, in: self) {
+                XCTAssertGreaterThanOrEqual(contrast.ratio, 4.5, "\(identifier): \(contrast)")
+            }
         }
     #endif
 }
