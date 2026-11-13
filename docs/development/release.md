@@ -31,8 +31,9 @@ The repository is public. The rule:
 ## Order of the first release
 
 ```
-maintainer M0 switch off Xcode Cloud PR/Main (before 6 December, independent of the rest)
+maintainer M0 switch off Xcode Cloud PR/Main: done 2026-11-13
            M1 protocol runs 1 and 2 on #155 → #155 merges (a C7 change of extractedText merges now, with its reset)
+           dry run: initialize → export → compare, no deploy (right after #155 merges, or on soak day 1)
            M2 soak: 7 days, Development, synthetic documents (starts once #155 is on main)
            M3 initialize → export → compare → schema to Production (cannot be undone)
 agent      part 4 (#185): production-versions.txt lists V1, MARKETING_VERSION YY.MM.1
@@ -93,13 +94,13 @@ or a version PR makes a new commit, and nothing is archived from a commit the ga
 
 Each step ends with what to post on the tracking issue (#9 for v1), under "Real data on GitHub".
 
-### M0. Xcode Cloud (before 6 December)
+### M0. Xcode Cloud (before 6 December): done 2026-11-13
 
 The quota resets on 6 December. Uploads are manual (P2), and GitHub Actions runs the PR checks, so Xcode Cloud's
 workflows would spend the quota on checks that already run elsewhere.
 
-- [ ] App Store Connect › Xcode Cloud › Manage Workflows: switch off or delete the workflows `PR` and `Main`.
-- [ ] Post: done, with the date.
+- [x] App Store Connect › Xcode Cloud › Manage Workflows: the workflows `PR` and `Main` are disabled (2026-11-13).
+- [x] Posted on #9.
 
 ### M1. Two-device protocol, runs 1 and 2
 
@@ -114,9 +115,8 @@ workflows would spend the quota on checks that already run elsewhere.
   3. [ ] the clean slate on both devices ("Clean slate", for a development build);
   4. [ ] the changed development build is installed on both devices;
   5. [ ] only then M2 starts. The soak runs once, on the final schema.
-
-  If C7 shows instead that the mirroring moves the long string to an asset without a model change, note it on #9:
-  M3's comparison then gets `--string-asset DocumentText.extractedText`.
+- [ ] Then the dry run of M3's export and comparison ("Production deploy", "Dry run"), right after #155 merges or on
+      soak day 1.
 
 ### M2. Soak test
 
@@ -154,10 +154,10 @@ The coordinator asks for the explicit OK and names:
 
 On the MacBook Air, signed in to Xcode with the maintainer's Apple Account, from a clean clone at the release commit:
 
-1. [ ] The clone:
+1. [ ] The clone, in a new folder for this version (never a folder an earlier release used):
    ```sh
-   git clone https://github.com/pklnx/dokumentum.git ~/dokumentum-release
-   cd ~/dokumentum-release
+   git clone https://github.com/pklnx/dokumentum.git ~/dokumentum-release-YY.MM.N
+   cd ~/dokumentum-release-YY.MM.N
    git checkout --detach <release commit SHA>
    git rev-parse HEAD   # must print the release commit
    git status --porcelain   # must print nothing
@@ -195,7 +195,8 @@ version PR `N+1`, the gate, M5 and M6 again.
 
 ### M7. Clean slate before the first install
 
-See "Clean slate" below. Post: done on both devices, and the `mdfind` output.
+See "Clean slate" below. Post: done on both devices, and the `mdfind` output with the home folder written as `~`
+(not `/Users/<name>`).
 
 ### M8. Install and device checklist
 
@@ -260,8 +261,15 @@ A defect is fixed by a PR; after the fix is installed on both devices, the soak 
 Production. It cannot be undone, and Production can never drop a field or change its type. So the Development schema
 is compared field by field with the frozen snapshot first.
 
-Do steps 1–4 in one sitting: export right before the deploy, and run no other build against Development between
-step 1 and step 4.
+Do steps 1–5 in one sitting: export right before the deploy, and run no other build against Development between
+step 1 and the deploy (step 5). If a script PR or a decision interrupts the sitting, export and compare again before
+deploying.
+
+**Dry run** (once, right after #155 merges, or on soak day 1). Steps 1–3 below with the development build of `main`
+at that time, posted on the issue, then stop: no deploy, and no reset of its own. It checks the script against the
+first real export early. A difference in the script's own table or language gets its script PR now, not at M3; a
+stray field is classified as in "Classifying a failed comparison" (a reset decided then costs at most the soak's
+first day). M3 itself still exports and compares again after the soak.
 
 1. [ ] **The build.** On the MacBook Air, run from Xcode a Debug build (the Sync lab exists only in Debug) of `main`
    at a commit whose `Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema/schema-v1.txt` is the one part 4
@@ -284,21 +292,26 @@ step 1 and step 4.
    1:
    ```sh
    python3 scripts/check-cloudkit-schema.py dokumentum-development.ckdb
-   # only if M1 recorded that C7 moves the text to an asset:
-   python3 scripts/check-cloudkit-schema.py dokumentum-development.ckdb --string-asset DocumentText.extractedText
    ```
-   It posts the whole output: every record type field by field (`ok`, `system`, `EXTRA`, `WRONG TYPE`, `MISSING`),
-   the indexes, the roles and the grants, and the last line, `CLEAN` or `NOT CLEAN`. Clean means: the record types
-   are exactly `Users`, `CD_<Entity>` for the seven V1 entities and `CDMR`; every field is a V1 attribute or to-one
-   relationship with its type, a system field (`___…`), `CD_entityName`, an `_ckAsset` field of an attribute stored
-   externally, or a `CDMR` field; nothing of V1 is missing; nothing in the file is unknown. The script's type table
-   and `CDMR` fields were written before the first real export: if the real export differs (an unknown statement
-   or a field the table does not expect), the agent reports it on the issue, a PR changes the script, and M3 waits
-   for it. A mismatch is never adjusted silently.
-4. [ ] **If clean:** CloudKit Console › Development › "Deploy Schema Changes…" to Production. **This cannot be
+   It posts the whole output: every record type field by field (`ok`, `implicit`, `system`, `EXTRA`, `WRONG TYPE`,
+   `MISSING`), the indexes, the implicit `NUMBER` fields, the roles and the grants, and the last line, `CLEAN` or
+   `NOT CLEAN`. Clean means:
+   - the record types are exactly `Users`, `CD_<Entity>` for the seven V1 entities, and `CDMR`;
+   - every field is a V1 attribute or to-one relationship with its type, a system field (`___…`), `CD_entityName`,
+     a `CDMR` field, or the `CD_<attribute>_ckAsset` field (ASSET) of a string or binary attribute. Apple, "Reading
+     CloudKit Records for Core Data": every variable-length attribute (String, Binary Data) gets that field, so V1
+     has 14 of them (12 strings, 2 binaries); a `uuid`, `date`, `int64` or `bool` attribute never has one;
+   - a V1 `int64` or `bool` field may be `NUMBER` (or `NUMBER PREFERRED AS INT64`): that is how CloudKit Development
+     types a numeric field that a save created before the schema initializer ran (Apple, "Integrating a Text-Based
+     Schema into Your Workflow"). It is listed as `implicit`, not as a problem. A `NUMBER` field anywhere else is a
+     stray field or a wrong type;
+   - nothing of V1 is missing, and nothing in the file is unknown.
+4. **If not clean, classify every problem first**, before any reset ("Classifying a failed comparison" below).
+5. [ ] **If clean:** CloudKit Console › Development › "Deploy Schema Changes…" to Production. **This cannot be
    undone.** Post the date. Part 4 (#185) then lists V1 in `production-versions.txt`.
-5. **If not clean** (an extra record type or field, for example from an earlier draft or a branch run on a device, or
-   a wrong type): **do not deploy.** Instead:
+6. **If a stray field or a wrong V1 type remains** (an extra record type or field, for example from an earlier draft
+   or a branch run on a device, or a V1 field with another type) and the maintainer decided on the reset: **do not
+   deploy.** Instead:
    1. [ ] CloudKit Console › Development › "Reset Development Environment". It deletes all Development records and
       the schema, the soak's and the protocol's data included.
    2. [ ] The clean slate on both devices ("Clean slate", for a development build), so that no local store re-uploads
@@ -306,7 +319,21 @@ step 1 and step 4.
    3. [ ] Install the current development build again on both devices, and repeat steps 1–3.
    4. [ ] Restart the soak from day 1 (M2), then M3 again.
 
-**The reset rule.** Every "Reset Development Environment" (C7 in M1, or step 5 here) is followed by the clean slate
+**Classifying a failed comparison.** An agent sorts each problem of a `NOT CLEAN` result into one of two kinds and
+posts the classification with its evidence. Nothing is reset before that.
+- **The script's own table or language** (the mirroring or CloudKit produces something the script does not know):
+  an unknown statement, type or qualifier from the CloudKit Schema Language; a field that the mirroring documents
+  or produces on every record type of its kind (as the `_ckAsset` fields are); a `CDMR` or system field the script
+  does not list. Evidence: Apple's documentation, or the same field after a fresh "Initialize CloudKit schema".
+  Fix: a script PR (reviewed like any PR), then the comparison runs again on the same export. No reset.
+- **A stray field or a wrong V1 type**: a record type or field that no V1 attribute, relationship or documented
+  mirroring rule explains (left from an earlier model draft or a branch build run on a device), or a V1 field with
+  another type than the table gives. Fix: a reset (step 6). It deletes the soak's data and restarts the soak, so
+  **the maintainer decides it**, on the agent's classification and recommendation.
+- If a problem fits neither kind, the agent says so and asks the maintainer; there is no deploy and no reset until
+  it is decided.
+
+**The reset rule.** Every "Reset Development Environment" (C7 in M1, or step 6 here) is followed by the clean slate
 on both devices and a fresh install of the development build, and restarts the soak from day 1. A reset without the
 clean slate lets the old local stores upload their records again and re-create the old fields.
 
@@ -388,14 +415,15 @@ pages (P10), named so that they are recognisable (for example `Testdokument 1`).
 | Step | Post |
 |---|---|
 | Gate | release commit SHA, `release.yml` run URL and results per job and step, local UISmoke results while #173 is open |
-| M0 | done, date |
+| M0 | done, date (done 2026-11-13) |
 | M1 | protocol results (on #31); a C7 change and its reset, if any |
+| Dry run | build SHA, the export, the comparison output and the classification of any problem |
 | M2 | one log comment per day (template above), then the result against the exit criteria |
 | M3 | build SHA, the export (as text or `.txt`), the comparison output, the deploy date or the reset |
 | M4 | platforms, bundle ID, SKU, category, internal group |
 | M5 | the OK, with version, release commit and gate results |
 | M6 | validation and upload results, the tag, `codesign -dv` of the archived Mac app, the privacy report |
-| M7 | done on both devices, `mdfind` output |
+| M7 | done on both devices, `mdfind` output with `~` for the home folder |
 | M8 | device checklist items 1–15, pass or fail |
 
 Everything under "Real data on GitHub": from M8 on, only the test documents are named, and crashes are summarized.

@@ -15,7 +15,7 @@ basics, the Xcode project, the packages, the test infrastructure and the checks.
 | The maintainer's Mac mini, local Claude Code sessions (`gh` available) | Implementation: Xcode, simulators, `xcodebuild`, `swift test` for the packages. The primary evidence for app code, except for signing and entitlements: agents have no signing identity and build unsigned, see "Build and test". |
 | The MacBook Air (M5), signed by the maintainer with their Apple Account | Signed builds and runs on the iPhone and the Mac: the only place that exercises the macOS entitlements and the sandbox. Release archives and the TestFlight uploads (manual, [release.md](./release.md), M6; #9, P2). The MacBook Air replaced the MacBook Pro on 2026-11-11 (maintainer decision on #1). The first signed Mac build passed that day (#1 step 9, #4 M1); the iPhone follows with #4's M2/M3 ([plan.md](./plan.md), section 4). |
 | Cloud session (Linux, no Xcode) | Planning, plan reviews, and everything that runs on Linux: the scripts below, workflows, docs, and (once the packages exist) `swift test` and `swift format lint` for `DokumentumKit`. |
-| Xcode Cloud | Not used for v1. It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). TestFlight uploads are manual from the MacBook Air (#9, P2), and its workflows `PR` and `Main` are switched off by the maintainer before the quota resets on 6 December ([release.md](./release.md), M0). |
+| Xcode Cloud | Not used for v1. It was the PR check for build and app tests until 2026-11-12, when its monthly quota ran out; GitHub Actions macOS runners took that over (see "Checks"). TestFlight uploads are manual from the MacBook Air (#9, P2), and its workflows `PR` and `Main` were disabled by the maintainer on 2026-11-13 ([release.md](./release.md), M0). |
 | GitHub Actions, `ubuntu-24.04` | The checks below. |
 
 ## Setup on the development Mac
@@ -1268,8 +1268,8 @@ there. The tests are not weakened; the workflow stays as the intended gate, and 
 Not used for v1. It was the PR check until 2026-11-12, when its monthly usage limit was reached and every
 build was cancelled; the repository is public, so GitHub Actions macOS runners are free and took over (plan.md,
 section 6, question 1). TestFlight uploads are manual from the MacBook Air (#9, P2; [release.md](./release.md),
-M6), not an Xcode Cloud workflow. The maintainer switches off the workflows `PR` and `Main` below before the quota
-resets on 6 December ([release.md](./release.md), M0); they are no longer required checks. The repository holds
+M6), not an Xcode Cloud workflow. The maintainer disabled the workflows `PR` and `Main` below on 2026-11-13, before
+the quota resets on 6 December ([release.md](./release.md), M0); they are no longer required checks. The repository holds
 only the shared scheme and `ci_scripts/`; what follows describes them as they were set up (plan on #1, maintainer
 step 6), and stays valid if a workflow is switched on again.
 

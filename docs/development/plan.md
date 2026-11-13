@@ -352,9 +352,9 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
    cost nothing. Build and app tests now run there (`app.yml`, jobs `app-ios`
    and `app-macos`, the PR check); Xcode Cloud is kept for the TestFlight
    uploads. **Changed 2026-11-13** (#9, P2): v1's TestFlight uploads are manual
-   from the MacBook Air, not an Xcode Cloud workflow, and the maintainer switches
-   off Xcode Cloud's `PR` and `Main` workflows before the quota resets on
-   6 December ([release.md](./release.md), M0 and M6).
+   from the MacBook Air, not an Xcode Cloud workflow, and the maintainer
+   disabled Xcode Cloud's `PR` and `Main` workflows on 2026-11-13, before the
+   quota resets on 6 December ([release.md](./release.md), M0 and M6).
    Archiving on GitHub Actions stays rejected: it would need signing certificates
    and an App Store Connect key as secrets in a public repository.
 
