@@ -10,25 +10,33 @@ Console's export pasted as text). The script passes only if:
   snapshot has a many-to-many relationship (NSPersistentCloudKitContainer keeps those in `CDMR` records);
 - every field of a `CD_` type is one of: a system field (`___...`); `CD_entityName` (STRING); `CD_<attribute>`
   for an attribute of that entity, with the type of TYPES; `CD_<relationship>` (STRING, the record name) for
-  a to-one relationship; `CD_<attribute>_ckAsset` (ASSET) for an attribute stored externally (`external=yes`),
-  or for a string attribute named with `--string-asset` (only when the two-device protocol's case C7 showed
-  that the mirroring moves that string to an asset);
+  a to-one relationship; `CD_<attribute>_ckAsset` (ASSET) for a variable-length attribute (`string` or
+  `binary`; never for `uuid`, `date`, `int64` or `bool`). Apple, "Reading CloudKit Records for Core Data":
+  "All variable length attribute types—String, Binary Data, and Transformable—generate an additional field
+  with a key in the form CD_[attribute.name]_ckAsset";
+- a field with the type `NUMBER` (bare or `PREFERRED AS INT64`) is what CloudKit Development creates when a
+  save adds a numeric field implicitly, before the schema is initialized (Apple, "Integrating a Text-Based
+  Schema into Your Workflow"). It is accepted only for an `int64` or `bool` attribute of the snapshot, whose
+  expected type is INT64, and listed separately as "implicit"; anywhere else it fails like any other field
+  (`PREFERRED AS DOUBLE` on an INT64 field is a wrong type, a NUMBER field outside the snapshot is a stray
+  field). `ENCRYPTED <type>` is read, and fails wherever it appears: V1 has no encrypted field;
 - every attribute that is not transient and every to-one relationship of the snapshot has its field;
 - `CDMR` has only system fields, `CD_entityName` and its own fields (CDMR_FIELDS), and `Users` only system
   fields and `roles LIST<INT64>`;
 - the file is read completely: `DEFINE SCHEMA`, then `CREATE ROLE` and `RECORD TYPE` statements, each record
-  type with fields (a type from PRIMITIVES or `LIST<...>`, then the index qualifiers `QUERYABLE`, `SORTABLE`,
-  `SEARCHABLE`) and `GRANT READ|CREATE|WRITE[, ...] TO <role>` lines. Any statement, type, qualifier or token
-  it does not know fails the check, and so does a custom role (Dokumentum defines none) or a grant to an
-  unknown role. `//` and `--` start comments.
+  type with fields (a type from PRIMITIVES, `ENCRYPTED <type>`, `NUMBER [PREFERRED AS INT64|DOUBLE]` or
+  `LIST<...>`, then the index qualifiers `QUERYABLE`, `SORTABLE`, `SEARCHABLE`) and
+  `GRANT READ|CREATE|WRITE[, ...] TO <role>` lines. Any statement, type, qualifier or token it does not know
+  fails the check, and so does a custom role (Dokumentum defines none) or a grant to an unknown role. `//`
+  and `--` start a comment to the end of the line, `/* ... */` a comment over several lines.
 
 The output lists every record type field by field, the indexes, the roles and the grants, for the M3 comment
-on the issue. TYPES, CDMR_FIELDS and the language were written from Apple's documentation, before the first
-real export. If the first real export differs, the difference is reported on the issue and a PR changes
-this script before the deploy; a mismatch is never adjusted silently.
+on the issue. TYPES, CDMR_FIELDS, the asset rule and the language follow Apple's two articles named above,
+written before the first real export. If the first real export differs in what the mirroring or the language
+produces, the difference is reported on the issue and a PR changes this script before the deploy; a mismatch
+is never adjusted silently (release.md, M3, "Classifying a failed comparison").
 
     python3 scripts/check-cloudkit-schema.py <export.ckdb>                     # from the repository root
-    python3 scripts/check-cloudkit-schema.py <export.ckdb> --string-asset DocumentText.extractedText
     python3 scripts/check-cloudkit-schema.py <export.ckdb> --snapshot <schema-vN.txt>
     python3 scripts/check-cloudkit-schema.py --self-test
 
@@ -55,6 +63,11 @@ TYPES = {
     "binary": "BYTES",
 }
 PRIMITIVES = {"ASSET", "BYTES", "DOUBLE", "INT64", "LOCATION", "STRING", "TIMESTAMP", "REFERENCE"}
+ENCRYPTABLE = {"BYTES", "STRING", "DOUBLE", "INT64", "LOCATION", "TIMESTAMP"}
+# Snapshot types whose attributes get a `CD_<attribute>_ckAsset` field (variable length).
+ASSET_TYPES = {"string", "binary"}
+# NUMBER forms accepted where the snapshot expects INT64 (an implicitly created field).
+IMPLICIT_INT64 = {"NUMBER", "NUMBER PREFERRED AS INT64"}
 QUALIFIERS = {"QUERYABLE", "SORTABLE", "SEARCHABLE"}
 PERMISSIONS = {"READ", "CREATE", "WRITE"}
 BUILT_IN_ROLES = {"_world", "_icloud", "_creator"}
@@ -66,8 +79,9 @@ USERS_FIELDS = {"roles": "LIST<INT64>"}
 ASSET_SUFFIX = "_ckAsset"
 
 TOKEN = re.compile(
-    r'(?P<space>\s+)|(?P<comment>(?://|--)[^\n]*)|"(?P<quoted>[^"\n]*)"|(?P<word>[A-Za-z_][A-Za-z0-9_]*)'
-    r'|(?P<symbol>[(),;<>])|(?P<other>.)'
+    r'(?P<space>\s+)|(?P<comment>(?://|--)[^\n]*|/\*.*?\*/)|"(?P<quoted>[^"\n]*)"'
+    r'|(?P<word>[A-Za-z_][A-Za-z0-9_]*)|(?P<symbol>[(),;<>])|(?P<other>.)',
+    re.DOTALL,
 )
 
 
@@ -188,17 +202,35 @@ class Parser:
                 raise SchemaError(f"line {line}: expected ',' or ')', found {value or 'the end of the file'!r}")
 
     def field_type(self):
+        if self.is_keyword("LIST"):
+            self.position += 1
+            self.expect_symbol("<")
+            inner = self.primitive("list element type")
+            self.expect_symbol(">")
+            return f"LIST<{inner}>"
+        return self.primitive("field type")
+
+    def primitive(self, what):
+        """A primitive type as one normalized string: `STRING`, `ENCRYPTED STRING`, `NUMBER PREFERRED AS INT64`."""
         kind, value, line = self.take()
         word = value.upper() if kind == "word" else ""
-        if word == "LIST":
-            self.expect_symbol("<")
+        if word == "ENCRYPTED":
             inner_kind, inner, inner_line = self.take()
-            if inner_kind != "word" or inner.upper() not in PRIMITIVES:
-                raise SchemaError(f"line {inner_line}: unknown list element type {inner!r}")
-            self.expect_symbol(">")
-            return f"LIST<{inner.upper()}>"
+            if inner_kind != "word" or inner.upper() not in ENCRYPTABLE:
+                raise SchemaError(f"line {inner_line}: unknown encrypted {what} {inner or 'the end of the file'!r}")
+            return f"ENCRYPTED {inner.upper()}"
+        if word == "NUMBER":
+            if not self.is_keyword("PREFERRED"):
+                return "NUMBER"
+            self.position += 1
+            self.expect_keyword("AS")
+            preferred_kind, preferred, preferred_line = self.take()
+            if preferred_kind != "word" or preferred.upper() not in ("INT64", "DOUBLE"):
+                raise SchemaError(f"line {preferred_line}: NUMBER PREFERRED AS takes INT64 or DOUBLE, "
+                                  f"found {preferred or 'the end of the file'!r}")
+            return f"NUMBER PREFERRED AS {preferred.upper()}"
         if word not in PRIMITIVES:
-            raise SchemaError(f"line {line}: unknown field type {value or 'the end of the file'!r}")
+            raise SchemaError(f"line {line}: unknown {what} {value or 'the end of the file'!r}")
         return word
 
     def grant(self):
@@ -225,8 +257,8 @@ def parse_export(text: str):
 
 
 def expected_from_snapshot(fields):
-    """{record type: {field: (CloudKit type, source)}}, the asset-capable attributes, problems."""
-    expected, assets, strings, problems = {}, {}, {}, []
+    """{record type: {field: (CloudKit type, source)}}, {(record type, asset field): source}, problems."""
+    expected, assets, problems = {}, {}, []
     entities = sorted(key.split(" ", 1)[1] for key in fields if key.startswith("entity "))
     many_to_many = False
     for entity in entities:
@@ -249,10 +281,8 @@ def expected_from_snapshot(fields):
                                 "extend the table only from a real export (release.md, M3)")
                 continue
             expected[record][f"CD_{prop}"] = (TYPES[snapshot_type], f"{name}, {snapshot_type}")
-            if values.get("external") == "yes":
-                assets[(record, f"CD_{prop}{ASSET_SUFFIX}")] = f"{name}, external"
-            if snapshot_type == "string":
-                strings[name] = (record, f"CD_{prop}{ASSET_SUFFIX}")
+            if snapshot_type in ASSET_TYPES:
+                assets[(record, f"CD_{prop}{ASSET_SUFFIX}")] = f"{name}, {snapshot_type}, variable length"
         else:
             if values.get("many") == "yes":
                 inverse = fields.get(f"relationship {values.get('to')}.{values.get('inverse')}", {})
@@ -262,18 +292,13 @@ def expected_from_snapshot(fields):
     if many_to_many:
         expected[CDMR] = {}
     expected[USERS] = {}
-    return expected, assets, strings, problems
+    return expected, assets, problems
 
 
-def compare(schema, snapshot_fields, string_assets=()):
+def compare(schema, snapshot_fields):
     """(problems, report lines) for a parsed export against a parsed snapshot."""
-    expected, assets, strings, problems = expected_from_snapshot(snapshot_fields)
-    for name in string_assets:
-        if name not in strings:
-            problems.append(f"--string-asset {name}: not a string attribute of the snapshot")
-            continue
-        assets[strings[name]] = f"{name}, string moved to an asset (--string-asset, case C7)"
-    report = []
+    expected, assets, problems = expected_from_snapshot(snapshot_fields)
+    report, implicit = [], []
     for role in sorted(schema["roles"]):
         problems.append(f"role {role} (line {schema['roles'][role]}): Dokumentum defines no security roles")
     known_roles = BUILT_IN_ROLES | set(schema["roles"])
@@ -303,6 +328,9 @@ def compare(schema, snapshot_fields, string_assets=()):
                 verdict, note = typed(field, info, ENTITY_NAME_FIELD[1], "mirroring", where, problems)
             elif record == CDMR:
                 verdict, note = typed(field, info, CDMR_FIELDS.get(field), "many-to-many", where, problems)
+            elif field in wanted and wanted[field][0] == "INT64" and info["type"] in IMPLICIT_INT64:
+                verdict, note = "implicit", f"{wanted[field][1]}; created by a save, read as INT64"
+                implicit.append(f"{record}.{field} {info['type']}")
             elif field in wanted:
                 verdict, note = typed(field, info, wanted[field][0], wanted[field][1], where, problems)
             elif (record, field) in assets:
@@ -311,7 +339,7 @@ def compare(schema, snapshot_fields, string_assets=()):
                 verdict = "EXTRA"
                 hint = ""
                 if field.endswith(ASSET_SUFFIX):
-                    hint = "; an asset field only for an attribute stored externally (or --string-asset after C7)"
+                    hint = "; an asset field only for a string or binary attribute"
                 problems.append(f"{where}: field {field} {info['type']} is not in the snapshot{hint}")
             qualifiers = f"  [{' '.join(info['indexes'])}]" if info["indexes"] else ""
             note = f"  ({note})" if note else ""
@@ -325,6 +353,8 @@ def compare(schema, snapshot_fields, string_assets=()):
                 problems.append(f"{record}: GRANT to the unknown role {grant['role']} (line {grant['line']})")
     report.append("Indexes:")
     report += [f"  {line}" for line in indexes] or ["  none"]
+    report.append("Implicit NUMBER fields (created by a save before the schema was initialized):")
+    report += [f"  {line}" for line in implicit] or ["  none"]
     report.append("Roles: " + (", ".join(sorted(schema["roles"])) or "none created"))
     report.append("Grants:")
     report += [f"  {line}" for line in grants] or ["  none"]
@@ -360,7 +390,7 @@ def read_text(path: str):
         raise OSError(f"{path}: not UTF-8 text")
 
 
-def check(export_text: str, snapshot_text: str, string_assets=(), snapshot_label="snapshot"):
+def check(export_text: str, snapshot_text: str, snapshot_label="snapshot"):
     """(problems, report lines)."""
     parse_snapshot = load_snapshot_parser()
     _, snapshot_fields, snapshot_problems = parse_snapshot(snapshot_text, snapshot_label)
@@ -370,7 +400,7 @@ def check(export_text: str, snapshot_text: str, string_assets=(), snapshot_label
         schema = parse_export(export_text)
     except SchemaError as error:
         return [f"export: {error}"], []
-    return compare(schema, snapshot_fields, string_assets)
+    return compare(schema, snapshot_fields)
 
 
 SYSTEM_FIELDS = (
@@ -389,10 +419,11 @@ GRANTS = (
 
 
 def render(snapshot_text: str, with_assets=True) -> str:
-    """A clean export for a snapshot, in the layout of the CloudKit Console's export (self-test only)."""
+    """A clean export for a snapshot, in the layout of the CloudKit Console's export (self-test only). With
+    `with_assets`, every string and binary attribute has its `_ckAsset` field, as Apple documents."""
     _, fields, problems = load_snapshot_parser()(snapshot_text, "snapshot")
     assert not problems, problems
-    expected, assets, _, problems = expected_from_snapshot(fields)
+    expected, assets, problems = expected_from_snapshot(fields)
     assert not problems, problems
     out = ["// A synthetic export for the self-test.", "DEFINE SCHEMA", ""]
     for record in sorted(expected):
@@ -436,81 +467,121 @@ def self_test() -> None:
     clean = render(snapshot)
     tag_record = "    RECORD TYPE CD_Tag (\n"
     in_tag = lambda line: clean.replace(tag_record, tag_record + line)  # noqa: E731
+    document_record = "    RECORD TYPE CD_Document (\n"
+    in_document = lambda line: clean.replace(document_record, document_record + line)  # noqa: E731
 
     cases = [
-        # (description, export text, --string-asset names, expected substring or None)
-        ("a clean export", clean, (), None),
-        ("a clean export without the asset fields", render(snapshot, with_assets=False), (), None),
+        # (description, export text, expected substring or None)
+        ("a clean export, every string and binary attribute with its _ckAsset field", clean, None),
+        ("a clean export without the asset fields", render(snapshot, with_assets=False), None),
         ("lower-case keywords and comments", clean.replace("DEFINE SCHEMA", "define schema -- exported")
-         .replace("RECORD TYPE CD_Tag (", "record type CD_Tag ( // tags"), (), None),
+         .replace("RECORD TYPE CD_Tag (", "record type CD_Tag ( // tags"), None),
+        ("a comment over several lines",
+         clean.replace("DEFINE SCHEMA\n", "/* exported\n   by cktool */\nDEFINE SCHEMA\n"), None),
+        ("an unclosed /* comment", clean.replace("DEFINE SCHEMA\n", "DEFINE SCHEMA\n/* open\n"), "unknown character"),
         ("a grant with two permissions", clean.replace('GRANT WRITE TO "_creator"', 'GRANT READ, WRITE TO "_creator"'),
-         (), None),
+         None),
         ("all three index qualifiers",
-         clean.replace("CD_name STRING,", "CD_name STRING QUERYABLE SEARCHABLE SORTABLE,"), (), None),
-        ("no semicolon after the last statement", clean.rstrip().rstrip(";"), (), None),
+         clean.replace("CD_name STRING,", "CD_name STRING QUERYABLE SEARCHABLE SORTABLE,"), None),
+        ("no semicolon after the last statement", clean.rstrip().rstrip(";"), None),
         # The three counter-proof cases of the plan: an extra field, a wrong type, an unknown statement.
-        ("an extra field", in_tag("        CD_colour STRING,\n"), (), "CD_colour STRING is not in the snapshot"),
-        ("a wrong field type", clean.replace("CD_title STRING", "CD_title BYTES"), (),
+        ("an extra field", in_tag("        CD_colour STRING,\n"), "CD_colour STRING is not in the snapshot"),
+        ("a wrong field type", clean.replace("CD_title STRING", "CD_title BYTES"),
          "CD_title has type BYTES, expected STRING"),
         ("an unknown statement", clean.replace("DEFINE SCHEMA\n", "DEFINE SCHEMA\n    DROP RECORD TYPE CD_Old;\n"),
-         (), "unknown statement"),
-        ("an extra record type", clean + "    RECORD TYPE CD_Draft (\n" + SYSTEM_FIELDS + GRANTS + "    );\n", (),
+         "unknown statement"),
+        ("an extra record type", clean + "    RECORD TYPE CD_Draft (\n" + SYSTEM_FIELDS + GRANTS + "    );\n",
          "record type CD_Draft"),
-        ("a missing record type", clean.replace("RECORD TYPE CDMR", "RECORD TYPE CDMR_gone"), (),
+        ("a missing record type", clean.replace("RECORD TYPE CDMR", "RECORD TYPE CDMR_gone"),
          "record type CDMR is missing"),
-        ("a missing field", clean.replace("        CD_pageCount INT64,\n", ""), (), "CD_pageCount: missing"),
-        ("a missing to-one relationship field", clean.replace("        CD_parent STRING,\n", ""), (),
-         "CD_parent: missing"),
-        ("an asset field on an attribute that is not stored externally", in_tag("        CD_name_ckAsset ASSET,\n"),
-         (), "an asset field only for an attribute stored externally"),
-        ("a string asset after C7", in_tag("        CD_name_ckAsset ASSET,\n"), ("Tag.name",), None),
-        ("--string-asset on a non-string", clean, ("Document.pageCount",), "not a string attribute"),
+        ("a missing field", clean.replace("        CD_pageCount INT64,\n", ""), "CD_pageCount: missing"),
+        ("a missing to-one relationship field", clean.replace("        CD_parent STRING,\n", ""), "CD_parent: missing"),
+        # The asset rule: string and binary attributes only (Apple, "Reading CloudKit Records for Core Data").
+        ("an asset field on a date attribute", in_document("        CD_createdAt_ckAsset ASSET,\n"),
+         "an asset field only for a string or binary attribute"),
+        ("an asset field on a uuid attribute", in_document("        CD_id_ckAsset ASSET,\n"),
+         "an asset field only for a string or binary attribute"),
+        ("an asset field on an int64 attribute", in_document("        CD_pageCount_ckAsset ASSET,\n"),
+         "an asset field only for a string or binary attribute"),
+        ("an asset field on a bool attribute", in_document("        CD_isInbox_ckAsset ASSET,\n"),
+         "an asset field only for a string or binary attribute"),
         ("an asset field of the wrong type", clean.replace("CD_pdfData_ckAsset ASSET", "CD_pdfData_ckAsset BYTES"),
-         (), "expected ASSET"),
-        ("a to-many relationship as a field", in_tag("        CD_documents STRING,\n"), (), "not in the snapshot"),
-        ("a to-one relationship as a reference", clean.replace("CD_parent STRING", "CD_parent REFERENCE"), (),
+         "expected ASSET"),
+        ("a string's asset field of the wrong type", clean.replace("CD_title_ckAsset ASSET", "CD_title_ckAsset STRING"),
+         "expected ASSET"),
+        # NUMBER: what an implicit save creates (Apple, "Integrating a Text-Based Schema into Your Workflow").
+        ("NUMBER on an int64 attribute", clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER"), None),
+        ("NUMBER on a bool attribute", clean.replace("CD_isInbox INT64", "CD_isInbox NUMBER QUERYABLE"), None),
+        ("NUMBER PREFERRED AS INT64 on an int64 attribute",
+         clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER PREFERRED AS INT64"), None),
+        ("NUMBER PREFERRED AS DOUBLE on an int64 attribute",
+         clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER PREFERRED AS DOUBLE"),
+         "CD_pageCount has type NUMBER PREFERRED AS DOUBLE, expected INT64"),
+        ("NUMBER on a string attribute", clean.replace("CD_title STRING", "CD_title NUMBER"),
+         "CD_title has type NUMBER, expected STRING"),
+        ("NUMBER on a date attribute", clean.replace("CD_createdAt TIMESTAMP", "CD_createdAt NUMBER"),
+         "CD_createdAt has type NUMBER, expected TIMESTAMP"),
+        ("a stray NUMBER field", in_tag("        CD_sortOrder NUMBER,\n"),
+         "CD_sortOrder NUMBER is not in the snapshot"),
+        ("NUMBER PREFERRED AS STRING", clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER PREFERRED AS STRING"),
+         "PREFERRED AS takes INT64 or DOUBLE"),
+        ("NUMBER PREFERRED without AS", clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER PREFERRED INT64"),
+         "expected AS"),
+        # ENCRYPTED: read, never expected in V1.
+        ("ENCRYPTED on a string attribute", clean.replace("CD_title STRING", "CD_title ENCRYPTED STRING"),
+         "CD_title has type ENCRYPTED STRING, expected STRING"),
+        ("a stray ENCRYPTED field", in_tag("        CD_secret ENCRYPTED BYTES,\n"),
+         "CD_secret ENCRYPTED BYTES is not in the snapshot"),
+        ("ENCRYPTED ASSET", clean.replace("CD_title STRING", "CD_title ENCRYPTED ASSET"),
+         "unknown encrypted field type"),
+        ("a to-many relationship as a field", in_tag("        CD_documents STRING,\n"), "not in the snapshot"),
+        ("a to-one relationship as a reference", clean.replace("CD_parent STRING", "CD_parent REFERENCE"),
          "expected STRING"),
-        ("a wrong CD_entityName type", clean.replace("CD_entityName STRING QUERYABLE", "CD_entityName INT64", 1), (),
+        ("a wrong CD_entityName type", clean.replace("CD_entityName STRING QUERYABLE", "CD_entityName INT64", 1),
          "expected STRING"),
         ("an extra field in CDMR", clean.replace("        CD_recordNames STRING,\n",
                                                  "        CD_recordNames STRING,\n        CD_extra STRING,\n"),
-         (), "not allowed here"),
+         "not allowed here"),
         ("an extra field in Users", clean.replace("        roles           LIST<INT64>,\n",
                                                   "        roles           LIST<INT64>,\n        nickname STRING,\n"),
-         (), "not allowed here"),
-        ("a custom role", clean.replace("DEFINE SCHEMA\n", "DEFINE SCHEMA\n    CREATE ROLE Admin;\n"), (),
+         "not allowed here"),
+        ("a custom role", clean.replace("DEFINE SCHEMA\n", "DEFINE SCHEMA\n    CREATE ROLE Admin;\n"),
          "defines no security roles"),
-        ("a grant to an unknown role", clean.replace('GRANT READ TO "_world"', 'GRANT READ TO "Admin"', 1), (),
+        ("a grant to an unknown role", clean.replace('GRANT READ TO "_world"', 'GRANT READ TO "Admin"', 1),
          "unknown role"),
-        ("an unknown permission", clean.replace('GRANT CREATE TO', 'GRANT DELETE TO', 1), (), "unknown permission"),
-        ("an unknown index qualifier", clean.replace("CD_name STRING,", "CD_name STRING INDEXED,"), (),
+        ("an unknown permission", clean.replace('GRANT CREATE TO', 'GRANT DELETE TO', 1), "unknown permission"),
+        ("an unknown index qualifier", clean.replace("CD_name STRING,", "CD_name STRING INDEXED,"),
          "unknown field qualifier"),
-        ("an unknown field type", clean.replace("CD_name STRING,", "CD_name ENCRYPTED_STRING,"), (),
-         "unknown field type"),
-        ("an unknown list element type", clean.replace("LIST<INT64>", "LIST<NUMBER>"), (), "unknown list element"),
-        ("a field twice", in_tag("        CD_name STRING,\n"), (), "appears twice"),
-        ("a record type twice", clean + "    RECORD TYPE CD_Tag (\n" + SYSTEM_FIELDS + GRANTS + "    );\n", (),
+        ("an unknown field type", clean.replace("CD_name STRING,", "CD_name ENCRYPTED_STRING,"), "unknown field type"),
+        ("an unknown list element type", clean.replace("LIST<INT64>", "LIST<BOOLEAN>"), "unknown list element"),
+        ("a field twice", in_tag("        CD_name STRING,\n"), "appears twice"),
+        ("a record type twice", clean + "    RECORD TYPE CD_Tag (\n" + SYSTEM_FIELDS + GRANTS + "    );\n",
          "appears twice"),
-        ("no DEFINE SCHEMA", clean.replace("DEFINE SCHEMA", ""), (), "expected DEFINE"),
-        ("an unclosed record type", clean.rstrip().rstrip(";").rstrip(")"), (), "expected ',' or ')'"),
-        ("a missing semicolon between statements", clean.replace(");\n", ")\n", 1), (), "expected ';'"),
-        ("an unknown character", clean.replace("CD_name STRING,", "CD_name STRING = 1,"), (), "unknown character"),
-        ("an empty file", "", (), "expected DEFINE"),
+        ("no DEFINE SCHEMA", clean.replace("DEFINE SCHEMA", ""), "expected DEFINE"),
+        ("an unclosed record type", clean.rstrip().rstrip(";").rstrip(")"), "expected ',' or ')'"),
+        ("a missing semicolon between statements", clean.replace(");\n", ")\n", 1), "expected ';'"),
+        ("an unknown character", clean.replace("CD_name STRING,", "CD_name STRING = 1,"), "unknown character"),
+        ("an empty file", "", "expected DEFINE"),
     ]
-    for description, text, string_assets, expected in cases:
-        problems, report = check(text, snapshot, string_assets)
+    for description, text, expected in cases:
+        problems, report = check(text, snapshot)
         if expected is None:
             assert problems == [], f"{description}: expected no problems, got {problems}"
         else:
             assert any(expected in problem for problem in problems), \
                 f"{description}: expected a problem with {expected!r}, got {problems}"
-    # The report lists every field and the indexes.
+    # The report lists every field, the indexes and the implicit NUMBER fields.
     problems, report = check(clean, snapshot)
     assert "  ok         CD_title STRING  (Document.title, string)" in report, report
+    assert "  ok         CD_title_ckAsset ASSET  (Document.title, string, variable length)" in report, report
+    assert "  ok         CD_pdfData_ckAsset ASSET  (DocumentFile.pdfData, binary, variable length)" in report, report
     assert "  system     ___recordID REFERENCE  [QUERYABLE]" in report, report
-    assert "  ok         CD_pdfData_ckAsset ASSET  (DocumentFile.pdfData, external)" in report, report
     assert "  CD_Document.CD_createdAt QUERYABLE SORTABLE" in report, report
     assert "  CD_Tag: GRANT READ TO _world" in report, report
+    _, report = check(clean.replace("CD_pageCount INT64", "CD_pageCount NUMBER"), snapshot)
+    implicit_line = "  implicit   CD_pageCount NUMBER  (Document.pageCount, int64; created by a save, read as INT64)"
+    assert implicit_line in report, report
+    assert "  CD_Document.CD_pageCount NUMBER" in report, report
     # The reader refuses what is not a regular file, and a missing file, without blocking.
     with tempfile.TemporaryDirectory() as root:
         fifo = os.path.join(root, "export.ckdb")
@@ -521,29 +592,32 @@ def self_test() -> None:
                 raise AssertionError(f"read_text accepted {path}")
             except OSError:
                 pass
-    # The committed snapshot reads, and a clean export of it passes: the cases above use a format that exists.
-    count = len(cases) + 2
+    count = len(cases) + 3
+    # The committed snapshot: a clean export of it passes with Apple's 12 string and 2 binary _ckAsset fields,
+    # and fails on an asset field of a date attribute. The cases above therefore use a format that exists.
     if os.path.isfile(SNAPSHOT):
         real = read_text(SNAPSHOT)
-        problems, _ = check(render(real), real, snapshot_label=SNAPSHOT)
+        rendered = render(real)
+        asset_lines = [line for line in rendered.split("\n") if line.strip().endswith("_ckAsset ASSET,")]
+        assert len(asset_lines) == 14, f"{SNAPSHOT}: expected 12 string and 2 binary asset fields, got {asset_lines}"
+        problems, _ = check(rendered, real, snapshot_label=SNAPSHOT)
         assert problems == [], f"a clean export of {SNAPSHOT} fails: {problems}"
-        count += 1
+        record = "    RECORD TYPE CD_Document (\n"
+        problems, _ = check(rendered.replace(record, record + "        CD_documentDate_ckAsset ASSET,\n"), real,
+                            snapshot_label=SNAPSHOT)
+        assert any("CD_documentDate_ckAsset" in problem for problem in problems), problems
+        count += 2
     print(f"self-test passed ({count} cases)")
 
 
 def main(arguments) -> int:
-    usage = ("usage: check-cloudkit-schema.py <export> [--snapshot <schema-vN.txt>] "
-             "[--string-asset <Entity.attribute>]... | --self-test")
-    export, snapshot, string_assets = None, SNAPSHOT, []
+    usage = "usage: check-cloudkit-schema.py <export> [--snapshot <schema-vN.txt>] | --self-test"
+    export, snapshot = None, SNAPSHOT
     rest = list(arguments)
     while rest:
         argument = rest.pop(0)
-        if argument in ("--snapshot", "--string-asset") and rest:
-            value = rest.pop(0)
-            if argument == "--snapshot":
-                snapshot = value
-            else:
-                string_assets.append(value)
+        if argument == "--snapshot" and rest:
+            snapshot = rest.pop(0)
         elif not argument.startswith("-") and export is None:
             export = argument
         else:
@@ -558,15 +632,14 @@ def main(arguments) -> int:
     except OSError as error:
         print(f"error: {error}")
         return 2
-    problems, report = check(export_text, snapshot_text, string_assets, snapshot_label=snapshot)
-    assets = f", string assets: {', '.join(string_assets)}" if string_assets else ""
-    print(f"Export {export} against {snapshot}{assets}")
+    problems, report = check(export_text, snapshot_text, snapshot_label=snapshot)
+    print(f"Export {export} against {snapshot}")
     for line in report:
         print(line)
     for problem in problems:
         print(f"error: {problem}")
     if problems:
-        print(f"NOT CLEAN: {len(problems)} problem(s); do not deploy (release.md, M3)")
+        print(f"NOT CLEAN: {len(problems)} problem(s); do not deploy, classify them first (release.md, M3)")
         return 1
     print("CLEAN: the export matches the snapshot")
     return 0
