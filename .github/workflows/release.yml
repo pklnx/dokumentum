@@ -1,8 +1,13 @@
 name: Release
 
-# Run by hand before a TestFlight build (docs/development/index.md, "GitHub Actions macOS"; checklist in #9):
-# the full Default plan plus the UISmoke plan on iOS and macOS. A build goes out only after a green run at the
-# release commit. Start it on the release commit's branch or tag: Actions, Release, Run workflow.
+# Run by hand before a TestFlight build (docs/development/release.md, "Gates"): the full Default plan plus the
+# UISmoke plan on iOS and macOS, then an unsigned build of the Release configuration on each platform (the
+# configuration TestFlight ships; the tests build Debug). A build goes out only after a green run at the release
+# commit. Start it on the release commit's branch or tag: Actions, Release, Run workflow.
+# The Release build runs even when a test step failed (`!cancelled()`), so a run always shows whether Release
+# compiles; the job stays red. It never signs: no signing identity or App Store Connect key is in CI (#9, P2).
+# The runners are small and UISmoke alone has taken 19 minutes on iOS (#173), so the job timeout leaves room for
+# the Release build after both plans: a job that hits its timeout counts as cancelled, which would skip the step.
 on:
   workflow_dispatch:
 
@@ -17,7 +22,7 @@ jobs:
   release-ios:
     name: release-ios
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,11 +32,20 @@ jobs:
           destination: 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0'
           plans: Default UISmoke
           artifact: release-ios-xcresult
+      - name: Release build, unsigned
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          export DEVELOPER_DIR="/Applications/Xcode_$(tr -d '[:space:]' < .xcode-version).app/Contents/Developer"
+          # A device build has no ad hoc form: compiled and embedded, not signed.
+          xcodebuild build -scheme Dokumentum -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-Release" CODE_SIGNING_ALLOWED=NO
 
   release-macos:
     name: release-macos
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,3 +55,14 @@ jobs:
           destination: 'platform=macOS'
           plans: Default UISmoke
           artifact: release-macos-xcresult
+      - name: Release build, unsigned
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          # The unsigned path (docs/development/index.md): ad hoc, without team and entitlements.
+          XCODE_XCCONFIG_FILE: Config/Unsigned.xcconfig
+        run: |
+          set -o pipefail
+          export DEVELOPER_DIR="/Applications/Xcode_$(tr -d '[:space:]' < .xcode-version).app/Contents/Developer"
+          xcodebuild build -scheme Dokumentum -configuration Release -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-Release"
