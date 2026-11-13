@@ -33,14 +33,21 @@ public enum DetectionLimits {
     public static let returnLineMinimumLinesBelow = 2
     /// Without a return-address line, every line of this area counts as a recipient line: forms A and B together.
     public static let recipientArea = 27.0...90.0
+    /// A right-window letter (Swiss and French C5/DL windows; review B1 of #204): when no line starts in
+    /// `acceptedFieldX` within `recipientArea`, the field is the lines starting at or right of this x. Without a
+    /// return-address line there, its lines within `rightWindowArea` (by their middle) are recipient lines.
+    public static let rightWindowLeft = 110.0
+    public static let rightWindowArea = 40.0...100.0
 
     // MARK: Other zones
 
     /// The info-block column beside the address field: lines starting at or right of this x, down to `infoBlockBottom`.
     public static let infoBlockLeft = 125.0
     public static let infoBlockBottom = 100.0
-    /// The footer: the lines in the page's last 47 mm (below 250 mm on A4), measured from the bottom edge so that
-    /// US Letter, US Legal and scaled photos get the same footer depth.
+    /// The footer: the lines below `footerTop` (250 mm), or in the page's last `footerHeight` (47 mm) when that starts
+    /// lower: on A4 and US Letter the footer starts at 250 mm, on US Legal and on tall scaled photos 47 mm above the
+    /// bottom edge (review N4 of #204).
+    public static let footerTop = 250.0
     public static let footerHeight = 47.0
     /// Two lines belong to one column block while the vertical gap between them is below this many line heights.
     public static let blockGapLineHeights = 1.5
@@ -107,8 +114,8 @@ public struct PageGeometry: Equatable, Sendable {
         isStandardSize = standard
     }
 
-    /// Where the footer starts, in millimetres from the top.
-    public var footerTop: Double { height - DetectionLimits.footerHeight }
+    /// Where the footer starts, in millimetres from the top: 250 mm, or 47 mm above the bottom edge when that is lower.
+    public var footerTop: Double { max(DetectionLimits.footerTop, height - DetectionLimits.footerHeight) }
 
     /// A normalised box in millimetres.
     func millimetres(_ box: PageLayout.Box) -> MillimetreBox {

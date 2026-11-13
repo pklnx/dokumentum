@@ -113,6 +113,13 @@ struct IssueDateDetectorTests {
         "Eingang 02.11.2026", "Termin am 20.11.2026", "Your letter of 2 November 2026", "Your ref. of 2 November 2026",
         "Received 2 November 2026", "Appointment: 20 November 2026",
         "Stand: 01.10.2026",
+        // Fix round 1 of #204 (N8, N9).
+        "Payment Date: 20.11.2026", "Birth Date: 1 February 1980", "Expiry Date: 31.12.2026",
+        "Expiration Date: 31.12.2026", "Liefer-Datum: 10.11.2026", "Geb.-Datum: 05.03.1980",
+        "Versicherungsbeginn: 01.12.2026", "Kündigungsfrist: 30.11.2026", "Vertragsende 31.12.2026",
+        "Versicherungsende 31.12.2026", "Laufzeitende 31.12.2026", "Eingegangen 20. Nov. 2026",
+        "zu Ihrem Schreiben vom 02.11.2026", "Ihre Anfrage vom 02.11.2026", "Ihrer Anfrage vom 02.11.2026",
+        "Ihrer Nachricht vom 02.11.2026", "Posteingang 02.11.2026", "Liefertermin 20.11.2026",
     ])
     func aCuedDateIsIgnored(cued: String) {
         // Alone, the cued date would be the only date (tier 3); with a second date, it would make that ambiguous.
@@ -221,6 +228,65 @@ struct IssueDateDetectorTests {
         #expect(detect("\u{0C}  \n\u{0C}Datum: 13.11.2026\u{0C}Datum: 01.11.2026") == Self.november13)
         #expect(detect("Seite 1\u{0C}Datum: 13.11.2026") == nil)
         #expect(detect("") == nil)
+    }
+
+    // MARK: Fix round 1 of #204
+
+    @Test func anAmbiguousInvalidOrImplausibleDateBlocksItsTier() {
+        // B3: the form keeps its place in its tier, so no lower tier picks another date.
+        #expect(detect("Date: 05/06/2026\nDear Mr. Smith,\nyour payment of 04/28/2026 was posted.") == nil, "D6")
+        #expect(detect("Invoice Date: 05/06/2026\nPO Date: 04/28/2026") == nil, "D54")
+        #expect(detect("Datum: 13.11.2028\nIhre Bestellung vom 01.11.2026") == nil, "D52")
+        #expect(detect("Datum: 31.11.2026\nIhre Bestellung vom 01.11.2026") == nil, "D53")
+        #expect(detect("05/06/2026\nIhre Bestellung vom 01.11.2026") == nil, "tier 2")
+        #expect(detect("Rechnung vom 31.11.2026\nIhre Bestellung vom 01.11.2026") == nil, "tier 3: a full year")
+        #expect(
+            detect("Ziffer 31.11.26\nIhre Bestellung vom 01.11.2026") == date(1, 11, 2026), "tier 3: a two-digit year")
+        #expect(detect("Datum: 13.11.2026\n05/06/2026") == Self.november13, "a higher tier still decides")
+    }
+
+    @Test func aCueOnThePreviousLineStopsADateThatEndsItsLine() {
+        // N7: label above value, as Vision gives an info block.
+        let birth = "Geburtsdatum\n05.03.1980\nKundennummer\n4711\nIhre Rechnung vom 13.11.2026"
+        #expect(detect(birth) == Self.november13)
+        #expect(detect("Fällig am\n27.11.2026\nRechnung vom 13.11.2026 über 100 EUR") == Self.november13)
+        #expect(detect("Ihr Schreiben vom\n01.11.2026\n13.11.2026") == Self.november13)
+        let joined = "John Smith Birth Date\n123 Main Street 03/05/1980\nStatement of November 13, 2026"
+        #expect(detect(joined) == Self.november13)
+        // A cue before the previous line's own date is used up there; a label at its end still labels.
+        #expect(detect("Kündigung zum 31.12.2026\n13.11.2026") == Self.november13)
+        let bezugszeichen = "Ihr Zeichen Ihre Nachricht vom Unser Zeichen Datum\nAB-1 01.11.2026 XY 13.11.2026"
+        #expect(detect(bezugszeichen) == Self.november13)
+    }
+
+    @Test func aRelaxedPreviousLineLabelNeedsAPlainDatum() {
+        // N8.
+        let birth = "Max Mustermann Geb.-Datum\nMusterweg 2 05.03.1980\nRechnung vom 13.11.2026"
+        #expect(detect(birth) == Self.november13)
+        let payment = "John Smith Payment Date\n123 Main Street 11/28/2026\nStatement of November 13, 2026"
+        #expect(detect(payment) == Self.november13)
+        #expect(detect("Liefer-Datum: 10.11.2026\nRechnung vom 13.11.2026") == Self.november13)
+        #expect(detect("01.11.2026\nRechnungs-Datum: 13.11.2026") == Self.november13, "a joined label still counts")
+    }
+
+    @Test func aSuffixCueEndsAWordButIsNoWordPart() {
+        // N9: `Spende` ends with `ende`, which is no suffix cue; `Terminal` holds `termin` inside a word.
+        #expect(detect("Ihre Spende vom 13.11.2026") == Self.november13)
+        #expect(detect("Terminal 2, Ankunft 13.11.2026") == Self.november13)
+    }
+
+    @Test func aPersonsNameIsNoPlace() {
+        // N10.
+        #expect(detect("01.11.2026\nMax Mustermann, 05.03.1980") == date(1, 11, 2026))
+        #expect(detect("01.11.2026\nBad Homburg, 13.11.2026") == Self.november13)
+        #expect(detect("01.11.2026\nNew York, November 13, 2026") == Self.november13)
+        #expect(detect("01.11.2026\nMünchen, 13.11.2026") == Self.november13)
+    }
+
+    @Test func standaloneAndLineEndsAllowTrailingPunctuation() {
+        // N11: M1, a standalone date followed by `,`; M2, a line that ends with the date and `.`.
+        #expect(detect("13.11.2026,\nUnsere Nachricht vom 01.11.2026") == Self.november13)
+        #expect(detect("01.11.2026\nMax Mustermann Datum\nMusterweg 2 13.11.2026.") == Self.november13)
     }
 
     // MARK: DateForms

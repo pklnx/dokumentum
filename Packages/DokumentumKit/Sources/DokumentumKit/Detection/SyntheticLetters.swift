@@ -491,5 +491,87 @@ public enum SyntheticLetters {
                 L("Kanzlei Beispiel Rechtsanwälte", x: 21, top: 273.2, size: 7),
                 L("Amtsgericht München PR 1234", x: 84, top: 273.2, size: 7),
             ]),
+        // Fix round 1 of #204 (review B1, B2, N3, N11).
+        swissWindow(at: 125, letterhead: "Muster", returnLine: true, id: "swiss-right-window-125"),
+        swissWindow(at: 130, letterhead: "Muster AG", returnLine: false, id: "swiss-right-window-130"),
+        letter(
+            "us-letterhead-springfield",
+            "B2: a US letterhead's small `Springfield, IL 62701` line in form A's zone: a town, not a name",
+            page: DetectionLimits.usLetter, recipient: "John Smith", known: ["Contoso Supplies"],
+            sender: .known("Contoso Supplies"), date: november13, springfieldLines),
+        letter(
+            "us-legal-letterhead-springfield", "B2: the same letterhead on US Legal",
+            page: DetectionLimits.usLegal, recipient: "John Smith", known: ["Contoso Supplies"],
+            sender: .known("Contoso Supplies"), date: november13, springfieldLines),
+        letter(
+            "uk-letterhead-oxford", "B2: a UK letterhead's small `Oxford, OX1 1AA` line in form A's zone",
+            recipient: "Jane Doe", known: ["Brightwater Opticians"], sender: .known("Brightwater Opticians"),
+            date: november13,
+            [
+                L("Brightwater Opticians", x: 20, top: 12, size: 18),
+                L("1 High Street", x: 20, top: 21.5, size: 8), L("Oxford, OX1 1AA", x: 20, top: 26, size: 8),
+                L("Ms Jane Doe", x: 20, top: 45, size: 11), L("12 Mill Lane", x: 20, top: 50, size: 11),
+                L("Manchester, M1 1AE", x: 20, top: 55, size: 11), L("13 November 2026", x: 20, top: 66, size: 11),
+            ]),
+        letter(
+            "din-a-small-recipient",
+            "N3: form A, the recipient in 9 pt with its street line in form B's zone, the body in 12 pt",
+            recipient: owner, sender: .structural("Muster Versicherung AG"), date: november13,
+            [
+                L("Muster Versicherung AG · Postfach 1 · 80001 München", x: 25, top: 28, size: 7),
+                L("Herrn Max Mustermann", x: 25, top: 36, size: 9),
+                L("Musterweg 2, 80331 München", x: 25, top: 43, size: 9),
+                L("Datum: 13.11.2026", x: 125, top: 36, size: 9),
+                L("Ihre Police", x: 25, top: 60, size: 12),
+                L("Sehr geehrter Herr Mustermann,", x: 25, top: 70, size: 12),
+                L("anbei Ihre Unterlagen.", x: 25, top: 76, size: 12),
+            ]),
+        letter(
+            "uk-small-recipient", "N3: a UK form A letter, the recipient in 9 pt, `Manchester, M1 1AE` at 43 mm",
+            recipient: "Jane Doe", sender: .structural("Brightwater Opticians Ltd"), date: november13,
+            [
+                L("Brightwater Opticians Ltd · 1 High Street · Oxford OX1 1AA", x: 20, top: 28, size: 7),
+                L("Ms Jane Doe", x: 20, top: 34, size: 9), L("13 November 2026", x: 130, top: 34, size: 9),
+                L("12 Mill Lane", x: 20, top: 38.5, size: 9), L("Manchester, M1 1AE", x: 20, top: 43, size: 9),
+                L("Your appointment", x: 20, top: 60, size: 12), L("Dear Ms Doe,", x: 20, top: 70, size: 12),
+                L("your new glasses are ready.", x: 20, top: 76, size: 12),
+            ]),
+        letter(
+            "us-half-inch-margin",
+            "N11: a US letter with half-inch margins (the recipient at 12.7 mm) and the owner in the info block",
+            page: DetectionLimits.usLetter, recipient: "John Smith", known: ["Northwind Dental Care"],
+            sender: .known("Northwind Dental Care"), date: november13,
+            [
+                L("Northwind Dental Care", x: 140, top: 12, size: 16),
+                L("Account: John Smith", x: 140, top: 25, size: 9),
+                L("November 13, 2026", x: 12.7, top: 40, size: 11), L("John Smith", x: 12.7, top: 50, size: 11),
+                L("123 Main Street", x: 12.7, top: 55, size: 11), L("Portland, OR 97201", x: 12.7, top: 60, size: 11),
+                L("Dear Mr. Smith,", x: 12.7, top: 75, size: 11),
+            ]),
     ]
+
+    /// A US letterhead with a small town line in form A's zone (review A5 of #204).
+    static let springfieldLines: [L] = [
+        L("Contoso Supplies", x: 25.4, top: 12, size: 18), L("100 Industrial Way", x: 25.4, top: 20.5, size: 8),
+        L("Springfield, IL 62701", x: 25.4, top: 25, size: 8), L("November 13, 2026", x: 25.4, top: 40, size: 11),
+        L("John Smith", x: 25.4, top: 50, size: 11), L("123 Main Street", x: 25.4, top: 55, size: 11),
+        L("Portland, OR 97201", x: 25.4, top: 60, size: 11), L("Dear Mr. Smith,", x: 25.4, top: 72, size: 11),
+    ]
+
+    /// A Swiss right-window letter (review B1 of #204): the recipient block at `x`, nothing in the left field.
+    static func swissWindow(at x: Double, letterhead: String, returnLine: Bool, id: String) -> SyntheticLetter {
+        let window: [L] =
+            (returnLine ? [L("Muster AG, Bahnhofstrasse 1, 8001 Zürich", x: x, top: 48, size: 7)] : []) + [
+                L("Herr", x: x, top: 53, size: 11), L("Max Mustermann", x: x, top: 58, size: 11),
+                L("Seestrasse 5", x: x, top: 63, size: 11), L("8002 Zürich", x: x, top: 68, size: 11),
+            ]
+        return letter(
+            id,
+            "B1: a Swiss right-window letter at \(Int(x)) mm, letterhead `\(letterhead)`"
+                + (returnLine ? ", with a return-address line" : ""),
+            recipient: owner, sender: .structural("Muster AG"), date: november13,
+            [
+                L(letterhead, x: 20, top: 15, size: 20), L("Zürich, 13. November 2026", x: 20, top: 90, size: 11),
+            ] + window + germanBody)
+    }
 }

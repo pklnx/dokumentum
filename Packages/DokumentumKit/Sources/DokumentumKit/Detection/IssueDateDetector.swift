@@ -17,16 +17,25 @@ import Foundation
 ///
 /// **Plausible:** a valid Gregorian date from 1900-01-01 to `createdAt` + 31 days (`DetectionLimits.dateWindowDays`).
 ///
-/// **Ignored:** a date with a cue (`germanCues`, `englishCues`; both apply to every document) between the previous
-/// date of its line (or the line's start) and itself, and both dates of a range (`01.10.2026 – 31.10.2026`,
-/// `01.10.–31.10.2026`, `… bis …`, `… to …`).
+/// **Ignored:** a date with a cue (`germanCues`, `englishCues`, and `germanSuffixCues` as word endings; all apply to
+/// every document) between the previous date of its line (or the line's start) and itself; a date that ends its line
+/// when the previous line, after its last date, holds a cue and does not end with a label (`Fällig am` /
+/// `27.11.2026`, review N7 of #204); and both dates of a range (`01.10.2026 – 31.10.2026`, `01.10.–31.10.2026`,
+/// `… bis …`, `… to …`). `Liefer-Datum` reads as `Lieferdatum` (review N8 of #204).
+///
+/// **Not a date but a position (review B3 of #204):** a form that is ambiguous (`05/06/2026`), invalid (`31.11.2026`)
+/// or outside the window still takes its place in a tier; that tier then gives none, so a labelled `Datum:
+/// 13.11.2028` (an OCR misread) never lets a lower tier pick another date. In tier 3 only forms with a four-digit year
+/// or a month name take a place.
 ///
 /// **Tiers** (the first non-empty tier decides; two different dates in it give none, with no fallback):
 /// 1. *labelled*: a label directly before the date on its line (colon optional): `labels`, or `Datum`/`Date` with
-///    no letter word directly before it (`Musterweg 2 Datum: …` counts, `Order Date: …` does not, N1, N3). A label at
-///    the end of the previous line counts when the date ends its own line and that line does not end with a cue
-///    (`Max Mustermann Datum` / `Musterweg 2 13.11.2026`, N3). A place line counts too: one to three words, a comma,
-///    an optional `den`, the date and nothing after it (`München, den 13.11.2026`);
+///    no letter word directly before it and not attached by `-` or `.` (`Musterweg 2 Datum: …` counts, `Order Date: …`
+///    and `Geb.-Datum` do not, N1, N3). A label at the end of the previous line counts when the date ends its own line
+///    and that line does not end with a cue (`Max Mustermann Datum` / `Musterweg 2 13.11.2026`, N3). A place line
+///    counts too: a comma, an optional `den`, the date and nothing after it, after one word, or two or three words
+///    of which one is a place particle (`Frankfurt am Main`, `Bad Homburg`, `New York`), so that `Max Mustermann,
+///    05.03.1980` is no place line (review N10 of #204);
 /// 2. *standalone*: a line that is only the date, in the first half of the page's lines;
 /// 3. *only*: exactly one distinct date with a four-digit year or a month name (N2: `Ziffer 4.1.12` never counts).
 public enum IssueDateDetector {
@@ -39,14 +48,18 @@ public enum IssueDateDetector {
         "Datum der Leistung", "Lieferdatum", "Leistungsdatum", "Bestelldatum",
         "Ihr Schreiben", "Ihre Nachricht", "Ihr Zeichen", "Eingang", "Termin",
         "Stand",
+        "Vertragsende", "Versicherungsende", "Laufzeitende", "eingegangen", "Ihrem Schreiben", "Ihre Anfrage",
+        "Ihrer Anfrage", "Ihrer Nachricht",
     ]
+    /// German compound cues, matched as the end of a word (`Versicherungsbeginn`, `Kündigungsfrist`, `Posteingang`).
+    public static let germanSuffixCues = ["beginn", "frist", "zeitraum", "laufzeit", "termin", "eingang"]
     public static let englishCues = [
         "due", "payable", "pay by",
         "date of birth", "DOB", "born",
         "period",
         "valid", "expires", "until", "deadline",
         "Order Date", "Start Date", "End Date", "Ship Date", "Shipping Date", "Effective Date", "Delivery Date",
-        "Service Date", "Due Date",
+        "Service Date", "Due Date", "Payment Date", "Birth Date", "Expiry Date", "Expiration Date",
         "your letter", "your ref", "received", "appointment",
     ]
     /// The labels of tier 1 besides `Datum` and `Date`.
@@ -62,6 +75,12 @@ public enum IssueDateDetector {
     ]
 
     static let foldedCues = (germanCues + englishCues).map(SuggestionRules.fold)
+    /// The words before a place line's comma: one of them must be one of these when there are two or three.
+    static let placeParticles: Set<String> = [
+        "am", "an", "a.", "der", "bei", "im", "in", "ob", "v.", "d.", "auf", "upon", "on", "bad", "st.", "st", "sankt",
+        "saint", "san", "santa", "neu", "new", "alt", "gross", "klein", "hansestadt", "fort", "port", "mount", "los",
+        "las", "le", "la", "el", "east", "west", "north", "south", "ober", "nieder", "unter",
+    ]
     static let foldedLabels = labels.map(SuggestionRules.fold)
 
     /// Gregorian, UTC: the calendar the window and the two-digit years are computed in when none is given.
@@ -83,25 +102,29 @@ public enum IssueDateDetector {
 
     /// The issue date in one page's lines.
     public static func detect(lines: [String], createdAt: Date, calendar: Calendar = utcCalendar) -> SuggestedDate? {
-        let folded = lines.map(SuggestionRules.fold).filter { !$0.isEmpty }
+        let folded = lines.map { joiningCompoundLabels(SuggestionRules.fold($0)) }.filter { !$0.isEmpty }
         let window = Window(createdAt: createdAt, calendar: calendar)
-        var labelled: [SuggestedDate] = []
-        var standalone: [SuggestedDate] = []
-        var strong: [SuggestedDate] = []
+        // A tier's entries; `nil` is a form that is ambiguous, invalid or outside the window (B3 of #204).
+        var labelled: [SuggestedDate?] = []
+        var standalone: [SuggestedDate?] = []
+        var strong: [SuggestedDate?] = []
         let firstHalf = (folded.count + 1) / 2
+        var previousCue = false
         for (index, line) in folded.enumerated() {
             let characters = Array(line)
             let tokens = Token.split(characters)
             let found = DateScanner(tokens: tokens, window: window).scan()
-            for (position, item) in found.enumerated() {
-                guard let date = item.date, window.contains(date) else { continue }
+            let previous = index > 0 ? folded[index - 1] : nil
+            for (position, item) in found.enumerated() where item.isComplete {
                 let before = String(characters[0..<item.start])
                 let after = String(characters[item.end...]).trimmingCharacters(in: .whitespaces)
                 let segmentStart = position > 0 ? found[position - 1].end : 0
                 let segment = String(characters[segmentStart..<item.start])
-                if isRange(found, at: position, in: characters) || hasCue(segment) { continue }
                 let endsLine = after.isEmpty || after == "."
-                let previous = index > 0 ? folded[index - 1] : nil
+                if isRange(found, at: position, in: characters) || hasCue(segment) || (endsLine && previousCue) {
+                    continue
+                }
+                let date = item.date.flatMap { window.contains($0) ? $0 : nil }
                 if endsWithLabel(before, strict: true) || (endsLine && isPlaceLine(before))
                     || (endsLine && previous.map(labelsNextLine) == true)
                 {
@@ -111,18 +134,51 @@ public enum IssueDateDetector {
                 }
                 if item.isStrong { strong.append(date) }
             }
+            let trailing = String(characters[(found.last?.end ?? 0)...])
+            previousCue = hasCue(trailing) && !labelsNextLine(line)
         }
         for tier in [labelled, standalone, strong] where !tier.isEmpty {
-            return Set(tier).count == 1 ? tier[0] : nil
+            guard let first = tier[0], tier.allSatisfy({ $0 == first }) else { return nil }
+            return first
         }
         return nil
     }
 
+    /// `liefer-datum` as `lieferdatum`, `rechnungs-datum` as `rechnungsdatum`: a hyphen between a letter and
+    /// `datum`/`date` joins one compound, which the labels and cues then name (review N8 of #204).
+    static func joiningCompoundLabels(_ line: String) -> String {
+        var result = ""
+        var characters = Array(line)[...]
+        while let character = characters.first {
+            characters = characters.dropFirst()
+            if character == "-", let last = result.last, last.isLetter,
+                ["datum", "date"].contains(where: { characters.starts(with: $0) })
+            {
+                continue
+            }
+            result.append(character)
+        }
+        return result
+    }
+
     // MARK: Cues and labels
 
-    /// Whether the folded text holds a cue as whole words.
+    /// Whether the folded text holds a cue as whole words, or a word ending with a German suffix cue.
     static func hasCue(_ folded: String) -> Bool {
         foldedCues.contains { Folded.containsBounded($0, in: folded) }
+            || germanSuffixCues.contains { endsAWord($0, in: folded) }
+    }
+
+    /// Whether some word of `text` ends with `suffix` (no letter or digit right after it).
+    static func endsAWord(_ suffix: String, in text: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: suffix, range: searchStart..<text.endIndex) {
+            if range.upperBound == text.endIndex { return true }
+            let after = text[range.upperBound]
+            if !(after.isLetter || after.isNumber) { return true }
+            searchStart = text.index(after: range.lowerBound)
+        }
+        return false
     }
 
     /// Whether the dates at `position` and next to it form a range: only a connector between them.
@@ -143,6 +199,7 @@ public enum IssueDateDetector {
         if text.last == ":" { text = text.dropLast().trimmingSuffix(\.isWhitespace) }
         for label in foldedLabels where endsWithWord(text, label) { return true }
         for label in plainLabels where endsWithWord(text, label) {
+            if let attached = text.dropLast(label.count).last, attached == "-" || attached == "." { continue }
             guard strict else { return true }
             let rest = text.dropLast(label.count).trimmingSuffix(\.isWhitespace)
             if let last = rest.last, last.isLetter { continue }
@@ -166,10 +223,12 @@ public enum IssueDateDetector {
         if text.hasSuffix(" den") { text = text.dropLast(4).trimmingSuffix(\.isWhitespace) }
         guard text.last == "," else { return false }
         let words = text.dropLast().split(separator: " ")
-        return (1...3).contains(words.count)
-            && words.allSatisfy { word in
+        guard (1...3).contains(words.count),
+            words.allSatisfy({ word in
                 word.contains(where: \.isLetter) && word.allSatisfy { $0.isLetter || $0 == "-" || $0 == "." }
-            }
+            })
+        else { return false }
+        return words.count == 1 || words.contains { placeParticles.contains(String($0)) }
     }
 
     /// Whether `text` ends with `word`, with no letter or digit right before it.
@@ -276,6 +335,8 @@ struct DateScanner {
         var end: Int
         /// A four-digit year or a month name (tier 3, N2).
         var isStrong: Bool
+        /// A whole date form, not the day and month of a range.
+        var isComplete = true
     }
 
     let tokens: [Token]
@@ -314,7 +375,10 @@ struct DateScanner {
             return (result.last, item)
         }
         if let last = dayMonthOnly(index) {
-            return (last, Found(date: nil, start: tokens[index].start, end: tokens[last].end, isStrong: false))
+            return (
+                last,
+                Found(date: nil, start: tokens[index].start, end: tokens[last].end, isStrong: false, isComplete: false)
+            )
         }
         return nil
     }

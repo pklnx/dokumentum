@@ -16,7 +16,9 @@ struct SyntheticLettersTests {
             "S3-shop-delivery", "S3a-receipt",
             "S3b-body-below", "S3c-labelled", "S4-insurer-info-block", "S5-us-invoice-ship-to", "ship-to-only",
             "law-firm", "uk-acme", "us-invoice", "us-letter-slash", "future-year", "nothing", "din-b-us-letter",
-            "din-b-us-legal", "din-b-odd-size",
+            "din-b-us-legal", "din-b-odd-size", "swiss-right-window-125", "swiss-right-window-130",
+            "us-letterhead-springfield", "us-legal-letterhead-springfield", "uk-letterhead-oxford",
+            "din-a-small-recipient", "uk-small-recipient", "us-half-inch-margin",
         ]
         for id in required { #expect(ids.contains(id), "\(id)") }
     }

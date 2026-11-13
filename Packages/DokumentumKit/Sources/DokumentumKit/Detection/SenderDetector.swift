@@ -13,21 +13,25 @@ public enum DetectedSender: Equatable, Sendable {
 /// Approach 3; review B1, B2; re-review R1-B1, N-r2, N-r3, N-r4).
 ///
 /// Geometry is in DIN 5008 millimetres (`DetectionLimits`, `PageGeometry`). Lines are classified first:
-/// - **Return-address line**: the topmost line whose left edge lies in the field's x-range (10–110 mm) at or below a
-///   form's field top (with the zone's tolerance), with its top in that form's return-address zone; at least two
-///   field lines below it, down to the form's bottom; its height at most 0.8 × their median height (required); at
-///   least two segments, a later one with a postcode. Form B is tried before form A: a form B letterhead may reach
-///   into form A's zone.
+/// - **The field**: the lines whose left edge lies at 10–110 mm. When none of them lies in the union area (y 27–90 mm),
+///   the letter has a right window (Swiss, French): the field is then the lines starting at or right of 110 mm
+///   (review B1 of #204).
+/// - **Return-address line**: for each form, the topmost field line at or below the form's field top (with the zone's
+///   tolerance), with its top in that form's return-address zone; at least two field lines below it, down to the
+///   form's bottom; its height at most 0.8 × their median height (required); at least two segments, a later one with
+///   a postcode. When both forms have one, the smaller line wins, and form B on a tie: a form B letterhead may reach
+///   into form A's zone with a small line of its own, and a small recipient line may reach into form B's zone
+///   (review N3 of #204).
 /// - **Recipient lines**: the field lines below the return-address line, down to the form's bottom; without one,
-///   every line of the union area (x 10–110 mm, y 27–90 mm). So a form B letterhead without a return-address line
-///   counts as recipient lines: a pinned miss (N-r3).
+///   every line of the union area (x 10–110 mm, y 27–90 mm), or with a right window every line of it at y 40–100 mm.
+///   So a form B letterhead without a return-address line counts as recipient lines: a pinned miss (N-r3).
 /// - **Recipient-labelled lines**: every line holding a `recipientLabels` entry; a line that is only a label covers
 ///   its column block below it (lines overlapping it horizontally, down to the first gap of more than 1.5 line
 ///   heights, N-r2).
 /// - **Letterhead**: lines above the field top (27 mm, or 45 mm with a form B return-address line) and the
 ///   info-block column (from x 125 mm, down to 100 mm), without recipient and recipient-labelled lines.
-/// - **Footer**: lines in the page's last 47 mm, grouped into column blocks (overlapping horizontally, gaps below
-///   1.5 line heights); a block with a `footerCues` line is dropped as a whole (B2).
+/// - **Footer**: lines below `PageGeometry.footerTop`, grouped into column blocks (overlapping horizontally, gaps below
+///   1.5 line heights); a block with a `footerCues` line or an IBAN-shaped number is dropped as a whole (B2).
 ///
 /// **Recipient exclusion** (B1.1): a known correspondent whose name occurs in a recipient or recipient-labelled line
 /// is never detected; a structural name equal to or contained in such a line is rejected.
@@ -36,21 +40,37 @@ public enum DetectedSender: Equatable, Sendable {
 /// 1. a known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
 ///    yields to the longer; two distinct names give **none for the document**;
 /// 2. else a structural name: the return-address line's first segment, unless it is a street, a post box or holds
-///    a postcode; in the letterhead (topmost first) and the footer, a segment with a legal form, cut after it, with
-///    a leading `©` and years dropped. It must be 2–80 characters, at most 8 words, with a letter, and no
-///    placeholder.
+///    a postcode, or the next segment is only a postcode (a town: `Springfield, IL 62701`, review B2 of #204); in the
+///    letterhead (topmost first) and the footer, a segment with a legal form, cut after it, with a leading `©` and
+///    years dropped, unless the words before the form read as a sentence (a lowercase word that is no name
+///    particle) or hold another legal form (two names joined, review N5 of #204). It must be 2–80 characters, at
+///    most 8 words, with a letter, and no placeholder.
+///
+/// **Limits** (review N6 of #204): a recipient block that starts left of 10 mm, or one above 27 mm, is no recipient
+/// block here; the owner's name there is excluded only when it also stands in a recipient or labelled line.
 public enum SenderDetector {
     public static let recipientLabels = [
-        "Kunde", "Kundin", "Versicherungsnehmer", "Patient", "Mandant", "Empfänger", "Anschrift", "Lieferadresse",
-        "Rechnungsadresse", "Rechnungsanschrift", "Lieferanschrift", "Rechnung an", "Lieferung an", "Bill to",
-        "Bill-to", "Ship to", "Ship-to", "Sold to", "Deliver to", "Invoice to", "Customer", "Account holder",
-        "Policyholder",
+        "Kunde", "Kundin", "Kundenname", "Name", "Versicherungsnehmer", "Versicherungsnehmerin", "Versicherte Person",
+        "Patient", "Patientin", "Mandant", "Mandantin", "Empfänger", "Empfängerin", "Rechnungsempfänger",
+        "Rechnungsempfängerin", "Leistungsempfänger", "Leistungsempfängerin", "Warenempfänger", "Warenempfängerin",
+        "Kontoinhaber", "Kontoinhaberin", "Anschrift", "Lieferadresse", "Rechnungsadresse", "Rechnungsanschrift",
+        "Lieferanschrift", "Rechnung an", "Lieferung an", "Bill to", "Bill-to", "Ship to", "Ship-to", "Sold to",
+        "Deliver to", "Invoice to", "Billing Address", "Shipping Address", "Invoice Address", "Delivery Address",
+        "Customer", "Account holder", "Policyholder",
     ]
     /// A footer column block with one of these is bank or register data, never a sender (B2).
     public static let footerCues = [
         "IBAN", "BIC", "SWIFT", "Bankverbindung", "Bank", "Konto", "Sort code", "Account", "Amtsgericht",
         "Registergericht", "Handelsregister", "HRB", "HRA", "PR", "VR", "Sitz", "USt-IdNr", "Steuernummer",
-        "Geschäftsführer", "Vorstand", "Aufsichtsrat", "Company number", "Registered office", "VAT", "Directors",
+        "Geschäftsführer", "Geschäftsführerin", "Geschäftsführung", "Vorstand", "Aufsichtsrat", "Company number",
+        "Registered office", "VAT", "Directors", "BLZ", "Kto", "Kontonummer",
+    ]
+    /// Lowercase words a company name may hold before its legal form (`Gesellschaft für Informatik e.V.`); any other
+    /// lowercase word makes the text a sentence, not a name (review N5 of #204).
+    static let nameParticles: Set<String> = [
+        "für", "und", "der", "die", "das", "des", "den", "dem", "von", "vom", "zu", "zum", "zur", "am", "an", "im",
+        "in",
+        "auf", "of", "and", "the", "for", "de", "du", "la", "le", "van", "y", "&",
     ]
     /// Legal forms, as words; a word's trailing `.`, `,`, `;` or `:` is ignored when comparing.
     public static let legalForms = [
@@ -83,7 +103,8 @@ public enum SenderDetector {
                 recipient.insert(other.index)
             }
         } else {
-            for line in lines where page.isFieldLine(line) && DetectionLimits.recipientArea.contains(line.box.midY) {
+            let area = page.hasRightWindow ? DetectionLimits.rightWindowArea : DetectionLimits.recipientArea
+            for line in lines where page.isFieldLine(line) && area.contains(line.box.midY) {
                 recipient.insert(line.index)
             }
         }
@@ -161,6 +182,8 @@ public enum SenderDetector {
             }
             let dropped = company.words.prefix(while: isYearOrCopyright).count
             guard dropped < company.formStart else { continue }
+            let head = company.words[dropped..<company.formStart]
+            guard !head.contains(where: isSentenceWord), !head.contains(where: isLegalFormWord) else { continue }
             names.append(company.words.dropFirst(dropped).joined(separator: " "))
         }
         return names
@@ -189,6 +212,19 @@ public enum SenderDetector {
         if !best.form.hasSuffix("."), last.hasSuffix(".") { last.removeLast() }
         result[best.end] = last
         return (result, best.start)
+    }
+
+    /// A word written all in lowercase letters that is no name particle (`send`, `bei`): the text is a sentence.
+    static func isSentenceWord(_ word: String) -> Bool {
+        let letters = word.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:"))
+        guard let first = letters.first, first.isLetter, first.isLowercase else { return false }
+        return letters.allSatisfy { $0.isLetter && $0.isLowercase } && !nameParticles.contains(letters)
+    }
+
+    /// A word that is a one-word legal form (`GmbH` in `Muster Versand GmbH Commerzbank AG`).
+    static func isLegalFormWord(_ word: String) -> Bool {
+        let key = comparable(word)
+        return legalFormWords.contains { $0.count == 1 && $0[0] == key }
     }
 
     static func isYearOrCopyright(_ word: String) -> Bool {
@@ -255,6 +291,41 @@ public enum SenderDetector {
         return false
     }
 
+    /// A segment that is only a postcode (`IL 62701`, `OX1 1AA`, `80284`): the segment before it is a town.
+    static func isOnlyPostcode(_ segment: String) -> Bool {
+        let words = segment.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.count == 1 {
+            let word = words[0]
+            return isZIP(word) || ((4...5).contains(word.count) && word.allSatisfy { $0.isASCII && $0.isNumber })
+        }
+        guard words.count == 2 else { return false }
+        let last = words[1].trimmingCharacters(in: CharacterSet(charactersIn: ".,"))
+        return (isUKOutward(words[0]) && isUKInward(last))
+            || (words[0].count == 2 && words[0].allSatisfy { $0.isASCII && $0.isUppercase } && isZIP(last))
+    }
+
+    /// An IBAN as printed: two capital letters and two digits, then digit groups (`DE12 7015 0000 …`) or one run
+    /// (`DE1270150000…`), at least 15 characters without spaces (review N2 of #204).
+    static func hasIBAN(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        for (index, word) in words.enumerated() {
+            let characters = Array(word)
+            guard characters.count >= 4, characters[0].isASCII, characters[0].isUppercase, characters[1].isASCII,
+                characters[1].isUppercase, characters[2].isASCII, characters[2].isNumber, characters[3].isASCII,
+                characters[3].isNumber
+            else { continue }
+            var compact = word
+            for next in words.dropFirst(index + 1) {
+                guard next.allSatisfy({ $0.isASCII && ($0.isNumber || $0.isUppercase) }) else { break }
+                compact += next
+            }
+            if compact.count >= 15, compact.dropFirst(2).allSatisfy({ $0.isASCII && ($0.isNumber || $0.isUppercase) }) {
+                return true
+            }
+        }
+        return false
+    }
+
     /// `M1`, `SW1A`, `EC2V`: one or two letters, a digit, an optional letter or digit.
     static func isUKOutward(_ word: String) -> Bool {
         let characters = Array(word)
@@ -301,7 +372,10 @@ struct Zone {
     func structuralNames() -> [String] {
         switch kind {
         case .returnAddress:
-            guard let first = lines.first.flatMap({ SenderDetector.segments($0.text).first }) else { return [] }
+            guard let line = lines.first else { return [] }
+            let parts = SenderDetector.segments(line.text)
+            guard let first = parts.first else { return [] }
+            if parts.count > 1, SenderDetector.isOnlyPostcode(parts[1]) { return [] }
             return [first]
         case .letterhead, .footer:
             return lines.flatMap { SenderDetector.legalFormNames(in: $0.text) }
@@ -313,6 +387,8 @@ struct Zone {
 struct Page {
     let geometry: PageGeometry
     let lines: [PageLine]
+    /// No line starts in the left field's x-range within the union area: the recipient sits in a right window.
+    let hasRightWindow: Bool
 
     init(_ layout: PageLayout) {
         geometry = layout.geometry
@@ -326,30 +402,45 @@ struct Page {
                     box: geometry.millimetres(line.box)))
         }
         self.lines = lines
+        hasRightWindow = !lines.contains { line in
+            DetectionLimits.acceptedFieldX.contains(line.box.minX)
+                && DetectionLimits.recipientArea.contains(line.box.midY)
+        }
     }
 
     func isFieldLine(_ line: PageLine) -> Bool {
-        DetectionLimits.acceptedFieldX.contains(line.box.minX)
+        hasRightWindow
+            ? line.box.minX >= DetectionLimits.rightWindowLeft : DetectionLimits.acceptedFieldX.contains(line.box.minX)
     }
 
-    /// The return-address line and its form (form B first), or `nil`.
+    /// The return-address line and its form, or `nil`. When both forms have one, the smaller line wins, form B on a
+    /// tie.
     func returnAddressLine() -> (index: Int, form: DetectionLimits.AddressForm)? {
-        let field = lines.filter(isFieldLine)
+        var best: (index: Int, form: DetectionLimits.AddressForm, height: Double)?
         for form in [DetectionLimits.formB, DetectionLimits.formA] {
-            let zone = form.returnZone
-            let topmost = field.filter { $0.box.minY >= zone.lowerBound }.min { $0.box.minY < $1.box.minY }
-            guard let candidate = topmost, zone.contains(candidate.box.minY) else { continue }
-            let below = field.filter { $0.box.midY > candidate.box.maxY && $0.box.midY <= form.bottom }
-            guard below.count >= DetectionLimits.returnLineMinimumLinesBelow else { continue }
-            let heights = below.map(\.box.height).sorted()
-            let middle = heights.count / 2
-            let median = heights.count % 2 == 1 ? heights[middle] : (heights[middle - 1] + heights[middle]) / 2
-            guard candidate.box.height <= DetectionLimits.returnLineHeightRatio * median else { continue }
-            let parts = SenderDetector.segments(candidate.text)
-            guard parts.count >= 2, parts.dropFirst().contains(where: SenderDetector.hasPostcode) else { continue }
-            return (candidate.index, form)
+            guard let index = returnAddressLine(form: form) else { continue }
+            let height = lines[index].box.height
+            if let current = best, height >= current.height - 0.01 { continue }
+            best = (index, form, height)
         }
-        return nil
+        return best.map { ($0.index, $0.form) }
+    }
+
+    /// The return-address line of one form, or `nil`.
+    func returnAddressLine(form: DetectionLimits.AddressForm) -> Int? {
+        let field = lines.filter(isFieldLine)
+        let zone = form.returnZone
+        let topmost = field.filter { $0.box.minY >= zone.lowerBound }.min { $0.box.minY < $1.box.minY }
+        guard let candidate = topmost, zone.contains(candidate.box.minY) else { return nil }
+        let below = field.filter { $0.box.midY > candidate.box.maxY && $0.box.midY <= form.bottom }
+        guard below.count >= DetectionLimits.returnLineMinimumLinesBelow else { return nil }
+        let heights = below.map(\.box.height).sorted()
+        let middle = heights.count / 2
+        let median = heights.count % 2 == 1 ? heights[middle] : (heights[middle - 1] + heights[middle]) / 2
+        guard candidate.box.height <= DetectionLimits.returnLineHeightRatio * median else { return nil }
+        let parts = SenderDetector.segments(candidate.text)
+        guard parts.count >= 2, parts.dropFirst().contains(where: SenderDetector.hasPostcode) else { return nil }
+        return candidate.index
     }
 
     /// The lines holding a recipient label, and the column blocks below lines that are only a label (N-r2).
@@ -395,7 +486,9 @@ struct Page {
         }
         var excluded = Set<Int>()
         for (index, line) in footer.enumerated()
-        where SenderDetector.foldedFooterCues.contains(where: { Folded.containsBounded($0, in: line.folded) }) {
+        where SenderDetector.foldedFooterCues.contains(where: { Folded.containsBounded($0, in: line.folded) })
+            || SenderDetector.hasIBAN(line.text)
+        {
             excluded.insert(root(index))
         }
         return footer.indices.filter { !excluded.contains(root($0)) }.map { footer[$0] }

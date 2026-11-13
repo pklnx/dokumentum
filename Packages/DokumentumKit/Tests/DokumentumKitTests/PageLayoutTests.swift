@@ -23,20 +23,30 @@ struct PageLayoutTests {
     }
 
     @Test func theFooterIsMeasuredFromTheBottomEdge() {
-        #expect(abs(PageGeometry(width: 612, height: 792).footerTop - 232.4) < 0.01, "US Letter")
+        // Review N4 of #204: 250 mm, or 47 mm above the bottom edge when that is lower.
+        #expect(abs(PageGeometry(width: 612, height: 792).footerTop - 250) < 0.01, "US Letter: 250 mm, not 232.4")
         #expect(abs(PageGeometry(width: 612, height: 1008).footerTop - 308.6) < 0.01, "US Legal")
+        #expect(abs(PageGeometry(width: 1000, height: 2000).footerTop - 373) < 0.01, "a tall photo: 420 − 47 mm")
+        // On US Letter, a body line at 236 mm is not footer (review F6 of #204).
+        let letterBody = [
+            SyntheticLetter.Line("John Smith", x: 25.4, top: 50, size: 11),
+            SyntheticLetter.Line("123 Main Street", x: 25.4, top: 55, size: 11),
+            SyntheticLetter.Line("Fabrikam Inc. · 1 Main Street · Redmond, WA 98052", x: 25.4, top: 236, size: 11),
+        ]
+        let usLetter = SyntheticLetters.layout(letterBody, width: 215.9, height: 279.4)
+        #expect(SenderDetector.detect(in: usLetter, known: SenderDetectorTests.records(["John Smith"])) == nil)
         // On US Legal, a body line at 260 mm is not footer: its company name is no sender.
         let lines = [
             SyntheticLetter.Line("Max Mustermann", x: 25, top: 40, size: 11),
             SyntheticLetter.Line("Musterweg 2", x: 25, top: 45, size: 11),
-            SyntheticLetter.Line("Ihre Bestellung bei Beispiel GmbH", x: 25, top: 260, size: 11),
+            SyntheticLetter.Line("Beispiel GmbH · Hauptstraße 1 · 80331 München", x: 25, top: 260, size: 11),
         ]
         let legal = SyntheticLetters.layout(lines, width: 215.9, height: 355.6)
         #expect(SenderDetector.detect(in: legal, known: SenderDetectorTests.records(["Max Mustermann"])) == nil)
         let a4 = SyntheticLetters.layout(lines)
         #expect(
             SenderDetector.detect(in: a4, known: SenderDetectorTests.records(["Max Mustermann"]))
-                == .name("Ihre Bestellung bei Beispiel GmbH"), "the same line is footer on A4")
+                == .name("Beispiel GmbH"), "the same line is footer on A4")
     }
 
     @Test func otherPagesAreScaledToA4sWidth() {
