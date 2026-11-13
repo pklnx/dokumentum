@@ -276,7 +276,7 @@ struct ProcessingSQLTests {
         try store.insertMetadata(.correspondent, "Ohne Regel")
 
         let recording = try SQLLog.Recording()
-        let rules = ProcessingQueue.textWriteRules(on: "text 0", in: store.container)
+        let rules = ProcessingQueue.textWriteRules(on: "text 0", in: store.container, budget: testMatchingBudget)
         let statements = try recording.statements()
 
         #expect(rules == nil)
@@ -298,7 +298,8 @@ struct ProcessingSQLTests {
         let ruled = try store.insert(device: deviceA, claimedAt: processingStart)
         try store.insertRule(.correspondent, "Stadtwerke", .any, "Strom")
         try store.insertRule(.tag, "Strom", .any, "Strom")
-        let rules = try #require(ProcessingQueue.textWriteRules(on: "Strom", in: store.container))
+        let rules = try #require(
+            ProcessingQueue.textWriteRules(on: "Strom", in: store.container, budget: testMatchingBudget))
 
         func write(_ id: UUID, fill: ProcessingQueue.MetadataFillStep?) throws -> [String] {
             let file = try #require(try store.fileIdentifier(of: id))

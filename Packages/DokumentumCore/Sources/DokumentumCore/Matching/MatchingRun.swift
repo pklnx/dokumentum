@@ -9,8 +9,13 @@ import Synchronization
 /// anyway.
 ///
 /// - **Rules:** read once, then validated and compiled once per run. An invalid rule is reported and skipped. A
-///   rule whose regular expression runs out of its budget is skipped for the rest of the run and reported. A rule
-///   edited during a run applies from the next run (review N5 b).
+///   **tag** rule whose regular expression runs out of its budget is skipped for the rest of the run; a
+///   **correspondent or type** rule is evaluated on every document, each time within its budget, and a time-out
+///   makes that kind ambiguous on that document only (review A of #205, B3: a run-wide skip would leave every later
+///   document without a correspondent, and the import path, which never skips, would decide them differently). Every
+///   rule that timed out is reported. A rule whose record has copies sharing its `instanceID` is counted
+///   (`copiedRules`): it never applies (`MatchingStore.withoutCopies`). A rule edited during a run applies from the
+///   next run (review N5 b).
 /// - **What it writes** is the text write's fill (`MetadataFill.applyRules`, T4): an empty correspondent and type
 ///   filled, matching tags added (also ones removed by hand, P3), nothing removed or replaced, no `touch()`, and
 ///   nothing for a document it would not change, so a second run saves nothing.
@@ -50,8 +55,13 @@ public final class MatchingRun: Sendable {
         public var ambiguous = 0
         /// Names of rules that cannot run (an invalid regular expression, a pattern over the limit), sorted.
         public var invalidRules: [String] = []
-        /// Names of rules skipped after their regular expression ran out of its budget, sorted.
+        /// Names of rules whose regular expression ran out of its budget at least once, sorted. A tag rule among
+        /// them was skipped for the rest of the run; a correspondent or type rule left its kind empty on the
+        /// documents where it timed out.
         public var slowRules: [String] = []
+        /// Rules that never apply because their record has copies sharing its `instanceID` (review A of #205, N6);
+        /// the rule sheet (#200) shows that state.
+        public var copiedRules = 0
         /// Saves: one per batch that changed something, one per single write after a fallback.
         public var saves = 0
         /// Cancelled between batches: the earlier batches are saved, the later ones untouched.
@@ -120,7 +130,9 @@ public final class MatchingRun: Sendable {
         let ids: [UUID]
         let rules: [MatchingRule]
         do {
-            rules = try MatchingStore.readRules(in: container)
+            let records = try MatchingStore.readRuleRecords(in: container)
+            rules = records.rules
+            report.copiedRules = records.copied
             ids = try Self.scan(in: container)
         } catch {
             Log.processing.error("Matching run could not read the store: \(Log.code(of: error), privacy: .public)")
@@ -129,6 +141,7 @@ public final class MatchingRun: Sendable {
         }
         let prepared = MatchingRules.Prepared(rules)
         var slow: Set<UUID> = []
+        let tagRules = Set(rules.filter { $0.kind == .tag }.map(\.id))
         var done = 0
         progress(Progress(done: 0, total: ids.count))
         if !rules.isEmpty {
@@ -140,7 +153,7 @@ public final class MatchingRun: Sendable {
                 let batch = Array(ids[start..<min(start + batchSize, ids.count)])
                 do {
                     try Self.runBatch(
-                        batch, rules: prepared, budget: budget, slow: &slow, in: container,
+                        batch, rules: prepared, budget: budget, slow: &slow, skippable: tagRules, in: container,
                         beforeCheck: hooks.beforeCheck, into: &report)
                 } catch {
                     Log.processing.error("Matching run failed: \(Log.code(of: error), privacy: .public)")
@@ -173,10 +186,12 @@ public final class MatchingRun: Sendable {
     }
 
     /// One batch: fetch, read the texts by key, evaluate, fill, check, one save; on a mismatch the changed documents
-    /// one by one. Throws only when the store fails.
+    /// one by one. Throws only when the store fails. `slow` collects every rule that timed out; of those, only the
+    /// ones in `skippable` (the tag rules) are left out of later documents.
     static func runBatch(
         _ ids: [UUID], rules: MatchingRules.Prepared, budget: MatchingBudget, slow: inout Set<UUID>,
-        in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?, into report: inout Report
+        skippable: Set<UUID>, in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?,
+        into report: inout Report
     ) throws {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -191,7 +206,7 @@ public final class MatchingRun: Sendable {
             // By key: the text row of each document, never its file or thumbnail.
             guard let text = document.text?.extractedText, !text.isEmpty else { continue }
             report.documents += 1
-            let outcome = rules.evaluate(text: text, budget: budget, skipping: slow)
+            let outcome = rules.evaluate(text: text, budget: budget, skipping: slow.intersection(skippable))
             slow.formUnion(outcome.timedOut)
             outcomes[document.instanceID] = outcome
             let state = RowState.capture(document)
@@ -272,7 +287,8 @@ public final class MatchingRun: Sendable {
             Matching run: documents \(report.documents, privacy: .public), rules.applied \
             \(report.changed, privacy: .public), skipped \(report.skipped, privacy: .public), rules.ambiguous \
             \(report.ambiguous, privacy: .public), regex.invalid \(report.invalidRules.count, privacy: .public), \
-            regex.timeout \(report.slowRules.count, privacy: .public), saves \(report.saves, privacy: .public), \
+            regex.timeout \(report.slowRules.count, privacy: .public), rules.copied \(report.copiedRules, privacy: .public), \
+            saves \(report.saves, privacy: .public), \
             cancelled \(report.cancelled, privacy: .public), failed \(report.failed, privacy: .public)
             """)
     }

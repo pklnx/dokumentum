@@ -739,9 +739,9 @@ budget:)` is a pure function of the text and the set of rules, never of their or
   `M(ü|ue)ller`). Only the first match is looked for.
 - **Several records of one kind (P2): none.** More than one matching correspondent (or type) leaves the field empty;
   detection (#11) or the classifier may fill it. Every matching tag applies. **A correspondent or type rule whose
-  regular expression timed out** (or that the bulk run skips after a time-out) **makes its kind ambiguous too**:
-  whether it matches is unknown, so none of that kind is set, and a faster and a slower device never set different
-  values (review A of #205, N4). A timed-out tag rule only leaves its own tag out.
+  regular expression timed out on a document makes its kind ambiguous on that document**: whether it matches is
+  unknown, so none of that kind is set there, and a faster and a slower device never set different values (review A
+  of #205, N4). A timed-out tag rule only leaves its own tag out.
 
 **Regex safety** (T8). A pattern can arrive by sync, invalid or written by a newer build, so it is validated and
 compiled at every use, and a failure means "skipped", never a crash (`MatchingRuleValidation.check`: at most 1,000
@@ -790,8 +790,12 @@ review A of #205, B1). The write's check reads a key through `RowRecords`, which
 order of a fetch without sort descriptors is not stable between contexts (measured: of two live copies, the write's
 context read the younger one first in 3 of 10 runs and the check's context the older one). So a fill that linked any
 copy could meet another copy in its check, and the text write would back off for ever, redoing its OCR each run.
+Copies are counted among all records of an `instanceID`, also those without a rule, in the snapshot (a second fetch by
+`instanceID`, only when rules exist) as in the fill, so the import path and the bulk run agree (review A of #205, N5).
 Copies are rare (a copied record, or a merge's loser and its copy, which the repair leaves alone, see "Copies sharing
-an `instanceID`" above).
+an `instanceID`" above), but such a rule silently never applies: the bulk run's report counts it (`copiedRules`,
+logged as `rules.copied`), the editor refuses the record (`noMetadata`), and **#200's rule sheet should show that
+state** ("This rule is not applied: the record exists twice") instead of a plain error.
 
 **Precedence** (T5, P1): a user's edit > rules > detection (#11) > classifier (#8). Correspondent, type and date: each
 later step fills only what is still empty when it writes. Tags: the classifier adds its tags unless the document has a
@@ -803,7 +807,10 @@ never replaces a correspondent or type the classifier or detection filled earlie
 **On request: "Apply Matching Rules"** (`MatchingRun`, T6, N7). Off the main actor, over every document outside the
 trash that has a text record with non-empty text, in any processing state except `unknown`; it never writes the
 state. The rules are read once, validated and compiled once per run; an invalid rule and one whose regular expression
-ran out of its budget (skipped for the rest of the run) are named in the result; a rule edited during a run applies
+ran out of its budget are named in the result. A **tag** rule that timed out is skipped for the rest of the run; a
+**correspondent or type** rule is evaluated on every document, each time within its budget, so a time-out leaves only
+that document's kind empty (review A of #205, B3: skipping it for the rest of the run made the kind ambiguous on every
+later document, and the import path, which never skips, decided them differently). A rule edited during a run applies
 from the next run (N5 b). Batches of 50, walked by `instanceID`, each in a fresh context: fetch the documents and read
 their text rows by key, never a file or thumbnail (`MatchingRunSQLTests`); evaluate, fill, check every changed document
 row and every linked metadata row again, and save once per batch. On a mismatch the batch rolls back and its changed
@@ -832,7 +839,12 @@ callback budget, the clock budget, an ordinary pattern on a 500,000-byte text), 
 `MatchingImportTests` (the text write, the windows, N6, the classifier keeping a rule's correspondent),
 `MatchingClassifierTagTests` (T13, N1–N3), `MatchingRunTests`, `MatchingRunSQLTests`, `MatchingConvergenceTests`,
 `MatchingRuleEditorTests`, and `ProcessingSQLTests` (N4). The catastrophic cases use bounded inputs (26 × "a" + "!"), so
-a broken guard fails them after a few seconds and never hangs the suite.
+a broken guard fails them after a few seconds and never hangs the suite. **No test runs an ordinary pattern against the
+real 100 ms**: that depends on the runner's load (it failed `app-macos` once at 0.188 s; review A of #205, B4). The
+production budget is pinned as a value (`MatchingBudget.production == .clock(.milliseconds(100))`); ordinary patterns
+run under a 10 s clock (`generousBudget` in Kit, `testMatchingBudget` in Core, passed to the queue through
+`ProcessingQueue(matchingBudget:)`); time-outs are tested with `.progressCallbacks` or with catastrophic inputs that
+take seconds without the guard.
 
 ## Library UI
 

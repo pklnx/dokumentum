@@ -6,8 +6,9 @@ import Testing
 struct MatchingRuleValidationTests {
     @Test func aValidRuleHasNoProblem() async {
         #expect(MatchingRuleValidation.check(mode: .regex, pattern: "Stadtwerke\\s+M(ü|ue)nchen") == nil)
-        #expect(MatchingRuleValidation.probe(regex: "Stadtwerke\\s+M(ü|ue)nchen") == nil)
-        #expect(await MatchingRuleValidation.probeConcurrently(regex: "IBAN\\s*DE\\d{20}") == nil)
+        #expect(MatchingRuleValidation.probe(regex: "Stadtwerke\\s+M(ü|ue)nchen", budget: generousBudget) == nil)
+        #expect(
+            await MatchingRuleValidation.probeConcurrently(regex: "IBAN\\s*DE\\d{20}", budget: generousBudget) == nil)
         #expect(MatchingRuleValidation.check(mode: .any, pattern: "(abc") == nil, "a word pattern is not compiled")
         #expect(
             MatchingRuleValidation.check(mode: .regex, pattern: "") == nil, "empty: never matches, nothing to check")
@@ -45,7 +46,7 @@ struct MatchingRuleValidationTests {
         #expect(texts.contains(String(repeating: "x,", count: 3_000)))
         #expect(texts.contains { $0.contains("Stadtwerke München") })
         for pattern in ["\\d{2}\\.\\d{2}\\.\\d{4}", "(Strom|Gas)\\s+\\d+", "^Invoice", "Rechnung\\s+\\w+"] {
-            #expect(MatchingRuleValidation.probe(regex: pattern) == nil, "\(pattern)")
+            #expect(MatchingRuleValidation.probe(regex: pattern, budget: generousBudget) == nil, "\(pattern)")
         }
     }
 

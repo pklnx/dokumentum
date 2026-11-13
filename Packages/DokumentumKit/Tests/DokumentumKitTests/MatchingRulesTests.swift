@@ -14,7 +14,7 @@ struct MatchingRulesTests {
     /// Whether a single tag rule matches `text`.
     static func matches(_ mode: MatchMode, _ pattern: String, _ text: String) -> Bool {
         let rule = rule(mode, pattern)
-        return MatchingRules.evaluate(text: text, rules: [rule]).tags == [rule.id]
+        return MatchingRules.evaluate(text: text, rules: [rule], budget: generousBudget).tags == [rule.id]
     }
 
     // MARK: Per mode
@@ -141,7 +141,7 @@ struct MatchingRulesTests {
         let broken = Self.rule(.regex, "(abc")
         let long = Self.rule(.any, String(repeating: "a ", count: 600))
         let good = Self.rule(.any, "Strom")
-        let outcome = MatchingRules.evaluate(text: "abc Strom", rules: [broken, long, good])
+        let outcome = MatchingRules.evaluate(text: "abc Strom", rules: [broken, long, good], budget: generousBudget)
         #expect(outcome.invalid == [broken.id, long.id])
         #expect(outcome.tags == [good.id])
     }
@@ -151,7 +151,8 @@ struct MatchingRulesTests {
     @Test func twoMatchingCorrespondentsGiveNone() {
         let first = Self.rule(.any, "Stadtwerke", kind: .correspondent)
         let second = Self.rule(.any, "München", kind: .correspondent)
-        let outcome = MatchingRules.evaluate(text: "Stadtwerke München", rules: [first, second])
+        let outcome = MatchingRules.evaluate(
+            text: "Stadtwerke München", rules: [first, second], budget: generousBudget)
         #expect(outcome.correspondent == nil)
         #expect(outcome.ambiguous == [.correspondent])
     }
@@ -164,7 +165,8 @@ struct MatchingRulesTests {
         let energie = Self.rule(.regex, "stadt\\w+")
         let gas = Self.rule(.any, "Gas")
         let outcome = MatchingRules.evaluate(
-            text: "Stadtwerke Rechnung Strom", rules: [correspondent, type, otherType, strom, energie, gas])
+            text: "Stadtwerke Rechnung Strom", rules: [correspondent, type, otherType, strom, energie, gas],
+            budget: generousBudget)
         #expect(outcome.correspondent == correspondent.id)
         #expect(outcome.documentType == type.id)
         #expect(outcome.tags == [strom.id, energie.id])
@@ -182,11 +184,11 @@ struct MatchingRulesTests {
             Self.rule(.regex, "(broken", kind: .tag),
         ]
         let text = "Stadtwerke München Jahresabrechnung Strom"
-        let expected = MatchingRules.evaluate(text: text, rules: rules)
+        let expected = MatchingRules.evaluate(text: text, rules: rules, budget: generousBudget)
         #expect(expected.ambiguous == [.correspondent])
         #expect(expected.documentType == rules[2].id)
         for permutation in Self.permutations(rules) {
-            #expect(MatchingRules.evaluate(text: text, rules: permutation) == expected)
+            #expect(MatchingRules.evaluate(text: text, rules: permutation, budget: generousBudget) == expected)
         }
     }
 
@@ -195,7 +197,7 @@ struct MatchingRulesTests {
     /// A synced rule with a back-reference is skipped as invalid (review B, N1).
     @Test func aBackReferenceRuleIsInvalidAtRunTime() {
         let rule = Self.rule(.regex, "(Strom)\\1")
-        let outcome = MatchingRules.evaluate(text: "StromStrom", rules: [rule])
+        let outcome = MatchingRules.evaluate(text: "StromStrom", rules: [rule], budget: generousBudget)
         #expect(outcome.invalid == [rule.id])
         #expect(outcome.tags.isEmpty)
     }

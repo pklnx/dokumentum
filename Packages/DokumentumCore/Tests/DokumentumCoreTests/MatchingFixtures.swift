@@ -9,6 +9,10 @@ import Testing
 // The matching tests' tools (#10, part 1b): records with rules, links set by another context, the matching fields
 // of a document. The store's saves are counted by `SaveCounter` (`DocumentImporterTests`).
 
+/// The matching budget of the Core tests: a clock no runner's load reaches, so an ordinary rule never times out in a
+/// test (review A of #205, B4). Tests of a time-out pass `.progressCallbacks` with bounded inputs instead.
+let testMatchingBudget = MatchingBudget.clock(.seconds(10))
+
 /// What the rules can change on a document, by name, as the tests compare it.
 struct MatchedRow: Equatable {
     var correspondent: String?
@@ -96,9 +100,10 @@ extension ProcessingStore {
 
     /// Two correspondents sharing an `instanceID`, both with the rule `any` "Stadtwerke" and the name "Stadtwerke"
     /// (review A of #205, B1), the original inserted first. With `tombstoneFirst` the original is a merge's loser and its
-    /// copy is live; otherwise both are live and the copy is older (first in keeper order).
+    /// copy is live; otherwise both are live and the copy is older (first in keeper order). Without `copyHasRule` only
+    /// the original has the rule.
     @discardableResult
-    func insertCopiedCorrespondent(tombstoneFirst: Bool) throws -> UUID {
+    func insertCopiedCorrespondent(tombstoneFirst: Bool, copyHasRule: Bool = true) throws -> UUID {
         let keeper = try insertMetadata(.correspondent, "Stadtwerke GmbH")
         let context = ModelContext(container)
         let original = Correspondent(name: "Stadtwerke", createdAt: processingStart.addingTimeInterval(-hour))
@@ -113,8 +118,10 @@ extension ProcessingStore {
         let copy = Correspondent(
             name: "Stadtwerke", createdAt: processingStart.addingTimeInterval(tombstoneFirst ? -hour : -2 * hour))
         copy.instanceID = original.instanceID
-        copy.matchMode = .any
-        copy.matchPattern = "Stadtwerke"
+        if copyHasRule {
+            copy.matchMode = .any
+            copy.matchPattern = "Stadtwerke"
+        }
         context.insert(copy)
         try context.save()
         return original.instanceID
@@ -142,7 +149,7 @@ extension ProcessingStore {
 
     /// A matching run on this store.
     func matchingRun(
-        budget: MatchingBudget = .production, batchSize: Int = MatchingLimits.batchSize,
+        budget: MatchingBudget = testMatchingBudget, batchSize: Int = MatchingLimits.batchSize,
         hooks: MatchingRun.Hooks = .init()
     ) -> MatchingRun {
         MatchingRun(container: container, budget: budget, batchSize: batchSize, hooks: hooks)

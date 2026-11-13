@@ -211,4 +211,76 @@ struct MatchingConvergenceTests {
         #expect(staleDump[seed.documents[5].id]?.correspondent == nil, "Gaswerke and Telekom: none")
         #expect(try Self.dump(current)[seed.documents[5].id]?.correspondent == seed.rules[1].id)
     }
+
+    // MARK: Fix round 2 of #205
+
+    /// Review A, B3: with a correspondent rule that times out on one document, the text write (store A) and the bulk
+    /// run (store B) give the same values, and only that document stays empty (counter-proof: the bulk run skips the
+    /// correspondent rule for the rest of the run).
+    @Test func aSlowCorrespondentRuleGivesTheSameValuesOnImportAndInBulk() async throws {
+        var documents = [
+            (
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                text: "Stadtwerke " + String(repeating: "a", count: 26) + "!"
+            )
+        ]
+        for index in 0..<3 {
+            documents.append(
+                (
+                    UUID(uuidString: "FFFFFFFF-0000-0000-0000-00000000000\(index)")!,
+                    "Stadtwerke München: Jahresabrechnung Strom"
+                ))
+        }
+        let seed = Seed(
+            documents: documents,
+            rules: [
+                Rule(kind: .correspondent, name: "Stadtwerke", mode: .any, pattern: "Stadtwerke"),
+                Rule(kind: .correspondent, name: "Langsam", mode: .regex, pattern: "(a+)+$"),
+            ])
+        let storeA = try ProcessingStore()
+        defer { storeA.remove() }
+        let storeB = try ProcessingStore()
+        defer { storeB.remove() }
+        try Self.seed(storeA, seed, reversed: false, state: "pending")
+        try Self.seed(storeB, seed, reversed: true)
+        let budget = MatchingBudget.progressCallbacks(1_000)
+
+        let queue = await storeA.queue(deviceA, clock: TestClock(), matchingBudget: budget).run()
+        _ = try #require(await storeB.matchingRun(budget: budget, batchSize: 1).run())
+
+        #expect(queue.done == documents.count)
+        for (id, text) in documents { #expect(try storeA.text(of: id).text == text) }
+        let dump = try Self.dump(storeB)
+        #expect(try Self.dump(storeA) == dump)
+        #expect(dump[documents[0].id]?.correspondent == nil)
+        for (id, _) in documents.dropFirst() { #expect(dump[id]?.correspondent == seed.rules[0].id) }
+    }
+
+    /// Review A, N5 (probe A): a record with a rule whose copy has none is no rule on both paths, so the text write
+    /// and the bulk run agree (counter-proof: count copies only among the records with a rule in `readRules`).
+    @Test func aCopyWithoutARuleIsNoRuleOnImportAndInBulk() async throws {
+        var ids: [UUID] = []
+        var reports: [MatchingRun.Report] = []
+        let storeA = try ProcessingStore()
+        defer { storeA.remove() }
+        let storeB = try ProcessingStore()
+        defer { storeB.remove() }
+        for (index, store) in [storeA, storeB].enumerated() {
+            try store.insertCopiedCorrespondent(tombstoneFirst: false, copyHasRule: false)
+            try store.insertRule(.correspondent, "München", .any, "München")
+            ids.append(
+                index == 0
+                    ? try store.insert(device: deviceA, claimedAt: processingStart) : try store.insertWithText(billText)
+            )
+        }
+
+        let queue = await storeA.queue(deviceA, stage: textStage(), clock: TestClock()).run()
+        reports.append(try #require(await storeB.matchingRun().run()))
+
+        #expect(queue.done == 1)
+        #expect(try storeA.matched(ids[0]).correspondent == "München")
+        #expect(try storeB.matched(ids[1]).correspondent == "München")
+        #expect(reports[0].copiedRules == 1)
+        #expect(reports[0].ambiguous == 0)
+    }
 }

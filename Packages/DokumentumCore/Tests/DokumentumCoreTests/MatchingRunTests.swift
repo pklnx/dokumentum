@@ -292,6 +292,7 @@ struct MatchingRunTests {
 
         #expect(first.skipped == 0)
         #expect(second.skipped == 0)
+        #expect(first.copiedRules == 1, "the rule that never applies is counted (review A of #205, N6)")
         #expect(second.changed == 0)
         #expect(try store.matched(id).correspondent == nil)
     }
@@ -309,5 +310,35 @@ struct MatchingRunTests {
 
         #expect(report.ambiguous == 0)
         #expect(try store.matched(id).correspondent == "Stadtwerke München")
+    }
+
+    // MARK: Fix round 2 of #205
+
+    /// Review A, B3 (probe C): a correspondent rule that times out leaves only that document's correspondent empty;
+    /// the later documents of the run still get "Stadtwerke" (counter-proof: skip it for the rest of the run, as tag
+    /// rules are). The callback budget keeps the slow case bounded without a clock; the ordinary documents call back
+    /// fewer than 1,000 times.
+    @Test func aSlowCorrespondentRuleLeavesOnlyItsOwnDocumentEmpty() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        try store.insertRule(.correspondent, "Stadtwerke", .any, "Stadtwerke")
+        try store.insertRule(.correspondent, "Langsam", .regex, "(a+)+$")
+        let slow = try store.insertWithText("Stadtwerke " + String(repeating: "a", count: 26) + "!")
+        let first = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        try store.edit(slow) { document, _ in document.instanceID = first }
+        var later: [UUID] = []
+        for index in 0..<3 {
+            let id = try store.insertWithText(Self.text)
+            let fixed = try #require(UUID(uuidString: "FFFFFFFF-0000-0000-0000-00000000000\(index)"))
+            try store.edit(id) { document, _ in document.instanceID = fixed }
+            later.append(fixed)
+        }
+
+        let report = try #require(await store.matchingRun(budget: .progressCallbacks(1_000), batchSize: 1).run())
+
+        #expect(report.slowRules == ["Langsam"])
+        #expect(report.ambiguous == 1, "only the document where it timed out")
+        #expect(try store.matched(first).correspondent == nil)
+        for id in later { #expect(try store.matched(id).correspondent == "Stadtwerke") }
     }
 }

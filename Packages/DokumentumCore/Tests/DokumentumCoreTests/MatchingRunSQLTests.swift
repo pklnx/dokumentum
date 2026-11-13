@@ -55,7 +55,8 @@ struct MatchingRunSQLTests {
 
         let recording = try SQLLog.Recording()
         try MatchingRun.runBatch(
-            ids, rules: rules, budget: .production, slow: &slow, in: store.container, beforeCheck: nil, into: &report)
+            ids, rules: rules, budget: testMatchingBudget, slow: &slow, skippable: [], in: store.container,
+            beforeCheck: nil, into: &report)
         let statements = try recording.statements()
 
         #expect(report.changed == 3)

@@ -87,4 +87,16 @@ struct MatchingRuleEditorTests {
         #expect(try store.rawRule(.tag, id)! == ("any", "(Strom"))
         #expect(try editor.save(.tag, id, mode: MatchMode.none) == .saved, "no rule: the pattern is not checked")
     }
+
+    /// Review A of #205, N6: a record with copies sharing its `instanceID` is not edited, as matching never uses it
+    /// (counter-proof: edit the first live copy).
+    @Test func aRecordWithCopiesIsNotEdited() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insertCopiedCorrespondent(tombstoneFirst: false)
+        let editor = MatchingRuleEditor(context: ModelContext(store.container))
+
+        #expect(try editor.rule(of: .correspondent, id) == nil)
+        #expect(try editor.save(.correspondent, id, pattern: "Telekom") == .noMetadata)
+    }
 }

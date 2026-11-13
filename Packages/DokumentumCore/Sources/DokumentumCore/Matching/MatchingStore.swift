@@ -7,11 +7,23 @@ import SwiftData
 
 /// The rule records of the store as values.
 enum MatchingStore {
+    /// The rule records as values, and how many rule records were left out because their record has copies.
+    struct RuleRecords {
+        var rules: [MatchingRule] = []
+        /// Distinct `instanceID`s of live records with a rule whose record has copies (`withoutCopies`).
+        var copied = 0
+    }
+
     /// The live rule records (a `matchModeRaw` that is not `""`, not merged away), in a context that ends with the
     /// read: one fetch per entity with a predicate on the rule field, so a store without rules reads no row (review
     /// N4). A tombstone is never a rule (T10), and neither is a record with **copies sharing its `instanceID`**
-    /// (`withoutCopies`, review A of #205, B1).
+    /// (`withoutCopies`, review A of #205, B1). Copies are counted among **all** records of those `instanceID`s, as the
+    /// fill counts them (review A of #205, N5): a second fetch by `instanceID`, only when rules exist.
     static func readRules(in container: ModelContainer) throws -> [MatchingRule] {
+        try readRuleRecords(in: container).rules
+    }
+
+    static func readRuleRecords(in container: ModelContainer) throws -> RuleRecords {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         let none = MatchMode.none.storedValue ?? ""
@@ -20,9 +32,25 @@ enum MatchingStore {
             FetchDescriptor<Correspondent>(predicate: #Predicate { $0.matchModeRaw != none }))
         let types = try context.fetch(
             FetchDescriptor<DocumentType>(predicate: #Predicate { $0.matchModeRaw != none }))
-        return withoutCopies(tags, \.instanceID).filter(\.isLive).map(rule)
-            + withoutCopies(correspondents, \.instanceID).filter(\.isLive).map(rule)
-            + withoutCopies(types, \.instanceID).filter(\.isLive).map(rule)
+        var records = RuleRecords()
+        if !tags.isEmpty {
+            let ids = Array(Set(tags.map(\.instanceID)))
+            let all = try context.fetch(FetchDescriptor<Tag>(predicate: #Predicate { ids.contains($0.instanceID) }))
+            records.add(tags, all: all, rule: rule)
+        }
+        if !correspondents.isEmpty {
+            let ids = Array(Set(correspondents.map(\.instanceID)))
+            let all = try context.fetch(
+                FetchDescriptor<Correspondent>(predicate: #Predicate { ids.contains($0.instanceID) }))
+            records.add(correspondents, all: all, rule: rule)
+        }
+        if !types.isEmpty {
+            let ids = Array(Set(types.map(\.instanceID)))
+            let all = try context.fetch(
+                FetchDescriptor<DocumentType>(predicate: #Predicate { ids.contains($0.instanceID) }))
+            records.add(types, all: all, rule: rule)
+        }
+        return records
     }
 
     /// `records` without every record whose `instanceID` another record of `records` shares (review A of #205, B1).
@@ -80,6 +108,25 @@ enum MatchingStore {
     private static func unique(_ rules: [MatchingRule]) -> [MatchingRule] {
         var seen: Set<UUID> = []
         return rules.filter { seen.insert($0.id).inserted }
+    }
+}
+
+extension MatchingStore.RuleRecords {
+    /// Adds the rules of `ruled` (records with a rule) that are live and whose `instanceID` no other record of `all`
+    /// shares; counts the live ones left out for copies.
+    fileprivate mutating func add<T: MatchingRuleRecord>(_ ruled: [T], all: [T], rule: (T) -> MatchingRule) {
+        var counts: [UUID: Int] = [:]
+        for record in all { counts[record.instanceID, default: 0] += 1 }
+        var copied: Set<UUID> = []
+        var seen: Set<UUID> = []
+        for record in ruled where record.isLive && seen.insert(record.instanceID).inserted {
+            if counts[record.instanceID, default: 0] > 1 {
+                copied.insert(record.instanceID)
+            } else {
+                rules.append(rule(record))
+            }
+        }
+        self.copied += copied.count
     }
 }
 

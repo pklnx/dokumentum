@@ -253,6 +253,9 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     let classificationFailures: ProcessingFailures
     let classificationSettings: ClassificationSettings
     let calendar: Calendar
+    /// The matching rules' regex budget (#10): `.production` in the app; tests pass a generous clock, so a loaded
+    /// runner never times out an ordinary rule (review A of #205, B4).
+    let matchingBudget: MatchingBudget
     /// The stage this queue waits for and the ones it let go.
     let stages: StageTracker
     /// Checked answers whose write has not saved yet, by document, with the text record they were made from (T3).
@@ -273,11 +276,13 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite. With
     ///     a classifier, the cut-off is recorded now if there is none yet (P9).
     ///   - calendar: the calendar a suggested date is stored in (the detail's date picker uses the current one).
+    ///   - matchingBudget: the matching rules' regex budget per rule and document (#10).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
         stage: any ProcessingStage = DocumentStage(), requeue: ProcessingRequeue? = nil,
         classifier: (any DocumentClassifying)? = nil, classificationFailures: ProcessingFailures? = nil,
         classificationSettings: ClassificationSettings? = nil, calendar: Calendar = .current,
+        matchingBudget: MatchingBudget = .production,
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
         stallTimeout: Duration = ProcessingQueue.stallTimeout,
         watchdogSleep: @escaping Sleep = { try await Task.sleep(for: $0, clock: .suspending) },
@@ -302,6 +307,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
         let settings = classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
         self.classificationSettings = settings
         self.calendar = calendar
+        self.matchingBudget = matchingBudget
         stages = StageTracker(onWait: hooks.waitsForStage)
         // P9: the cut-off is recorded when the queue is set up, before its first run: the app creates the queue at
         // launch before anything of that launch is imported (the share queue, a drop), so such a document is
@@ -491,7 +497,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             let thumbnail = backfills ? result.thumbnail : nil
             var inserted = false
             // The rules, outside the write's window (N6); `nil` without a text or without rule records (N4).
-            let rules = text.flatMap { Self.textWriteRules(on: $0.1.text, in: container) }
+            let rules = text.flatMap { Self.textWriteRules(on: $0.1.text, in: container, budget: matchingBudget) }
             if rules != nil { hooks.afterRules?() }
             var ruleFill = RuleFill()
             let outcome = write(
@@ -833,7 +839,9 @@ extension ProcessingQueue {
     /// the read, evaluated on `text` (the text the write stores), outside the write's window. `nil` when there is no
     /// rule record: the write then fetches no metadata (review N4, `ProcessingSQLTests`). A read that fails is logged,
     /// and the write goes on without rules; "Apply Matching Rules" applies them later.
-    static func textWriteRules(on text: String, in container: ModelContainer) -> TextWriteRules? {
+    static func textWriteRules(
+        on text: String, in container: ModelContainer, budget: MatchingBudget = .production
+    ) -> TextWriteRules? {
         let rules: [MatchingRule]
         do {
             rules = try MatchingStore.readRules(in: container)
@@ -842,8 +850,8 @@ extension ProcessingQueue {
             return nil
         }
         guard !rules.isEmpty else { return nil }
-        let outcome = MatchingRules.evaluate(text: text, rules: rules, budget: .production)
-        return TextWriteRules(rules: rules, outcome: outcome, text: text, budget: .production)
+        let outcome = MatchingRules.evaluate(text: text, rules: rules, budget: budget)
+        return TextWriteRules(rules: rules, outcome: outcome, text: text, budget: budget)
     }
 
     /// The document's PDF, in a context of its own that ends with the load: the one blob read of a run.

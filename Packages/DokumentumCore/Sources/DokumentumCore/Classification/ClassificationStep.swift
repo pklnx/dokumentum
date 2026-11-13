@@ -120,7 +120,7 @@ extension ProcessingQueue {
         }
         let outcome = Self.writeClassification(
             id, expecting: held, suggestion: checked, text: input.extractedText, now: now(), calendar: calendar,
-            in: container, beforeCheck: hooks.beforeCheck)
+            budget: matchingBudget, in: container, beforeCheck: hooks.beforeCheck)
         switch outcome {
         case .saved:
             forget(id)
@@ -421,7 +421,8 @@ extension ProcessingQueue {
     ///    nothing.
     static func writeClassification(
         _ instanceID: UUID, expecting held: Held, suggestion: CheckedSuggestion, text: String, now: Date,
-        calendar: Calendar, in container: ModelContainer, beforeCheck: (@Sendable (Write) throws -> Void)?
+        calendar: Calendar, budget: MatchingBudget = .production, in container: ModelContainer,
+        beforeCheck: (@Sendable (Write) throws -> Void)?
     ) -> WriteOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -444,7 +445,8 @@ extension ProcessingQueue {
                 related[RowKey(entity: .tag, instanceID: tag.instanceID)] = RowState.capture(tag)
             }
             // T13: only needed when there are tags to add to.
-            let hasUserTags = !tags.isEmpty && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: text))
+            let hasUserTags =
+                !tags.isEmpty && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: text, budget: budget))
             let fields = ClassificationFields(
                 title: document.title, createdAt: document.createdAt, modifiedAt: document.modifiedAt,
                 documentDate: document.documentDate, hasCorrespondent: document.correspondent != nil,
@@ -524,10 +526,10 @@ extension ProcessingQueue {
     /// `text`. Only these tags' rules are evaluated (review N1), so an edit of an unrelated rule never makes the
     /// write back off. A tag without a rule, on a tombstone (N2), with an invalid rule or one that timed out (the
     /// outcome leaves it out) is a user tag.
-    static func hasUserTag(_ tags: [Tag], text: String) -> Bool {
+    static func hasUserTag(_ tags: [Tag], text: String, budget: MatchingBudget = .production) -> Bool {
         let rules = tags.compactMap(MatchingStore.liveRule)
         guard !rules.isEmpty else { return true }
-        let ruleTags = MatchingRules.evaluate(text: text, rules: rules, budget: .production).tags
+        let ruleTags = MatchingRules.evaluate(text: text, rules: rules, budget: budget).tags
         return tags.contains { !ruleTags.contains($0.instanceID) }
     }
 }

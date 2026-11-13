@@ -115,6 +115,7 @@ public struct MatchingRuleEditor {
 
 /// A record with a matching rule: a tag, correspondent or document type.
 protocol MatchingRuleRecord: AnyObject {
+    var instanceID: UUID { get }
     var isLive: Bool { get }
     var matchMode: MatchMode { get set }
     var matchPattern: String { get set }

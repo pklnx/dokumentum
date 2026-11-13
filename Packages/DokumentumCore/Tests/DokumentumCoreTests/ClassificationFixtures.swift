@@ -91,7 +91,7 @@ extension ProcessingStore {
         ProcessingQueue(
             container: container, deviceID: device, failures: failures ?? self.failures(device), stage: stage,
             classifier: classifier, classificationFailures: classificationFailures, calendar: testCalendar,
-            watchdogSleep: watchdog.sleep, now: clock.function, hooks: hooks)
+            matchingBudget: testMatchingBudget, watchdogSleep: watchdog.sleep, now: clock.function, hooks: hooks)
     }
 
     /// A document as the text step leaves it for classification: `classify`, `text` in its text record, claimed by
