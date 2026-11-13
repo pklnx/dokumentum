@@ -65,8 +65,37 @@ live in `Packages/`.
 - **Capabilities change by editing the entitlements files in `Config/`**, which the script pins key by
   key, so an unreviewed capability fails `lint`. Do not use Xcode's Signing & Capabilities editor; strip
   whatever it writes into the `.pbxproj`. The settings of Xcode's "App Sandbox & Hardened Runtime"
-  category inject entitlements past these files, so the script rejects them all, except
-  `ENABLE_HARDENED_RUNTIME = NO` until step 8.
+  category inject entitlements past these files, so the script rejects them all, except hardened runtime
+  in exactly one form (below).
+- **Hardened runtime is on for the app target only** (step 8, maintainer decision P1 on #9), with no
+  exception entitlements: `ENABLE_HARDENED_RUNTIME = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))`, `YES`
+  for `Dokumentum` and `NO` for `DokumentumShare` (iOS only, where it does nothing), `DokumentumTests` and
+  `DokumentumUITests`. A hardened UI test runner refuses to load the ad hoc test bundle ("mapping process
+  and mapped file (non-platform) have different Team IDs"), so a project-wide `YES` breaks macOS UISmoke on
+  the unsigned path. An ad hoc Debug build drops the flag from the app by itself (Xcode notes "Disabling
+  hardened runtime with ad-hoc codesigning"), so unsigned test runs behave as before and
+  `Config/Unsigned.xcconfig` does not touch it. An unsigned Release build keeps it (`codesign -dv` shows
+  `flags=0x10002(adhoc,runtime)`), and so does the signed Mac app (`runtime`). `check-project.py`
+  accepts only that line, each `DOKUMENTUM_HARDENED_RUNTIME_*` as an unconditioned `YES` or `NO`, and pins
+  what each target resolves to.
+- **Info.plist keys only the app has** never come from a build setting: an `INFOPLIST_KEY_*` setting writes
+  its key into every target's generated Info.plist, also where it resolves empty (measured on #182: the
+  extension then got an empty `LSApplicationCategoryType`, `ITSAppUsesNonExemptEncryption = false` and an
+  empty orientation list). They are in the app's files: `Config/Info-iOS.plist` holds the iPhone orientations
+  and, as `Config/Info-macOS.plist` does for the Mac app, the App Store keys `ITSAppUsesNonExemptEncryption =
+  NO` (P6 on #9: no encryption of its own) and `LSApplicationCategoryType = public.app-category.productivity`
+  (P7; a Mac upload needs it). The scene manifest and the launch screen stay generated, through a variable only
+  the app sets (a `_Generation` setting that resolves empty adds no key). The share extension and the test
+  bundles carry none of these keys; `check-project.py` pins the files and the per-target values.
+- **Privacy manifests** (`Dokumentum/PrivacyInfo.xcprivacy`, `DokumentumShare/PrivacyInfo.xcprivacy`, P5 on
+  #9): no tracking, no tracking domains, no collected data. The app declares UserDefaults (`CA92.1`: its own
+  per-device settings) and file timestamps (`C617.1`: the share queue in the app group container); the
+  extension declares file timestamps (`C617.1`) only. `scripts/check-privacy-manifest.py` searches the Swift
+  sources each target ships (its folder and the library sources of the packages it links) for Apple's
+  required-reason APIs and fails on a category used but not declared, or declared but not used. Apple
+  requires the declarations on iOS; the same manifest ships in the Mac app's `Contents/Resources`, where
+  it is informational. A new use of such an API needs its category and an approved reason in the manifest
+  of every target that ships the code.
 - **The Mac app reads files the user picks** through `com.apple.security.files.user-selected.read-only`
   (an App Sandbox key, not an App ID capability): the open panel and ⌘O need it, and the import only
   reads. A drop needs no key when the app receives it as a file (`FileRepresentation`, a copy); a
@@ -1183,7 +1212,7 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 
 | Check | Where | What it does |
 |---|---|---|
-| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
+| `lint` | GitHub Actions, `checks.yml` | Python only. Runs the self-tests of the check scripts, validates `.github/labels.json` (`scripts/check-labels.py`) and the project's invariants (`scripts/check-project.py`, also: only the classifier imports `FoundationModels`), keeps the privacy manifests matched to the required-reason APIs the shipped code uses (`scripts/check-privacy-manifest.py`), flags tests that wait for time (`scripts/check-test-waits.py`), checks the logging rules (`scripts/check-logging.py`) and that the schema snapshots are additive and meet the CloudKit rules (`scripts/check-schema-snapshots.py --base`, with the full history checked out). |
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
@@ -1199,6 +1228,8 @@ python3 scripts/check-labels.py --self-test
 python3 scripts/check-labels.py
 python3 scripts/check-project.py --self-test
 python3 scripts/check-project.py
+python3 scripts/check-privacy-manifest.py --self-test
+python3 scripts/check-privacy-manifest.py
 python3 scripts/check-localization.py --self-test
 python3 scripts/check-localization.py --catalog
 python3 scripts/check-test-waits.py --self-test

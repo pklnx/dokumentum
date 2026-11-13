@@ -49,7 +49,7 @@ other people, a server, a web UI, e-mail import, Windows/Android.
 | iCloud container | `iCloud.space.pklnx.Dokumentum` (new; the old container stays untouched) |
 | App group | `group.space.pklnx.dokumentum` (iOS app and share extension) |
 | Team | `88GY2V9C2A` (committed in `Config/Project.xcconfig`; automatic signing on the maintainer's machine; agents' local builds and the CI test jobs (GitHub Actions, formerly Xcode Cloud) build macOS unsigned, section 4) |
-| Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; user-selected files, read only; no app group, no network. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key |
+| Entitlements | iOS app: push, iCloud (CloudKit, the container above), the app group. Mac app: push, iCloud, App Sandbox; user-selected files, read only; no app group, no network. Share extension: the app group. The files are `Config/*.entitlements`; `scripts/check-project.py` pins them key by key. Hardened runtime: the app target only, with no exception entitlements (maintainer decision P1 on #9, 2026-11-13); the share extension and the test targets stay off |
 | Languages | English source strings, German translation (String Catalogs), as in the old app |
 | Device classes | iPhone (compact) and Mac (regular); no iPad layout, no size-class branches beyond these two |
 
@@ -296,7 +296,7 @@ M ≈ 2-3 PRs, L ≈ 4+ PRs.
 | 5 | OCR and text layer | Vision OCR (de/en), text from existing PDFs, invisible text layer, thumbnails, page count, resume after quit | M |
 | 6 | Search | Index and query of 3.5, search field in the library, filter by tag/correspondent/type/inbox | M |
 | 7 | On-device classification | Foundation Models suggest title, correspondent, type, tags and date; suggestions are applied only to empty fields; a switch in settings; unavailable without Apple Intelligence, with the reason shown | M |
-| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of use on Development, with synthetic documents only: maintainer decision 2026-11-02) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, the hardened-runtime decision, a check list on both devices. Step 8 decides hardened runtime: `ENABLE_HARDENED_RUNTIME` stays `NO` until then (`Config/Project.xcconfig`), and `scripts/check-project.py` allows only that value, so the decision changes that rule too | S |
+| 8 | v1 on TestFlight | App icon and colours from `pklnx/design-system`, a two-device sync soak test (a week of use on Development, with synthetic documents only: maintainer decision 2026-11-02) before the CloudKit schema goes to Production (maintainer; it freezes the v1 schema), TestFlight pipeline, privacy manifest, the hardened-runtime decision, a check list on both devices. Hardened runtime is decided (P1 on #9): on for the app target only, through one variable per target in `Config/Project.xcconfig`, which `scripts/check-project.py` pins; privacy manifests for the app and the share extension, kept matched to the code by `scripts/check-privacy-manifest.py` (#182, part 1 of #9) | S |
 
 Order: 0 → 1 → 2 (can start once the model is merged) → 3 → 4 and 5 →
 6 and 7 in parallel → 8.
