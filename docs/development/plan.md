@@ -61,7 +61,7 @@ Measured toolchains (`sw_vers`, `xcodebuild -version`, `xcodebuild -showsdks`):
 |---|---|---|---|---|
 | MacBook Air, the maintainer's signing Mac (2026-11-11) | 27.2.1 (26B131) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | none installed |
 | MacBook Pro, returned to Apple (2026-11-07) | 27.2 (26B7124) | 27.2 (27B52), Swift 6.4.2 | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), iOS 27.2 |
-| GitHub Actions runner, image `xcode-27-arm64` 20261104.0337 (2026-11-12; Xcode selected by `DEVELOPER_DIR`) | 27.0.1 | 27.2 (27B52) (the image's default is 27.1) | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), 27.1, 27.2 |
+| GitHub Actions runner, image `xcode-27-arm64` 20261104.0337.1 (2026-11-12; Xcode selected by `DEVELOPER_DIR`) | 27.0.1 | 27.2 (27B52) (the image's default is 27.1) | iOS 27.2, iOS Simulator 27.2, macOS 27.2 | iOS 27.0 (has the iPhone 18 Pro), 27.1, 27.2 (`simctl list runtimes`, probe run 43291274218) |
 | Xcode Cloud (2026-11-07) | not read | 27.2, build not read | not read | not recorded |
 
 The Xcode Cloud row is an inference, not a reading of the log: `ci_post_clone.sh`

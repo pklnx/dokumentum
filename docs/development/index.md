@@ -1172,8 +1172,10 @@ text and `localizedDescription` are `.private`. App code never prints, and a cra
 | `localization` | GitHub Actions, `checks.yml` | `scripts/check-localization.py --catalog`: every entry of `Dokumentum/Localizable.xcstrings`, of the share extension's `DokumentumShare/Localizable.xcstrings` and of `Dokumentum/InfoPlist.xcstrings` (the camera permission text, #5) has a finished German translation (a plural `one` and `other`), and none is stale. The build mode skips `InfoPlist.xcstrings`: it has no `.stringsdata`. |
 | `kit-linux` | GitHub Actions, `checks.yml` | The only job with the Swift toolchain (`.github/actions/install-swift`, pinned with a SHA-256, one download per run): `swift format lint --strict` with the committed `.swift-format`, then the `DokumentumKit` tests, which include `DokumentumTestSupportTests`. |
 | `secret-scan` | GitHub Actions, `secrets.yml` | Installs the pinned gitleaks, runs the scan's self-test (`scripts/secret-scan-test.sh`), then scans the commits the PR adds (`scripts/secret-scan-range.sh` prints the range). |
-| `app-ios` | GitHub Actions, `app.yml` | Since 2026-11-12 the PR check for build and app tests (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. |
-| `app-macos` | GitHub Actions, `app.yml` | The same on macOS. |
+| `app-ios` | GitHub Actions, `app.yml` | Required. The PR check for build and app tests since 2026-11-12 (see "GitHub Actions macOS"): the `Dokumentum` scheme built unsigned, test plan `Default` on the iPhone 18 Pro, iOS 27.0 simulator. A pull request that changes only docs and process files skips it and passes with a note in the job summary. |
+| `app-macos` | GitHub Actions, `app.yml` | Required. The same on macOS. |
+| `scope` | GitHub Actions, `app.yml` | Runs `scripts/app-scope.py` and its self-test; decides what `app-ios` and `app-macos` do. Not required. |
+| `release-ios`, `release-macos` | GitHub Actions, `release.yml` | Started by hand (`workflow_dispatch`) before a TestFlight build: the full `Default` plan and the `UISmoke` plan on iOS and on macOS. A build goes out only after a green run at the release commit (checklist in #9). |
 
 Run the Python checks from the repository root:
 
@@ -1200,19 +1202,44 @@ strings of the iOS-only extension, so they are checked only once its target was 
 ### GitHub Actions macOS
 
 Since 2026-11-12 `.github/workflows/app.yml` is the PR check for build and app tests. It runs on pull
-requests and on pushes to `main`, with no `paths` filter, and has two jobs, `app-ios` and `app-macos`
-(the required checks). Each selects the Xcode in `.xcode-version` through `DEVELOPER_DIR`, runs
-`ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the test plan
-`Default` (`build-for-testing`), runs the localisation check on the derived data, and then runs the tests
-(`test-without-building`). The UISmoke plan is not part of it. Builds are unsigned
-(`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the destinations are the iPhone 18 Pro on
-iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so `TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3`
-is set. The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
+requests, on pushes to `main` and nightly (02:17 UTC), with no `paths` filter, and has two required jobs,
+`app-ios` and `app-macos`, which always run and always report. A `scope` job first runs `scripts/app-scope.py`
+(with a self-test, like the `check-*.py` scripts) on the files the pull request changes against its merge base:
+
+| Changed files | `app-ios` / `app-macos` |
+|---|---|
+| Only docs and process files: `docs/**`, `*.md` anywhere, `.github/ISSUE_TEMPLATE/**`, `.github/labels.json` | Skipped: no build, no tests, a note in the job summary. The jobs run on a Linux runner and pass. |
+| Anything else, any file the script does not know, no files, or a diff that cannot be read | The full `Default` plan. If in doubt, the full plan runs. |
+
+If the `scope` job itself fails (checkout, runner, a script error), `app-ios` and `app-macos` still run, as they are
+not skipped (`if: !cancelled()`; a skipped job would satisfy the ruleset), and an empty scope is not `docs`, so they run
+the full plan.
+
+Every push to `main` and the nightly run always run the full plan; the coordinator reads failures on `main`.
+The jobs use the composite action `.github/actions/app-test`. It selects the Xcode in `.xcode-version` through
+`DEVELOPER_DIR`, runs `ci_scripts/ci_post_clone.sh` as the toolchain check, builds the `Dokumentum` scheme with the
+test plans (`build-for-testing`), runs the localisation check on the derived data, and then runs the tests
+(`test-without-building`). Builds are unsigned (`XCODE_XCCONFIG_FILE=Config/Unsigned.xcconfig`, as for agents), the
+destinations are the iPhone 18 Pro on iOS 27.0 and `platform=macOS`, and the runners are small (3 CPUs), so
+`TEST_RUNNER_DOKUMENTUM_TEST_TIMEOUT_SCALE=3` is set. The tests run in parallel, as the test plan sets. Until #164 they ran serially: in parallel mode the
 `DokumentumCoreTests` process froze on these runners (no output, no time-limit failure), because test hooks blocked
-all three threads of the cooperative pool ("Waiting in tests"). No per-test time allowance is set (it is not verified that it bounds Swift Testing
-tests, and a frozen pool stops `.timeLimit` too), so the bound of a stuck run is the job timeout of 30 minutes. A
-failed or cancelled run uploads its `.xcresult` bundles as an artifact (kept 7 days). The workflow needs no secrets and only
-`contents: read`. The runner image `xcode-27` is a preview image whose default Xcode is newer than the pin.
+all three threads of the cooperative pool ("Waiting in tests"). No per-test time allowance is set (it
+is not verified that it bounds Swift Testing tests, and a frozen pool stops `.timeLimit` too), so the bound of a
+stuck run is the job timeout of 30 minutes. A failed or cancelled run uploads its `.xcresult` bundles as an
+artifact (kept 7 days). The workflows need no secrets and only `contents: read`. The runner image `xcode-27` is a
+preview image whose default Xcode is newer than the pin.
+
+**Before a TestFlight build**, start `.github/workflows/release.yml` (`workflow_dispatch`) on the release commit: it
+runs the full `Default` plan and the `UISmoke` plan on iOS and on macOS (`release-ios`, `release-macos`).
+
+**UISmoke on the hosted runners does not pass yet** (first runs 2026-11-12, run 43314705135, attempts 1 and 2; the
+`Default` plan passed on macOS both times). On macOS, 12 of 13 UI tests pass and `ScanSmokeTests.testScanAndCleanupLandInInbox`
+fails both times with the accessibility audit's "Contrast failed for Inbox empty" (the placeholder behind the cleanup
+sheet; the runner is a virtual machine). On iOS, attempt 1 had 10 passed and 2 failed with timeouts that look like load
+on the 3-CPU runner (`LibrarySmokeTests.testSidebarFiltersAndOpensAPDF`: "Timed out while evaluating UI query";
+`ScanSmokeTests.testScanAndCleanupLandInInbox`: "Audit failed to complete in time"); the UISmoke plan took 19 minutes
+there. The tests are not weakened; the workflow stays as the intended gate, and until these are understood a red
+`release-*` run is expected. Follow-up issue: #173.
 
 ### Xcode Cloud
 

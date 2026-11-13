@@ -1,0 +1,43 @@
+name: Release
+
+# Run by hand before a TestFlight build (docs/development/index.md, "GitHub Actions macOS"; checklist in #9):
+# the full Default plan plus the UISmoke plan on iOS and macOS. A build goes out only after a green run at the
+# release commit. Start it on the release commit's branch or tag: Actions, Release, Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release-ios:
+    name: release-ios
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/app-test
+        with:
+          destination: 'platform=iOS Simulator,name=iPhone 18 Pro,OS=27.0'
+          plans: Default UISmoke
+          artifact: release-ios-xcresult
+
+  release-macos:
+    name: release-macos
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/app-test
+        with:
+          destination: 'platform=macOS'
+          plans: Default UISmoke
+          artifact: release-macos-xcresult
