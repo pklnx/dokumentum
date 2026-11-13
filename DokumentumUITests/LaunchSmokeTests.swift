@@ -53,14 +53,19 @@ final class LaunchSmokeTests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [detected], timeout: UITestApp.timeout(120)), .completed,
             "no detected correspondent: \(correspondent.label) \(String(describing: correspondent.value))")
-        // 13.11.2026 in any of the app's date formats: the day, the month (as a number or a name) and the year.
+        // 13.11.2026: the Mac's date picker gives its value as a date, the iPhone's as text in the app's format (the
+        // day, the month as a number or a name, the year).
         let date = ui.element("documentInfo.date")
-        let shown =
-            [date.label, date.value as? String ?? ""].joined(separator: " ")
-            + date.descendants(matching: .any).allElementsBoundByIndex.map {
+        XCTAssertTrue(date.waitForExistence(timeout: 10), "no date")
+        if let value = date.value as? Date {
+            let day = Calendar.current.dateComponents([.year, .month, .day], from: value)
+            XCTAssertEqual(day, DateComponents(year: 2026, month: 11, day: 13), "not the detected date: \(value)")
+        } else {
+            let shown = ([date] + date.descendants(matching: .any).allElementsBoundByIndex).map {
                 [$0.label, $0.value as? String ?? ""].joined(separator: " ")
             }.joined(separator: " ")
-        XCTAssertTrue(shown.contains("13") && shown.contains("2026"), "not the detected date: \(shown)")
+            XCTAssertTrue(shown.contains("13") && shown.contains("2026"), "not the detected date: \(shown)")
+        }
         ui.attachWindowScreenshot("2-detected-sender-and-date", to: self)
     }
 
