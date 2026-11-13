@@ -50,22 +50,31 @@ DOKUMENTUM_BUNDLE_ID_SUFFIX_DokumentumTests = .Tests
 DOKUMENTUM_BUNDLE_ID_SUFFIX_DokumentumUITests = .UITests
 PRODUCT_BUNDLE_IDENTIFIER = space.pklnx.Dokumentum$(DOKUMENTUM_BUNDLE_ID_SUFFIX_$(TARGET_NAME))
 
-// Info.plist: generated from the build settings. Only what has no setting comes from a file, merged
-// into the generated one: the app's background mode for CloudKit pushes (iOS only, none on macOS) and
-// the extension's NSExtension. These files live in Config/: a plist inside the synchronized
-// DokumentumShare/ folder fails with "Multiple commands produce". The iOS app's camera usage text
-// (#5, part 2) is in Config/Info-iOS.plist too, not an INFOPLIST_KEY_ setting: such a setting reaches
-// every target's Info.plist, also where it resolves empty (the extension then had an empty
-// NSCameraUsageDescription). Its German is in Dokumentum/InfoPlist.xcstrings.
+// Info.plist: generated from the build settings. What only the app may have comes from a file, merged into
+// the generated one, because an INFOPLIST_KEY_ setting reaches every target's Info.plist, also where it resolves
+// empty (measured: the extension got an empty NSCameraUsageDescription, an empty LSApplicationCategoryType, an
+// ITSAppUsesNonExemptEncryption of false and an empty orientation list; the Mac app got that empty list from the
+// iPhone-only line). The files hold:
+// - Config/Info-iOS.plist: the background modes and task identifiers, the camera usage text (#5, part 2; its German
+//   is in Dokumentum/InfoPlist.xcstrings), the iPhone orientations, and the App Store keys of step 8: export
+//   compliance (P6 on #9: no encryption of its own; CloudKit's TLS is the system's, SHA-256 for duplicates is
+//   hashing) and the category (P7 on #9);
+// - Config/Info-macOS.plist: the same two App Store keys (a Mac upload needs LSApplicationCategoryType);
+// - Config/DokumentumShare-Info.plist: the extension's NSExtension.
+// They live in Config/: a plist inside a synchronized folder fails with "Multiple commands produce". The settings
+// below are the only INFOPLIST_KEY_ settings this file may have (check-project.py allows no other), and none is
+// app-only: CFBundleDisplayName goes into every target on purpose (the share sheet shows the extension under that
+// name), and the scene manifest and the launch screen are generated for the app only, through a variable only the
+// app sets (a _Generation setting that resolves empty adds no key).
 GENERATE_INFOPLIST_FILE = YES
 DOKUMENTUM_INFOPLIST_Dokumentum = Config/Info-iOS.plist
-DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] =
+DOKUMENTUM_INFOPLIST_Dokumentum[sdk=macosx*] = Config/Info-macOS.plist
 DOKUMENTUM_INFOPLIST_DokumentumShare = Config/DokumentumShare-Info.plist
 INFOPLIST_FILE = $(DOKUMENTUM_INFOPLIST_$(TARGET_NAME))
 INFOPLIST_KEY_CFBundleDisplayName = Dokumentum
-INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = YES
-INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
-INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphone*] = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+DOKUMENTUM_IOS_APP_SCENES_Dokumentum = YES
+INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
+INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = $(DOKUMENTUM_IOS_APP_SCENES_$(TARGET_NAME))
 
 // Assets and previews. The AppIcon set stays empty until step 8.
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
@@ -100,11 +109,20 @@ DOKUMENTUM_ENTITLEMENTS_Dokumentum[sdk=macosx*] = Config/Dokumentum-macOS.entitl
 DOKUMENTUM_ENTITLEMENTS_DokumentumShare = Config/DokumentumShare.entitlements
 CODE_SIGN_ENTITLEMENTS = $(DOKUMENTUM_ENTITLEMENTS_$(TARGET_NAME))
 
-// Hardened runtime stays off until step 8 decides it (plan.md section 5): nothing before distribution
-// needs it. The App Sandbox comes from the macOS entitlements file, not from ENABLE_APP_SANDBOX: the
-// settings of Xcode's "App Sandbox & Hardened Runtime" category inject entitlements past that file, so
-// check-project.py rejects all of them, except exactly this line.
-ENABLE_HARDENED_RUNTIME = NO
+// Hardened runtime (step 8, P1 on #9): on for the shipped app only, with no exception entitlements. The share
+// extension (iOS only, where the setting does nothing) and the test targets stay off: a hardened UI test runner
+// refuses to load the ad hoc test bundle ("different Team IDs", library validation), so macOS UISmoke would fail on
+// the unsigned path. An ad hoc Debug build drops the flag from the app by itself ("Disabling hardened runtime with
+// ad-hoc codesigning"), so the tests run as before; an unsigned Release build keeps it (codesign -dv: adhoc,runtime),
+// as the signed Mac app does. Config/Unsigned.xcconfig stays as it is. One explicit variable per target, as for the
+// platforms. The App Sandbox comes from the macOS entitlements file, not from
+// ENABLE_APP_SANDBOX: the settings of Xcode's "App Sandbox & Hardened Runtime" category inject entitlements past
+// that file, so check-project.py rejects all of them, except exactly this form.
+DOKUMENTUM_HARDENED_RUNTIME_Dokumentum = YES
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumShare = NO
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumTests = NO
+DOKUMENTUM_HARDENED_RUNTIME_DokumentumUITests = NO
+ENABLE_HARDENED_RUNTIME = $(DOKUMENTUM_HARDENED_RUNTIME_$(TARGET_NAME))
 
 // Optional local overrides. Keep this include last, so it overrides everything above.
 #include? "Local.xcconfig"

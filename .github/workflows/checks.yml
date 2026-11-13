@@ -29,6 +29,7 @@ jobs:
         run: |
           python3 scripts/check-labels.py --self-test
           python3 scripts/check-project.py --self-test
+          python3 scripts/check-privacy-manifest.py --self-test
           python3 scripts/check-localization.py --self-test
           python3 scripts/check-test-waits.py --self-test
           python3 scripts/check-logging.py --self-test
@@ -39,6 +40,8 @@ jobs:
         run: python3 scripts/check-labels.py
       - name: Xcode project
         run: python3 scripts/check-project.py
+      - name: Privacy manifests
+        run: python3 scripts/check-privacy-manifest.py
       - name: Test waits
         run: python3 scripts/check-test-waits.py
       - name: Logging

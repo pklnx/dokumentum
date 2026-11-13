@@ -7,12 +7,22 @@
 		<string>space.pklnx.Dokumentum.continued.*</string>
 		<string>space.pklnx.Dokumentum.backgroundProcessing</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Dokumentum uses the camera to scan documents. Scans are stored only in your archive on your devices and in your iCloud.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
 		<string>processing</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~iphone</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>
