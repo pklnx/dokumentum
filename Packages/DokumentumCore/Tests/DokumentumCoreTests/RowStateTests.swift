@@ -55,4 +55,44 @@ struct RowStateTests {
             #expect(Self.captured(name).isDisjoint(with: excluded), "\(name)")
         }
     }
+
+    /// The rule fields (#10) are captured with their values, so a rule edited in a background writer's window shows
+    /// as a changed row: for a tag, a correspondent and a document type, the captured row holds the record's mode
+    /// and pattern, and changing either changes the row.
+    @Test func theRuleFieldsAreCapturedWithTheirValues() throws {
+        let tag = DokumentumCore.Tag(name: "Strom")
+        (tag.matchModeRaw, tag.matchPattern) = ("any", "Strom Stadtwerke")
+        let correspondent = Correspondent(name: "Stadtwerke")
+        (correspondent.matchModeRaw, correspondent.matchPattern) = ("exact", "Stadtwerke München")
+        let type = DocumentType(name: "Rechnung")
+        (type.matchModeRaw, type.matchPattern) = ("regex", #"IBAN\s*DE\d{20}"#)
+
+        func tagRule() throws -> [String] {
+            guard case .tag(let row) = RowState.capture(tag) else { throw CaptureKindMismatch() }
+            return [row.matchModeRaw, row.matchPattern]
+        }
+        func metadataRule(_ state: RowState) throws -> [String] {
+            guard case .metadata(let row) = state else { throw CaptureKindMismatch() }
+            return [row.matchModeRaw, row.matchPattern]
+        }
+        #expect(try tagRule() == ["any", "Strom Stadtwerke"])
+        #expect(try metadataRule(RowState.capture(correspondent)) == ["exact", "Stadtwerke München"])
+        #expect(try metadataRule(RowState.capture(type)) == ["regex", #"IBAN\s*DE\d{20}"#])
+
+        // An edit of either field changes the captured row.
+        let tagBefore = RowState.capture(tag)
+        tag.matchPattern = "Strom"
+        #expect(RowState.capture(tag) != tagBefore)
+        tag.matchModeRaw = "all"
+        #expect(try tagRule() == ["all", "Strom"])
+        let correspondentBefore = RowState.capture(correspondent)
+        correspondent.matchPattern = "Stadtwerke"
+        #expect(RowState.capture(correspondent) != correspondentBefore)
+        let typeBefore = RowState.capture(type)
+        type.matchModeRaw = ""
+        #expect(RowState.capture(type) != typeBefore)
+        #expect(try metadataRule(RowState.capture(type)) == ["", #"IBAN\s*DE\d{20}"#])
+    }
+
+    private struct CaptureKindMismatch: Error {}
 }

@@ -200,6 +200,18 @@ struct StoreMigrationTests {
         let written = try Self.writeEveryAttribute(at: url, model: v1)
         let records = Set(written.map { $0.split(separator: " ").prefix(2).joined(separator: " ") })
         #expect(records.count == 8, "one record of each entity and a second tag: \(records.sorted())")
+        // Every relationship of V1 links something in the written store, so a relationship that a later version's
+        // `writeEveryAttribute` forgets to set fails here instead of comparing equal as empty on both sides.
+        let linked = Set(
+            written.compactMap { line -> String? in
+                let parts = line.split(separator: " ")
+                guard parts.count == 3, let arrow = parts[2].range(of: "->"), arrow.upperBound != parts[2].endIndex
+                else { return nil }
+                return "\(parts[0]).\(parts[2][..<arrow.lowerBound])"
+            })
+        let relationships = Set(
+            v1.entities.flatMap { entity in entity.relationshipsByName.keys.map { "\(entity.name ?? "?").\($0)" } })
+        #expect(linked == relationships, "relationships left empty: \(relationships.subtracting(linked).sorted())")
 
         let container = try TestSupport.makeContainerOnDisk(at: url)
         let context = ModelContext(container)
@@ -338,7 +350,8 @@ struct StoreMigrationTests {
         return (kept.sorted(), added.sorted())
     }
 
-    /// A value other than the attribute's default, distinct per entity, attribute and record.
+    /// A value other than the attribute's default. Strings are distinct per entity, attribute and record; other
+    /// types need not be, because the test only needs values that differ from the defaults.
     static func value(for attribute: NSAttributeDescription, of entity: String, index: Int) throws -> Any {
         switch attribute.attributeType {
         case .stringAttributeType: return "\(entity).\(attribute.name) \(index) ü"

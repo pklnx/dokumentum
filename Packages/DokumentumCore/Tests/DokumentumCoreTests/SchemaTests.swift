@@ -150,6 +150,16 @@ struct SchemaTests {
         let versions = DokumentumMigrationPlan.schemas
         #expect(versions.map { $0.versionIdentifier } == [Schema.Version(1, 0, 0), Schema.Version(2, 0, 0)])
         #expect(DokumentumMigrationPlan.stages.count == versions.count - 1)
+        // Every stage is lightweight, from each version to the next (never custom: a custom stage would run on each
+        // device separately).
+        for (index, stage) in DokumentumMigrationPlan.stages.enumerated() {
+            guard case .lightweight(let from, let to) = stage else {
+                Issue.record("stage \(index + 1) is not lightweight")
+                continue
+            }
+            #expect(ObjectIdentifier(from) == ObjectIdentifier(versions[index]), "stage \(index + 1)")
+            #expect(ObjectIdentifier(to) == ObjectIdentifier(versions[index + 1]), "stage \(index + 1)")
+        }
         #expect(ObjectIdentifier(try #require(versions.last)) == ObjectIdentifier(DokumentumSchemaV2.self))
         #expect(ObjectIdentifier(DokumentumMigrationPlan.current) == ObjectIdentifier(DokumentumSchemaV2.self))
         #expect(ObjectIdentifier(Document.self) == ObjectIdentifier(DokumentumSchemaV2.Document.self))

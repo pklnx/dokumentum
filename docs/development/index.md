@@ -350,7 +350,8 @@ decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.m
    `schema-v<N-1>.txt`: only added lines. `scripts/check-cloudkit-schema.py` then compares an export with the new
    snapshot by default.
 5. Add a `StoreMigrationTests` case that writes a store with V(N-1) and opens it with V(N): `writeEveryAttribute`
-   sets every attribute and relationship of V(N-1) generically, and the case checks every value after the open.
+   sets every attribute of V(N-1) generically and the relationships it names (extend that list for a new
+   relationship; the case fails while one is left empty), and the case checks every value after the open.
 6. A change of an earlier version that is not in Production yet (release.md, M1, case C7) is made identically in
    every later version, so each stage stays lightweight.
 

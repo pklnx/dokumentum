@@ -319,8 +319,9 @@ first day). M3 itself still exports and compares again after the soak.
    - nothing of the latest version is missing, and nothing in the file is unknown.
 4. **If not clean, classify every problem first**, before any reset ("Classifying a failed comparison" below).
 5. [ ] **If clean:** CloudKit Console › Development › "Deploy Schema Changes…" to Production. **This cannot be
-   undone.** Post the date. Part 4 (#185) then lists every deployed version in `production-versions.txt` (`1` and
-   `2` once V2 is in the build: the migration test keeps a real V1 store, so V1 stays frozen too).
+   undone.** Post the date. Part 4 (#185) then lists every version up to the deployed one in
+   `production-versions.txt` (`1` and `2` once V2 is in the build: the migration test keeps a real V1 store, so V1
+   stays frozen too).
 6. **If a stray field or a wrong field type remains** (an extra record type or field, for example from an earlier
    draft or a branch run on a device, or a field of the snapshot with another type) and the maintainer decided on the reset: **do not
    deploy.** Instead:
