@@ -59,6 +59,7 @@
 		A10000000000000000000005 /* Dokumentum-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Dokumentum-macOS.entitlements"; sourceTree = "<group>"; };
 		A10000000000000000000006 /* DokumentumShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DokumentumShare.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000007 /* Info-iOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-iOS.plist"; sourceTree = "<group>"; };
+		A10000000000000000000009 /* Info-macOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-macOS.plist"; sourceTree = "<group>"; };
 		A10000000000000000000008 /* DokumentumShare-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "DokumentumShare-Info.plist"; sourceTree = "<group>"; };
 		B10000000000000000000001 /* DokumentumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000001 /* DokumentumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DokumentumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -134,6 +135,7 @@
 				A10000000000000000000005 /* Dokumentum-macOS.entitlements */,
 				A10000000000000000000006 /* DokumentumShare.entitlements */,
 				A10000000000000000000007 /* Info-iOS.plist */,
+				A10000000000000000000009 /* Info-macOS.plist */,
 				A10000000000000000000008 /* DokumentumShare-Info.plist */,
 			);
 			path = Config;
