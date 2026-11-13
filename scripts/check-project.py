@@ -15,7 +15,9 @@ diff. Python only, so it also runs on Linux (the `lint` check):
   for the extension and the test bundles, so their generated Info.plists do not carry them (#9, part 1).
 - The other keys only the app has are in its Info.plist files, never build settings (APP_ONLY_INFO_SETTINGS): an
   INFOPLIST_KEY_ setting writes its key into every target's Info.plist, also where it resolves empty (measured on
-  #182: an empty category, export compliance false and an empty orientation list in the extension). The iOS file
+  #182: an empty category, export compliance false and an empty orientation list in the extension).
+  CFBundleDisplayName is not app-only: every target carries it on purpose (the share sheet shows the extension
+  under that name), so it stays a project-wide setting. The iOS file
   holds the orientations and the App Store keys of step 8 (export compliance, P6 on #9; the category, P7), the Mac
   file (MAC_APP_INFO_CONTENT) exactly those two App Store keys.
 - The camera's usage text (NSCameraUsageDescription, #5, part 2) is in the iOS app's Config/Info-iOS.plist,
@@ -219,7 +221,8 @@ IOS_APP_INFO_CONTENT = {
 # The Mac app's whole Info.plist file: the App Store keys only.
 MAC_APP_INFO_CONTENT = dict(APP_STORE_INFO)
 # Keys only the app has, which therefore never come from a build setting: such a setting writes its key into every
-# target's generated Info.plist, also where it resolves empty (measured on #182).
+# target's generated Info.plist, also where it resolves empty (measured on #182). Not CFBundleDisplayName, which every
+# target carries on purpose.
 APP_ONLY_INFO_SETTINGS = {
     "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption",
     "INFOPLIST_KEY_LSApplicationCategoryType",

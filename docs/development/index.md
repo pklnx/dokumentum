@@ -78,14 +78,15 @@ live in `Packages/`.
   `flags=0x10002(adhoc,runtime)`), and so does the signed Mac app (`runtime`). `check-project.py`
   accepts only that line, each `DOKUMENTUM_HARDENED_RUNTIME_*` as an unconditioned `YES` or `NO`, and pins
   what each target resolves to.
-- **Info.plist keys only the app has** never come from a build setting: an `INFOPLIST_KEY_*` setting writes
+- **Info.plist keys only the app has** never come from a plain build setting: an `INFOPLIST_KEY_*` setting writes
   its key into every target's generated Info.plist, also where it resolves empty (measured on #182: the
   extension then got an empty `LSApplicationCategoryType`, `ITSAppUsesNonExemptEncryption = false` and an
   empty orientation list). They are in the app's files: `Config/Info-iOS.plist` holds the iPhone orientations
   and, as `Config/Info-macOS.plist` does for the Mac app, the App Store keys `ITSAppUsesNonExemptEncryption =
   NO` (P6 on #9: no encryption of its own) and `LSApplicationCategoryType = public.app-category.productivity`
   (P7; a Mac upload needs it). The scene manifest and the launch screen stay generated, through a variable only
-  the app sets (a `_Generation` setting that resolves empty adds no key). The share extension and the test
+  the app sets (a `_Generation` setting that resolves empty adds no key). `CFBundleDisplayName` is the one
+  project-wide key that every target carries on purpose: the share sheet shows the extension under that name. The share extension and the test
   bundles carry none of these keys; `check-project.py` pins the files and the per-target values.
 - **Privacy manifests** (`Dokumentum/PrivacyInfo.xcprivacy`, `DokumentumShare/PrivacyInfo.xcprivacy`, P5 on
   #9): no tracking, no tracking domains, no collected data. The app declares UserDefaults (`CA92.1`: its own
