@@ -152,7 +152,9 @@ struct StoreMigrationTests {
         let read = try Self.dump(ModelContext(reopened))
         #expect(read == written)
         #expect(written.count == 10)
-        #expect(written.filter { $0.contains(" mode=") && !$0.contains(" mode= pattern= ") }.count == 5)
+        // The five records with a rule hold both of its fields, so a rule field that is not stored fails here.
+        let rules = written.filter { $0.contains(" mode=") && !$0.contains(" mode= ") && !$0.contains(" pattern= ") }
+        #expect(rules.count == 5, "\(rules)")
         // The blobs went to external storage, so the round trip covered that path.
         let externalFolder = url.deletingLastPathComponent().appending(path: ".RoundTrip_SUPPORT/_EXTERNAL_DATA")
         let external = try FileManager.default.contentsOfDirectory(atPath: externalFolder.path)
@@ -187,6 +189,10 @@ struct StoreMigrationTests {
     /// V1 → V2 (#10, part 1a): a store written with V1's model, every attribute of every entity set to a value
     /// other than its default and every relationship set, opens with V2 through the migration plan. Every V1 value
     /// and link is kept, and the fields V2 adds read their defaults: the rule fields `""`, so no rule.
+    ///
+    /// SwiftData opens such a store even when V1 is missing from the plan: it then infers the same lightweight
+    /// migration (measured on #198; probe P-1 of #10's plan found the same for a model changed in place). So this
+    /// test checks what the open keeps, not that the stage is listed; `SchemaTests` pins the versions and stages.
     @Test func aV1StoreWithEveryFieldOpensWithV2() throws {
         SQLLog.enable()
         let url = try TestSupport.makeTemporaryDirectory().appending(path: "EveryField-V1.store")
