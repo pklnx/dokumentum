@@ -56,8 +56,9 @@ public enum ArchiveStore {
     /// The CloudKit container; named explicitly, never `.automatic`.
     public nonisolated static let cloudKitContainerIdentifier = "iCloud.space.pklnx.Dokumentum"
 
-    /// The current schema; every container opens through `DokumentumMigrationPlan`.
-    public nonisolated static var schema: Schema { Schema(versionedSchema: DokumentumSchemaV1.self) }
+    /// The current schema (`DokumentumMigrationPlan.current`); every container opens through
+    /// `DokumentumMigrationPlan`.
+    public nonisolated static var schema: Schema { Schema(versionedSchema: DokumentumMigrationPlan.current) }
 
     /// `<Application Support>/Dokumentum/Dokumentum.store`, in the app's own container (the sandbox
     /// container on macOS, the data container on iOS), never in the app group: the share extension never

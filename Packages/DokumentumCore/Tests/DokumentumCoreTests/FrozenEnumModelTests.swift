@@ -84,6 +84,63 @@ struct FrozenEnumModelTests {
         #expect(read.textSourceRaw == "braille")
     }
 
+    /// `MatchMode` on the three records that hold a rule (#10): a newer build's mode reads as `.unknown`, a real
+    /// mode is written, and setting `.unknown` or the mode a record already reads as writes nothing.
+    @Test func theMatchModeReadsWritesAndNeverWritesItsFallbackBack() {
+        let tag = DokumentumCore.Tag(name: "Strom")
+        let correspondent = Correspondent(name: "Stadtwerke")
+        let type = DocumentType(name: "Rechnung")
+        #expect([tag.matchMode, correspondent.matchMode, type.matchMode] == [.none, .none, .none])
+        tag.matchMode = .any
+        correspondent.matchMode = .exact
+        type.matchMode = .regex
+        #expect([tag.matchModeRaw, correspondent.matchModeRaw, type.matchModeRaw] == ["any", "exact", "regex"])
+        tag.matchMode = .all
+        type.matchMode = .none
+        #expect([tag.matchModeRaw, type.matchModeRaw] == ["all", ""])
+
+        (tag.matchModeRaw, correspondent.matchModeRaw, type.matchModeRaw) = ("fuzzy", "ANY", " regex")
+        #expect([tag.matchMode, correspondent.matchMode, type.matchMode] == [.unknown, .unknown, .unknown])
+        tag.matchMode = .unknown
+        correspondent.matchMode = correspondent.matchMode
+        type.matchMode = .unknown
+        #expect([tag.matchModeRaw, correspondent.matchModeRaw, type.matchModeRaw] == ["fuzzy", "ANY", " regex"])
+        // An unknown mode is replaced by a real one the user picks.
+        tag.matchMode = .exact
+        #expect(tag.matchModeRaw == "exact")
+    }
+
+    /// An unrelated edit, a save and a reopen keep a newer build's mode on each of the three records.
+    @Test func anUnknownMatchModeSurvivesAnEditAndAReopen() throws {
+        let url = try TestSupport.makeTemporaryDirectory().appending(path: "FrozenMatchMode.store")
+        do {
+            let context = ModelContext(try TestSupport.makeContainerOnDisk(at: url))
+            let tag = DokumentumCore.Tag(name: "Strom")
+            let correspondent = Correspondent(name: "Stadtwerke")
+            let type = DocumentType(name: "Rechnung")
+            context.insert(tag)
+            context.insert(correspondent)
+            context.insert(type)
+            (tag.matchModeRaw, correspondent.matchModeRaw, type.matchModeRaw) = ("fuzzy", "fuzzy", "fuzzy")
+            (tag.matchPattern, correspondent.matchPattern, type.matchPattern) = ("a", "b", "c")
+            try context.save()
+            tag.name = "Strom 2"
+            correspondent.name = "Stadtwerke 2"
+            type.name = "Rechnung 2"
+            tag.matchMode = tag.matchMode
+            correspondent.matchMode = .unknown
+            try context.save()
+        }
+        let context = ModelContext(try TestSupport.makeContainerOnDisk(at: url))
+        let tag = try #require(try context.fetch(FetchDescriptor<DokumentumCore.Tag>()).first)
+        let correspondent = try #require(try context.fetch(FetchDescriptor<Correspondent>()).first)
+        let type = try #require(try context.fetch(FetchDescriptor<DocumentType>()).first)
+        #expect([tag.name, correspondent.name, type.name] == ["Strom 2", "Stadtwerke 2", "Rechnung 2"])
+        #expect([tag.matchModeRaw, correspondent.matchModeRaw, type.matchModeRaw] == ["fuzzy", "fuzzy", "fuzzy"])
+        #expect([tag.matchPattern, correspondent.matchPattern, type.matchPattern] == ["a", "b", "c"])
+        #expect([tag.matchMode, correspondent.matchMode, type.matchMode] == [.unknown, .unknown, .unknown])
+    }
+
     /// Every repair pass on a store holding such a document: the plan made from the store's snapshot changes
     /// its references and links but never a raw value (I8). Here the Kit planner and applier run on a snapshot
     /// read from the store; `noSwiftDataRepairPassWritesAFallbackBack` runs the SwiftData passes.
