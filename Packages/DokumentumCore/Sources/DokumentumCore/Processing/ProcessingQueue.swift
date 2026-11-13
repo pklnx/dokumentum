@@ -44,6 +44,10 @@ public struct ProcessingReport: Equatable, Sendable {
     public var classificationSkipped = 0
     /// Thumbnails the result writes of this run inserted for documents the re-queue pass recorded (#6, part 4, N3).
     public var thumbnailsBackfilled = 0
+    /// Text result writes in which the matching rules set a correspondent or type or added tags (#10, part 1b).
+    public var rulesApplied = 0
+    /// Text result writes that left a correspondent or type empty because several records' rules matched (P2).
+    public var rulesAmbiguous = 0
     /// The run ended early because a second stage was left behind after a timeout while the first had not
     /// returned yet (N1). The next run waits for one of them before it starts a stage.
     public var stalled = false
@@ -155,6 +159,13 @@ public protocol ProcessingRunning: Sendable {
 /// over, whatever its clock says) or links another file than the one whose data was processed (a replaced or
 /// relinked file: compared by the file row's identifier, read from the document row without loading the file).
 ///
+/// **Matching rules (#10, part 1b).** The text result write also applies the matching rules, rules first in the shared
+/// fill (`MetadataFill`, plan of #10 §4a): after the stage returned and before the write, a short context reads the
+/// live rule records (`MatchingStore.readRules`) and evaluates them on the text the write stores. The write applies
+/// the outcome to the row it fetched (an empty correspondent and type filled, tags added, no `touch()`), evaluates
+/// again only when the live rules it fetched differ from the snapshot, and its check reads every metadata row it
+/// links again with the document row. Without rule records it fetches no metadata at all (review N4).
+///
 /// **Write discipline (T6, #56's principle: a background writer never writes over a row state it has not read).**
 /// The claim write and the result write each run in one synchronous call (`write`), with no `await` from its first
 /// step to its last and never a compensating write:
@@ -205,14 +216,18 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
         public var beforeCheck: (@Sendable (Write) throws -> Void)?
         /// Runs each time a run starts to wait for a stage that was let go before it starts its own (N1).
         public var waitsForStage: (@Sendable () -> Void)?
+        /// Runs after the text result write's rules were read and evaluated, before the write (#10, N6): where a test
+        /// edits a rule between the snapshot and the write.
+        public var afterRules: (@Sendable () -> Void)?
 
         public init(
             afterScan: (@Sendable () async -> Void)? = nil, beforeCheck: (@Sendable (Write) throws -> Void)? = nil,
-            waitsForStage: (@Sendable () -> Void)? = nil
+            waitsForStage: (@Sendable () -> Void)? = nil, afterRules: (@Sendable () -> Void)? = nil
         ) {
             self.afterScan = afterScan
             self.beforeCheck = beforeCheck
             self.waitsForStage = waitsForStage
+            self.afterRules = afterRules
         }
     }
 
@@ -238,6 +253,9 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     let classificationFailures: ProcessingFailures
     let classificationSettings: ClassificationSettings
     let calendar: Calendar
+    /// The matching rules' regex budget (#10): `.production` in the app; tests pass a generous clock, so a loaded
+    /// runner never times out an ordinary rule (review A of #205, B4).
+    let matchingBudget: MatchingBudget
     /// The stage this queue waits for and the ones it let go.
     let stages: StageTracker
     /// Checked answers whose write has not saved yet, by document, with the text record they were made from (T3).
@@ -258,11 +276,13 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
     ///   - classificationSettings: the switch and the cut-off; by default in the text counter's defaults suite. With
     ///     a classifier, the cut-off is recorded now if there is none yet (P9).
     ///   - calendar: the calendar a suggested date is stored in (the detail's date picker uses the current one).
+    ///   - matchingBudget: the matching rules' regex budget per rule and document (#10).
     public init(
         container: ModelContainer, deviceID: String, failures: ProcessingFailures, sightings: ClaimSightings? = nil,
         stage: any ProcessingStage = DocumentStage(), requeue: ProcessingRequeue? = nil,
         classifier: (any DocumentClassifying)? = nil, classificationFailures: ProcessingFailures? = nil,
         classificationSettings: ClassificationSettings? = nil, calendar: Calendar = .current,
+        matchingBudget: MatchingBudget = .production,
         takeoverInterval: TimeInterval = ProcessingClaimRules.takeoverInterval,
         stallTimeout: Duration = ProcessingQueue.stallTimeout,
         watchdogSleep: @escaping Sleep = { try await Task.sleep(for: $0, clock: .suspending) },
@@ -287,6 +307,7 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
         let settings = classificationSettings ?? ClassificationSettings(defaultsSuite: failures.defaultsSuite)
         self.classificationSettings = settings
         self.calendar = calendar
+        self.matchingBudget = matchingBudget
         stages = StageTracker(onWait: hooks.waitsForStage)
         // P9: the cut-off is recorded when the queue is set up, before its first run: the app creates the queue at
         // launch before anything of that launch is imported (the share queue, a drop), so such a document is
@@ -475,8 +496,20 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             var nextState = ProcessingState.done
             let thumbnail = backfills ? result.thumbnail : nil
             var inserted = false
-            let outcome = write(.result, id, expecting: held, checksText: text != nil, checksFile: layered != nil) {
-                document in
+            // The rules, outside the write's window (N6); `nil` without a text or without rule records (N4).
+            let rules = text.flatMap { Self.textWriteRules(on: $0.1.text, in: container, budget: matchingBudget) }
+            if rules != nil { hooks.afterRules?() }
+            var ruleFill = RuleFill()
+            let outcome = write(
+                .result, id, expecting: held, checksText: text != nil, checksFile: layered != nil,
+                fill: rules.map { rules -> MetadataFillStep in
+                    { document, context in
+                        var fill = MetadataFill(context: context)
+                        ruleFill = try fill.applyRules(rules, to: document)
+                        return fill.related
+                    }
+                }
+            ) { document in
                 if document.pageCount != result.pageCount { document.pageCount = result.pageCount }
                 if let (source, capped) = text {
                     if document.textSource != source { document.textSource = source }
@@ -504,6 +537,9 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
                 if nextState == .classify { report.toClassify += 1 } else { report.done += 1 }
                 if layered != nil { report.layered += 1 }
                 if inserted { report.thumbnailsBackfilled += 1 }
+                if ruleFill.changed { report.rulesApplied += 1 }
+                if ruleFill.ambiguous { report.rulesAmbiguous += 1 }
+                Self.log(ruleFill)
                 if backfills { requeue?.forgetThumbnailBackfill([id]) }
                 if let (_, capped) = text, capped.isCapped {
                     report.textsCapped += 1
@@ -561,6 +597,19 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             report.interrupted += 1
             return .stop
         }
+    }
+
+    /// Logs what the rules of one saved text write did: fixed codes and counts only (T11); names and patterns are
+    /// user data.
+    private static func log(_ fill: RuleFill) {
+        if fill.invalid > 0 {
+            Log.processing.notice("Matching rules skipped: regex.invalid \(fill.invalid, privacy: .public)")
+        }
+        if fill.timedOut > 0 {
+            Log.processing.notice("Matching rules skipped: regex.timeout \(fill.timedOut, privacy: .public)")
+        }
+        if fill.changed { Log.processing.notice("Matching rules: rules.applied") }
+        if fill.ambiguous { Log.processing.notice("Matching rules: rules.ambiguous") }
     }
 
     /// A failed attempt (thrown or timed out): below the limit nothing is written and the backoff starts; the third
@@ -661,11 +710,11 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
 
     func write(
         _ kind: Write, _ instanceID: UUID, expecting held: Held, checksText: Bool = false, checksFile: Bool = false,
-        change: (Document) -> Void
+        fill: MetadataFillStep? = nil, change: (Document) -> Void
     ) -> WriteOutcome {
         Self.write(
             kind, instanceID, expecting: held, in: container, checksText: checksText, checksFile: checksFile,
-            beforeCheck: hooks.beforeCheck, change: change)
+            beforeCheck: hooks.beforeCheck, fill: fill, change: change)
     }
 
     private static func log(_ report: ProcessingReport) {
@@ -679,7 +728,8 @@ public actor ProcessingQueue: ProcessingRunning, ProcessingRetrying {
             \(report.stalled, privacy: .public), thumbnails backfilled \(report.thumbnailsBackfilled, privacy: .public), \
             to classify \(report.toClassify, privacy: .public), classified \(report.classified, privacy: .public), \
             declined \(report.declined, privacy: .public), classification skipped \
-            \(report.classificationSkipped, privacy: .public)
+            \(report.classificationSkipped, privacy: .public), rules applied \(report.rulesApplied, privacy: .public), \
+            rules ambiguous \(report.rulesAmbiguous, privacy: .public)
             """)
     }
 }
@@ -785,6 +835,25 @@ extension ProcessingQueue {
         requeue?.forgetThumbnailBackfill(Set(gone).intersection(backfill))
     }
 
+    /// The text result write's rules (plan of #10, §4, N6): the live rule records, read in a context that ends with
+    /// the read, evaluated on `text` (the text the write stores), outside the write's window. `nil` when there is no
+    /// rule record: the write then fetches no metadata (review N4, `ProcessingSQLTests`). A read that fails is logged,
+    /// and the write goes on without rules; "Apply Matching Rules" applies them later.
+    static func textWriteRules(
+        on text: String, in container: ModelContainer, budget: MatchingBudget = .production
+    ) -> TextWriteRules? {
+        let rules: [MatchingRule]
+        do {
+            rules = try MatchingStore.readRules(in: container)
+        } catch {
+            Log.processing.error("Could not read the matching rules: \(Log.code(of: error), privacy: .public)")
+            return nil
+        }
+        guard !rules.isEmpty else { return nil }
+        let outcome = MatchingRules.evaluate(text: text, rules: rules, budget: budget)
+        return TextWriteRules(rules: rules, outcome: outcome, text: text, budget: budget)
+    }
+
     /// The document's PDF, in a context of its own that ends with the load: the one blob read of a run.
     static func loadFile(of instanceID: UUID, in container: ModelContainer) -> Load {
         let context = ModelContext(container)
@@ -799,13 +868,19 @@ extension ProcessingQueue {
         }
     }
 
+    /// A step of the shared metadata fill in a write (`MetadataFill`, plan of #10 §4a): it changes the fetched
+    /// document in the write's context and returns the metadata rows it linked, which the check reads again.
+    typealias MetadataFillStep = (Document, ModelContext) throws -> [RowKey: RowState]
+
     /// One write, steps 1 to 5 of the discipline, without a suspension. With `checksText` the write also changes the
     /// document's text record, and step 4 reads that row again too, by key (`RowState.readText`); with `checksFile`
-    /// likewise its file record (`RowState.readFile`; `pdfData` is not compared, `RowState.excluded`).
+    /// likewise its file record (`RowState.readFile`; `pdfData` is not compared, `RowState.excluded`). With `fill`
+    /// (the text result write's rules) step 3 also runs the fill after `change`, and step 4 reads the metadata rows
+    /// it linked again with the document row.
     static func write(
         _ kind: Write, _ instanceID: UUID, expecting held: Held, in container: ModelContainer,
         checksText: Bool = false, checksFile: Bool = false, beforeCheck: (@Sendable (Write) throws -> Void)?,
-        change: (Document) -> Void
+        fill: MetadataFillStep? = nil, change: (Document) -> Void
     ) -> WriteOutcome {
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -823,10 +898,11 @@ extension ProcessingQueue {
             if checksFile, fileRead == nil { return .changed }
             // 3. Only the fields that change.
             change(document)
+            let related = try fill?(document, context) ?? [:]
             try beforeCheck?(kind)
             // 4. The rows again, in a second fresh context, every field.
             let key = RowKey(entity: .document, instanceID: instanceID)
-            let stored = try RowState.read([key], in: container)
+            let stored = try RowState.read(Set(related.keys).union([key]), in: container)
             var textUnchanged = true
             if let (textID, textState) = textRead {
                 textUnchanged = try RowState.readText(textID, in: container) == textState
@@ -835,7 +911,8 @@ extension ProcessingQueue {
             if let (fileID, fileState) = fileRead {
                 fileUnchanged = try RowState.readFile(fileID, in: container) == fileState
             }
-            guard stored[key] == read, textUnchanged, fileUnchanged else {
+            guard stored[key] == read, related.allSatisfy({ stored[$0.key] == $0.value }), textUnchanged, fileUnchanged
+            else {
                 context.rollback()
                 Log.processing.notice("A processing write met another save of its document and wrote nothing")
                 return .metAnotherSave

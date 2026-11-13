@@ -2,7 +2,12 @@ import Foundation
 
 /// Which of a document's fields a suggestion may fill (plan of #8, Approach 4, T2; maintainer's P2 and P7).
 ///
-/// - **Correspondent, type, tags:** empty by value: none set.
+/// - **Correspondent and type:** empty by value: none set.
+/// - **Tags (#10, T13, maintainer's P1):** empty unless the document has a **user tag**: a tag that the matching rules
+///   do not explain. A document whose only tags are rule tags still gets the classifier's tags, added to its own.
+///   No field records who set a tag, so the classification write evaluates the rules of the document's own tags on
+///   its text (`hasUserTags`). A tag whose rule is invalid, times out or sits on a tombstone counts as a user tag
+///   (review N2); a tag the user set by hand that its rule also matches counts as a rule tag (the plan's R8).
 /// - **Title and date** always hold an automatic value (the file name or "Scan …", and the import time), which a
 ///   value cannot tell from the user's own. They count as empty only while the document **has never been edited**:
 ///   `modifiedAt == createdAt` (the import sets both to the same time, and every edit, inbox change, trash, restore
@@ -19,10 +24,12 @@ public struct ClassificationFields: Equatable, Sendable {
     public var hasCorrespondent: Bool
     public var hasDocumentType: Bool
     public var hasTags: Bool
+    /// A tag the matching rules do not explain (T13); `hasTags` when the caller does not tell them apart.
+    public var hasUserTags: Bool
 
     public init(
         title: String, createdAt: Date, modifiedAt: Date, documentDate: Date, hasCorrespondent: Bool,
-        hasDocumentType: Bool, hasTags: Bool
+        hasDocumentType: Bool, hasTags: Bool, hasUserTags: Bool? = nil
     ) {
         self.title = title
         self.createdAt = createdAt
@@ -31,6 +38,7 @@ public struct ClassificationFields: Equatable, Sendable {
         self.hasCorrespondent = hasCorrespondent
         self.hasDocumentType = hasDocumentType
         self.hasTags = hasTags
+        self.hasUserTags = hasUserTags ?? hasTags
     }
 
     public var isNeverEdited: Bool { modifiedAt == createdAt }
@@ -38,7 +46,8 @@ public struct ClassificationFields: Equatable, Sendable {
     public var dateIsEmpty: Bool { isNeverEdited && documentDate == createdAt }
     public var correspondentIsEmpty: Bool { !hasCorrespondent }
     public var documentTypeIsEmpty: Bool { !hasDocumentType }
-    public var tagsAreEmpty: Bool { !hasTags }
+    /// No user tag: the classifier's tags are added to the rule tags the document may have (T13).
+    public var tagsAreEmpty: Bool { !hasUserTags }
 
     /// The stored `documentDate` for a suggested day: the day in `calendar`, at the time of day `keeping` has
     /// there. The detail's date picker (`DatePicker` with `.date`) changes a date the same way: it sets the day and

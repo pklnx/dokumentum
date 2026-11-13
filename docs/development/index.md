@@ -546,7 +546,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
   write). `ProcessingSQLTests` checks the SQL under `swift test`.
 - **Writes** (T6): the claim write (only when the claim is not already this device's and fresh) and the result write
   (`pageCount` and `textSource` when they differ, the text record's `extractedText`, with a text layer the file
-  record's `pdfData` and the document's `fileSize`, `done` or `failed`). The text is
+  record's `pdfData` and the document's `fileSize`, the matching rules' correspondent, type and tags (#10, see
+  "Matching rules"), `done` or `failed`). The text is
   capped at 500,000 UTF-8 bytes (T7, N6): cut at the last page boundary below the cap, or, when the first page with text
   alone is over it, at its last whole character, after one form feed per blank page before it; the report counts it (`textsCapped`) and it is logged. The result write's check
   also reads the text row again, by key (`RowState.readText`; the only background writer of a linked text), and with
@@ -640,18 +641,29 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     `14. Januar 2026`, `Jänner`, `14 January 2026`, `January 14, 2026`). A checked answer is kept in the queue's memory,
     keyed by document and text record, until its write saved (T3); after a text record swap the model is asked again.
     The memory (answers and waits) is dropped for a document that left `classify` another way.
-  - **Empty fields** (`ClassificationFields`, T2, P2, P7): correspondent, type and tags when none is set; title and
+  - **Empty fields** (`ClassificationFields`, T2, P2, P7): correspondent and type when none is set; title and
     date only while the document was never edited (`modifiedAt == createdAt`; the date also `documentDate ==
     createdAt`; an empty title always). So a file-name title and the import date are replaced until the first edit,
     and an edit of any field (also the inbox flag, a trash and restore, a repair change) keeps title and date.
+    **Tags** (#10, T13, the maintainer's P1) count as empty unless the document has a **user tag**: a tag whose own
+    matching rule does not match the document's text. The write evaluates only the rules of the document's own tags
+    (re-review N1), on the text the step read for the model (the same text record the write expects); a tag without a
+    rule, with an invalid rule or one that times out, or on a tombstone is a user tag (N2). So a document whose only
+    tags the rules added (on import or by "Apply Matching Rules") still gets the classifier's tags, **added** to its
+    own, at most three new and none twice; a document with a tag the user set gets none, as before. No field records
+    who set a tag, so a tag the user set by hand that its rule also matches counts as a rule tag, and the classifier
+    may still add tags there (R8). A rule edited between the text write and the classification is judged as it is at
+    the classification write; the classification normally follows the text write in the same run (T7).
   - **The result write** (`writeClassification`, T3): one synchronous call under the write discipline above. A fresh
     context fetches the document and re-checks `classify`, the exact claim, not trashed and the same text record; it
     decides each field's emptiness on that row; it resolves names against the live records it fetches
     (`MetadataMatcher`: an equal normalized name in keeper order, else the longest word prefix either way, a tie none;
     without a match a new correspondent or type is inserted, P1; a tag only when exactly one live tag has the name,
-    review N7, and never a new one); it sets only the fields it fills and `done`, without `touch()`, so a later edit is
-    still the first; its check reads the document row and every metadata row it found linked or links again
-    (`RowState.read`: a linked record must still be live under the same name). On a mismatch it rolls back and the
+    review N7, and never a new one; tags are added to the document's rule tags, never replacing them); it sets only
+    the fields it fills and `done`, without `touch()`, so a later edit is still the first; its check reads the document
+    row and every metadata row it found linked or links again (`RowState.read`: a linked record must still be live
+    under the same name, and each of the document's tags must keep its rule, so a rule edit of one of them in the
+    window makes the write back off, while an edit of an unrelated rule does not, N1, N3). On a mismatch it rolls back and the
     next run decides again with the cached answer. The suggested date is stored as the detail's date picker stores a
     day: the time of day of the current `documentDate`, in the current calendar.
   - **Never overwriting an edit** holds on this store: an edit saved before the fetch makes its field non-empty (and
@@ -700,6 +712,139 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     footer on the Mac).
 - **Debug only:** `-ProcessingTakeoverSeconds <n>` replaces the 6 hours (the two-device check, #4's M4). Release
   builds do not contain it.
+
+## Matching rules
+
+#10, part 1b (plan of #10, Revision 1; re-review N1–N4). A tag, correspondent or document type can carry a rule that
+assigns it from a document's text, as in paperless-ngx. Part 2 (#200) adds the rule sheet and the Settings action.
+
+**Model.** The rule is two fields on the record it assigns (`matchModeRaw`, the frozen enum `MatchMode`, `""` for no
+rule; `matchPattern`, as typed; schema V2, "Data model and sync"). There is no rule entity, so sync has nothing new
+to link or repair. Only live records' rules apply: a tombstone's rule is ignored, and the repair's same-name merge
+does not carry a rule over to the keeper (T10, R4).
+
+**Matching** (`DokumentumKit/Matching/`, Foundation only, tested on Linux too). `MatchingRules.evaluate(text:rules:
+budget:)` is a pure function of the text and the set of rules, never of their order (T7, a permutation test pins it):
+- **The text** is the document's extracted text only, never the title or the file name (T9).
+- **Word modes** (`MatchingPattern`): the words are the search's (`SearchTokenizer`'s scanning, a hyphen at a line end
+  joins; `SearchNormalizer`'s folding of case, diacritics and width, ß → ss), compared **whole** ("Amt" is not in
+  "Samt", P4). A word with ä, ö or ü also has the folded form of its transcription, on both sides, and two words are
+  equal when their forms share one: "Mueller" matches "Müller", "Müller" matches "Muller", and "Poet", "Neue" and
+  "Michael" match only themselves (N2; never detranscribed). `any`: one term occurs; `all`: every term, in any order;
+  `exact`: the whole pattern as consecutive words. Terms are split at whitespace; `"…"`, `„…“` and `“…”` hold a phrase
+  (consecutive words), an unclosed quote runs to the end. An empty pattern, `none` and `unknown` never match.
+- **Regular expressions** (`RegexMatcher`, B2): `NSRegularExpression`, `.caseInsensitive`, on the **NFC** form of the
+  text and of the pattern (a PDF's decomposed "München" is found by `München`). Neither is case-folded, so `\S`, `\W`
+  and digits mean what they say, and accents and ae/oe/ue count as written (`Müller` does not find "Mueller"; write
+  `M(ü|ue)ller`). Only the first match is looked for.
+- **Several records of one kind (P2): none.** More than one matching correspondent (or type) leaves the field empty;
+  detection (#11) or the classifier may fill it. Every matching tag applies. **A correspondent or type rule whose
+  regular expression timed out on a document makes its kind ambiguous on that document**: whether it matches is
+  unknown, so none of that kind is set there, and a faster and a slower device never set different values (review A
+  of #205, N4). A timed-out tag rule only leaves its own tag out.
+
+**Regex safety** (T8). A pattern can arrive by sync, invalid or written by a newer build, so it is validated and
+compiled at every use, and a failure means "skipped", never a crash (`MatchingRuleValidation.check`: at most 1,000
+characters, and a regular expression must compile and must not use a **back-reference**, `\1`–`\9` or `\k<name>`;
+an escaped backslash before a digit is no reference). A back-reference step compares a whole capture, so on a long run
+of one character ICU's steps between two progress callbacks take seconds and the guard would stop far beyond its
+budget (review B of #205, N1: `(a+)\1b` took 1.4 s on 20,000 × "a" and 20 s on 100,000); the editor shows the error,
+and a synced rule with one is skipped as invalid. At run time `enumerateMatches(options: .reportProgress)` stops a
+match once the **budget** is spent: 100 ms per rule and document on the clock (`MatchingBudget.production`; the clock is
+read every 8th progress callback). The rule then does not match that document. The progress block runs once per start
+position (an ordinary no-match on a 500,000-byte text calls it about 500,000 times), so a budget that counts callbacks
+would time out ordinary rules on long texts: it exists only for the catastrophic-pattern tests (`.progressCallbacks`).
+For the editor, `MatchingRuleValidation.probe` runs a regular expression on fixed probe texts (the adversarial inputs
+of the plan's P-2 and R-1, and ordinary German and English text) within the budget; the sheet runs it debounced and off
+the main actor (`probeConcurrently`). Logging is counts and fixed codes only (`regex.invalid`, `regex.timeout`,
+`rules.applied`, `rules.ambiguous`); names and patterns are user data and never logged.
+
+**What a rule writes** (T4, the same for import and bulk): the correspondent and the type **only when the document has
+none**; matching tags are **added**; nothing is removed or replaced; `touch()` is never called, so #8's "title and date
+only while never edited" still holds after a rule wrote; an outcome that changes nothing writes nothing, so a second
+application saves nothing.
+
+**On import: in the text result write** (T3, N6; `ProcessingQueue`). After the stage returned and before the write, a
+short context reads the live rule records (`MatchingStore.readRules`: one select per entity with a predicate on the
+rule field, so a store without rules reads no row), and they are evaluated on the text the write stores. The write
+applies the outcome to the row it fetched, through the shared fill (`MetadataFill`, below); when the live rules it
+fetched differ from the snapshot (a rule added, edited, merged or removed in between), it evaluates again on the
+fetched ones. Its check reads every metadata row it links again together with the document row, so a rule edited,
+renamed or merged in the window makes the write back off, and the next run decides again; a rule edited after the
+check applies from the next text write or bulk run, and so does one added between the snapshot and the write of a
+store that had none. **Without rule records the write fetches no more metadata than a text write before #10** (its
+check, `RowState.read`, reads every tag, correspondent and type as it always did; re-review N4, `ProcessingSQLTests`).
+With rules it fetches them exactly once more, in the fill. `ProcessingReport` counts `rulesApplied` and `rulesAmbiguous`. Older documents are not touched
+automatically: "Apply Matching Rules" covers them.
+
+**The shared fill** (`MetadataFill`, `DokumentumCore/Matching/MatchingStore.swift`; plan §4a). The one seam the text
+write and the bulk run share, and #11's detection extends: one fetch of the live correspondents, types and tags in the
+write's context, **rules first**, then detection on the row as the rules left it; one related-row map
+of every metadata row a step links, which the write's check reads again. A link writes the record's inverse
+relationship, so a linked row must be one the write read. The rows a document had linked before are not in the map:
+no decision of a fill reads them (emptiness is the document row's link, which the check compares). On the `classify`
+path, detection fills after the classifier (#11's Q3), so #11 part 2 calls the fill from both classification exits as
+well; the rules stay first. **A record with copies sharing its `instanceID`** is treated like a tombstone everywhere
+in matching (the fill, the rule snapshot, the editor): never a rule, never linked (`MatchingStore.withoutCopies`,
+review A of #205, B1). The write's check reads a key through `RowRecords`, which keeps the first copy read, and the
+order of a fetch without sort descriptors is not stable between contexts (measured: of two live copies, the write's
+context read the younger one first in 3 of 10 runs and the check's context the older one). So a fill that linked any
+copy could meet another copy in its check, and the text write would back off for ever, redoing its OCR each run.
+Copies are counted among all records of an `instanceID`, also those without a rule, in the snapshot (a second fetch by
+`instanceID`, only when rules exist) as in the fill, so the import path and the bulk run agree (review A of #205, N5).
+Copies are rare (a copied record, or a merge's loser and its copy, which the repair leaves alone, see "Copies sharing
+an `instanceID`" above), but such a rule silently never applies: the bulk run's report counts it (`copiedRules`,
+logged as `rules.copied`), the editor refuses the record (`noMetadata`), and **#200's rule sheet should show that
+state** ("This rule is not applied: the record exists twice") instead of a plain error.
+
+**Precedence** (T5, P1): a user's edit > rules > detection (#11) > classifier (#8). Correspondent, type and date: each
+later step fills only what is still empty when it writes. Tags: the classifier adds its tags unless the document has a
+user tag (T13, "Classification" above). A user's edit saved before the write's fetch makes the field non-empty; one
+saved in the window makes the write back off. "Rules beat the classifier" holds only for documents whose text is
+written after the rule exists: a rule added later and applied by "Apply Matching Rules" fills only empty fields, so it
+never replaces a correspondent or type the classifier or detection filled earlier (N5 c).
+
+**On request: "Apply Matching Rules"** (`MatchingRun`, T6, N7). Off the main actor, over every document outside the
+trash that has a text record with non-empty text, in any processing state except `unknown`; it never writes the
+state. The rules are read once, validated and compiled once per run; an invalid rule and one whose regular expression
+ran out of its budget are named in the result. A **tag** rule that timed out is skipped for the rest of the run; a
+**correspondent or type** rule is evaluated on every document, each time within its budget, so a time-out leaves only
+that document's kind empty (review A of #205, B3: skipping it for the rest of the run made the kind ambiguous on every
+later document, and the import path, which never skips, decided them differently). A rule edited during a run applies
+from the next run (N5 b). Batches of 50, walked by `instanceID`, each in a fresh context: fetch the documents and read
+their text rows by key, never a file or thumbnail (`MatchingRunSQLTests`); evaluate, fill, check every changed document
+row and every linked metadata row again, and save once per batch. On a mismatch the batch rolls back and its changed
+documents are written one by one under the same discipline; a document whose own write meets another save again is
+skipped and counted ("run again"). Nothing is ever written to undo. Cancellable between batches, progress per batch,
+one run at a time per instance. Memory: texts are capped at 500,000 bytes, so a batch holds at most about 25 MB. Like
+paperless's retagger, it adds tags the user removed by hand (R3; the confirmation of part 2 says so).
+
+**Two devices** (T7). Both devices write only through the fill, and the outcome is a deterministic function of the
+text, the live rules and the document's current fields; ambiguity gives none on both alike. So with the same rules
+both reach the same values in whatever order they run or fetch, and a device that receives the other's result finds
+nothing to write (no ping-pong). Concurrent application sets the same correspondent and type (last writer wins with
+equal values) and adds tags on both sides (the tag link is the relationship `DocumentEditor` writes). With different
+rules (an edit not yet arrived) each device follows its own and last writer wins per field. **An edit on the other
+device that has not arrived yet can be overwritten** when a run fills the same field here: #8's M3 case, but for the
+bulk run over the whole archive; it belongs to that case on #31's two-device protocol (N5 a).
+
+**Editing a rule** (`MatchingRuleEditor`, the model side of part 2's sheet; `StoreLibrarySource.matchingRule` reads
+one). It writes only the fields the user changed (a draft can be older than the store), only on a live record, keeps a
+newer build's mode (`unknown`) unless the user picks one, refuses what `MatchingRuleValidation.check` refuses, saves
+once and rolls back on failure.
+
+**Tests.** Kit (also on Linux): `MatchingRulesTests` (every mode with a hit and a miss, normalisation, transcribed
+forms, whole words, NFC, ambiguity, permutations), `MatchingPatternTests`, `RegexMatcherTests` (invalid patterns, the
+callback budget, the clock budget, an ordinary pattern on a 500,000-byte text), `MatchingRuleValidationTests`. Core:
+`MatchingImportTests` (the text write, the windows, N6, the classifier keeping a rule's correspondent),
+`MatchingClassifierTagTests` (T13, N1–N3), `MatchingRunTests`, `MatchingRunSQLTests`, `MatchingConvergenceTests`,
+`MatchingRuleEditorTests`, and `ProcessingSQLTests` (N4). The catastrophic cases use bounded inputs (26 × "a" + "!"), so
+a broken guard fails them after a few seconds and never hangs the suite. **No test runs an ordinary pattern against the
+real 100 ms**: that depends on the runner's load (it failed `app-macos` once at 0.188 s; review A of #205, B4). The
+production budget is pinned as a value (`MatchingBudget.production == .clock(.milliseconds(100))`); ordinary patterns
+run under a 10 s clock (`generousBudget` in Kit, `testMatchingBudget` in Core, passed to the queue through
+`ProcessingQueue(matchingBudget:)`); time-outs are tested with `.progressCallbacks` or with catastrophic inputs that
+take seconds without the guard.
 
 ## Library UI
 

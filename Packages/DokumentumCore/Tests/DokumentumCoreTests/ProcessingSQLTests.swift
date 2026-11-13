@@ -248,11 +248,96 @@ struct ProcessingSQLTests {
 
         let recording = try SQLLog.Recording()
         let outcome = ProcessingQueue.writeClassification(
-            id, expecting: held, suggestion: suggestion, now: processingStart, calendar: testCalendar,
-            in: store.container, beforeCheck: nil)
+            id, expecting: held, suggestion: suggestion, text: billText, now: processingStart,
+            calendar: testCalendar, in: store.container, beforeCheck: nil)
         let statements = try recording.statements()
 
         #expect(outcome == .saved)
         expectNoBlobTable(statements)
+    }
+
+    // MARK: Matching rules (#10, part 1b; review N4)
+
+    static let metadataTables = ["ZTAG", "ZCORRESPONDENT", "ZDOCUMENTTYPE"]
+
+    private func namesMetadata(_ statement: String) -> Bool {
+        Self.metadataTables.contains { SQLLog.statement(statement, names: $0) }
+    }
+
+    /// Without rule records, the text write's rule snapshot is three selects with a predicate on the rule field that
+    /// read no row, and the write gets no fill: it fetches no more metadata than a text write before #10
+    /// (counter-proof: return an empty snapshot instead of `nil`, the write then fetches the metadata).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func withoutRulesTheTextWriteReadsOnlyTheEmptyRuleSnapshot() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        _ = try seed(store)
+        try store.insertMetadata(.tag, "Ohne Regel")
+        try store.insertMetadata(.correspondent, "Ohne Regel")
+
+        let recording = try SQLLog.Recording()
+        let rules = ProcessingQueue.textWriteRules(on: "text 0", in: store.container, budget: testMatchingBudget)
+        let statements = try recording.statements()
+
+        #expect(rules == nil)
+        let selects = statements.filter { $0.contains("SELECT") }
+        #expect(selects.count == 3, "\(selects)")
+        #expect(selects.allSatisfy { namesMetadata($0) && $0.contains("ZMATCHMODERAW") }, "\(selects)")
+        expectNoBlobTable(statements)
+        for statement in statements { #expect(!SQLLog.statement(statement, names: "ZDOCUMENT"), "\(statement)") }
+    }
+
+    /// With a rule, the text write fetches the metadata exactly once more in its context (`MetadataFill`), and still
+    /// reads no blob but the text by key. Counted as whole-table fetches of the correspondent and type tables (tag
+    /// selects also come from relationship faults).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func withARuleTheTextWriteFetchesTheMetadataOnce() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let plain = try store.insert(device: deviceA, claimedAt: processingStart)
+        let ruled = try store.insert(device: deviceA, claimedAt: processingStart)
+        try store.insertRule(.correspondent, "Stadtwerke", .any, "Strom")
+        try store.insertRule(.tag, "Strom", .any, "Strom")
+        let rules = try #require(
+            ProcessingQueue.textWriteRules(on: "Strom", in: store.container, budget: testMatchingBudget))
+
+        func write(_ id: UUID, fill: ProcessingQueue.MetadataFillStep?) throws -> [String] {
+            let file = try #require(try store.fileIdentifier(of: id))
+            let recording = try SQLLog.Recording()
+            let outcome = ProcessingQueue.write(
+                .result, id,
+                expecting: .init(stateRaw: "pending", deviceID: deviceA, claimedAt: processingStart, file: file),
+                in: store.container, checksText: true, beforeCheck: nil, fill: fill
+            ) { document in
+                document.text?.extractedText = "Strom"
+                document.processingState = .done
+            }
+            #expect(outcome == .saved)
+            return try recording.statements()
+        }
+        let without = try write(plain, fill: nil)
+        let with = try write(ruled) { document, context in
+            var fill = MetadataFill(context: context)
+            _ = try fill.applyRules(rules, to: document)
+            return fill.related
+        }
+
+        #expect(try store.matched(ruled).tags == ["Strom"])
+        #expect(try store.matched(ruled).correspondent == "Stadtwerke")
+        #expect(try store.matched(plain).tags.isEmpty)
+        // Whole-table fetches only: a select by key (`WHERE t0.Z_PK = ?`) is a fault of the linked record.
+        let fetches = { (statements: [String]) in
+            statements.map { $0.trimmingCharacters(in: .whitespaces) }.filter {
+                $0.hasSuffix("FROM ZCORRESPONDENT t0") || $0.hasSuffix("FROM ZDOCUMENTTYPE t0")
+            }.count
+        }
+        // The check's fetch of both tables, and with the rules exactly one more: `MetadataFill.live()` keeps what it
+        // fetched (review A of #205, N2; counter-proof: no cache in `live()`).
+        #expect(fetches(without) == 2, "\(without)")
+        #expect(fetches(with) == 4, "\(with)")
+        for statement in with {
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTFILE"), "\(statement)")
+            #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
+        }
     }
 }

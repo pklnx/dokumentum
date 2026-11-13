@@ -74,11 +74,12 @@ final class ProcessingStore: Sendable {
     func queue(
         _ device: String, failures: ProcessingFailures? = nil,
         stage: any ProcessingStage = DocumentStage(recognizer: StubRecognizer()),
-        clock: TestClock, watchdog: ManualDebounce = ManualDebounce(), hooks: ProcessingQueue.Hooks = .init()
+        clock: TestClock, watchdog: ManualDebounce = ManualDebounce(), hooks: ProcessingQueue.Hooks = .init(),
+        matchingBudget: MatchingBudget = testMatchingBudget
     ) -> ProcessingQueue {
         ProcessingQueue(
             container: container, deviceID: device, failures: failures ?? self.failures(device), stage: stage,
-            watchdogSleep: watchdog.sleep, now: clock.function, hooks: hooks)
+            matchingBudget: matchingBudget, watchdogSleep: watchdog.sleep, now: clock.function, hooks: hooks)
     }
 
     /// Inserts one document as the importer does (file and text in the same save), in the given queue state.
