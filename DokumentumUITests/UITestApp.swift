@@ -95,9 +95,15 @@ struct UITestApp {
         return String(format: "%04d-%02d-%02d", result.year ?? 0, result.month ?? 0, result.day ?? 0)
     }
 
+    /// The status of the app's in-memory notification center in every launch (#12, part 3): `-UITestNotifications
+    /// authorized`. Every `-UITest*` launch uses that center, never the system's, so no run shows a permission prompt or
+    /// writes this device's reminders; with the argument the settings show "allowed" and no "Allow Notifications".
+    static let notificationArguments = ["-UITestNotifications", "authorized"]
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
-        var arguments = Self.launchArguments(store) + ["-UITestToday", Self.today] + extraArguments
+        var arguments =
+            Self.launchArguments(store) + ["-UITestToday", Self.today] + Self.notificationArguments + extraArguments
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
         }

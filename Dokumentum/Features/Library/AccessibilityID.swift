@@ -168,6 +168,27 @@ enum AccessibilityID {
     static let settingsMatchingCancel = "settings.matching.cancel"
     static let settingsMatchingResult = "settings.matching.result"
 
+    /// The settings' "Reminders" section (#12, part 3): the switch; the lead-time picker and the time picker, each named
+    /// by its value (`settings.reminders.lead.3`, `settings.reminders.time.0900`), so a UI test reads the value without
+    /// localized text; the status line named by the status (`authorized`, `notDetermined`, `denied`), "Allow
+    /// Notifications", the button to the system's settings, and the footnote.
+    static let settingsRemindersSwitch = "settings.reminders.switch"
+    static func settingsRemindersLead(_ days: Int) -> String { "settings.reminders.lead.\(days)" }
+    static func settingsRemindersTime(_ minuteOfDay: Int) -> String {
+        let hour = minuteOfDay / 60
+        let minute = minuteOfDay % 60
+        return "settings.reminders.time.\(hour < 10 ? "0" : "")\(hour)\(minute < 10 ? "0" : "")\(minute)"
+    }
+    static func settingsRemindersStatus(_ status: ReminderAuthorizationStatus) -> String {
+        "settings.reminders.status.\(ReminderSettingsText.statusIdentifier(status))"
+    }
+    static let settingsRemindersAllow = "settings.reminders.allow"
+    static let settingsRemindersOpenSettings = "settings.reminders.openSettings"
+    static let settingsRemindersFootnote = "settings.reminders.footnote"
+    /// The Deadlines list's notice and its "Allow Notifications" (#12, part 3).
+    static let deadlinesReminderNotice = "documentList.reminderNotice"
+    static let deadlinesReminderAllow = "documentList.reminderNotice.allow"
+
     /// The rule sheet (#10, part 2): the sidebar rows' "Edit Matching…", the sheet, its mode picker and each mode,
     /// the pattern field, the explanation, the line under the field, Save and Cancel, and the states of a record with
     /// copies and of a gone one.

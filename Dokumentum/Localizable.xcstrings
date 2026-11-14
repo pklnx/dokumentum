@@ -1,6 +1,47 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld days before" : {
+      "comment" : "Settings: a deadline reminds this many days before its day.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Tag vorher"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Tage vorher"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 day before"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld days before"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld documents" : {
       "comment" : "VoiceOver value of a sidebar row: how many documents it has.",
       "localizations" : {
@@ -439,6 +480,28 @@
         }
       }
     },
+    "1 week before" : {
+      "comment" : "Settings: a deadline reminds one week before its day.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Woche vorher"
+          }
+        }
+      }
+    },
+    "2 weeks before" : {
+      "comment" : "Settings: a deadline reminds two weeks before its day.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 Wochen vorher"
+          }
+        }
+      }
+    },
     "A newer version of Dokumentum set this rule. It is kept unless you choose another match." : {
       "comment" : "Matching rule sheet: explanation of a mode written by a newer app version.",
       "localizations" : {
@@ -446,6 +509,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Eine neuere Version von Dokumentum hat diese Regel festgelegt. Sie bleibt erhalten, solange du keine andere Zuordnung wählst."
+          }
+        }
+      }
+    },
+    "A reminder shows the document's title, its due day and the deadline's label, never the document's text. Whether it shows on the lock screen follows “Show Previews” in Settings > Notifications." : {
+      "comment" : "Settings: what a deadline reminder shows (maintainer decision Q5).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Erinnerung zeigt den Titel des Dokuments, seinen Fälligkeitstag und die Bezeichnung der Frist, nie den Text des Dokuments. Ob sie auf dem Sperrbildschirm erscheint, richtet sich nach „Vorschauen zeigen“ in den Einstellungen unter „Mitteilungen“."
+          }
+        }
+      }
+    },
+    "A reminder shows the document's title, its due day and the deadline's label, never the document's text. Whether it shows on the lock screen follows “Show Previews” in System Settings > Notifications." : {
+      "comment" : "Settings: what a deadline reminder shows (maintainer decision Q5).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Erinnerung zeigt den Titel des Dokuments, seinen Fälligkeitstag und die Bezeichnung der Frist, nie den Text des Dokuments. Ob sie auf dem Sperrbildschirm erscheint, richtet sich nach „Vorschauen zeigen“ in den Systemeinstellungen unter „Mitteilungen“."
           }
         }
       }
@@ -512,6 +597,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alle Wörter"
+          }
+        }
+      }
+    },
+    "Allow Notifications" : {
+      "comment" : "Button: asks the system to allow Dokumentum's notifications.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen erlauben"
+          }
+        }
+      }
+    },
+    "Allow notifications so this Mac can remind you of these deadlines." : {
+      "comment" : "The Deadlines list's notice while the reminders' permission has not been asked for.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaube Mitteilungen, damit dich dieser Mac an diese Fristen erinnern kann."
+          }
+        }
+      }
+    },
+    "Allow notifications so this Mac can remind you." : {
+      "comment" : "Settings: the system has not been asked for the reminders' permission yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaube Mitteilungen, damit dich dieser Mac erinnern kann."
+          }
+        }
+      }
+    },
+    "Allow notifications so this iPhone can remind you of these deadlines." : {
+      "comment" : "The Deadlines list's notice while the reminders' permission has not been asked for.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaube Mitteilungen, damit dich dieses iPhone an diese Fristen erinnern kann."
+          }
+        }
+      }
+    },
+    "Allow notifications so this iPhone can remind you." : {
+      "comment" : "Settings: the system has not been asked for the reminders' permission yet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaube Mitteilungen, damit dich dieses iPhone erinnern kann."
           }
         }
       }
@@ -606,6 +746,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Regeln werden angewendet … %1$lld von %2$lld"
+          }
+        }
+      }
+    },
+    "At" : {
+      "comment" : "Settings: the time of day of a deadline reminder, after “Remind me”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Um"
           }
         }
       }
@@ -1010,6 +1161,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Heute fällig"
+          }
+        }
+      }
+    },
+    "Due tomorrow" : {
+      "comment" : "A reminder's text: the deadline is due on the day after the reminder.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Morgen fällig"
           }
         }
       }
@@ -1793,6 +1955,50 @@
         }
       }
     },
+    "Notifications are allowed on this Mac." : {
+      "comment" : "Settings: the reminders' permission is given.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen sind auf diesem Mac erlaubt."
+          }
+        }
+      }
+    },
+    "Notifications are allowed on this iPhone." : {
+      "comment" : "Settings: the reminders' permission is given.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen sind auf diesem iPhone erlaubt."
+          }
+        }
+      }
+    },
+    "Notifications are turned off for Dokumentum on this Mac. You can turn them on in System Settings > Notifications." : {
+      "comment" : "Settings: the reminders' permission was refused.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen sind für Dokumentum auf diesem Mac ausgeschaltet. Du kannst sie in den Systemeinstellungen unter „Mitteilungen“ einschalten."
+          }
+        }
+      }
+    },
+    "Notifications are turned off for Dokumentum on this iPhone. You can turn them on in Settings > Notifications." : {
+      "comment" : "Settings: the reminders' permission was refused.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mitteilungen sind für Dokumentum auf diesem iPhone ausgeschaltet. Du kannst sie in den Einstellungen unter „Mitteilungen“ einschalten."
+          }
+        }
+      }
+    },
     "OK" : {
       "comment" : "Button that closes the import notice.",
       "localizations" : {
@@ -1817,6 +2023,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline: Änderungen werden synchronisiert, sobald eine Verbindung besteht"
+          }
+        }
+      }
+    },
+    "On the due day" : {
+      "comment" : "Settings: a deadline reminds on its own day.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Am Fälligkeitstag"
           }
         }
       }
@@ -1851,6 +2068,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "One photo could not be read and was left out."
+          }
+        }
+      }
+    },
+    "Open Settings" : {
+      "comment" : "Button: opens the system's notification settings for Dokumentum.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen öffnen"
+          }
+        }
+      }
+    },
+    "Open System Settings" : {
+      "comment" : "Button: opens the system's notification settings for Dokumentum.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Systemeinstellungen öffnen"
           }
         }
       }
@@ -2036,6 +2275,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Regulärer Ausdruck"
+          }
+        }
+      }
+    },
+    "Remind me" : {
+      "comment" : "Settings: the picker of how many days before its day a deadline reminds.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erinnern"
+          }
+        }
+      }
+    },
+    "Remind me of deadlines" : {
+      "comment" : "Settings: the switch that turns the deadline reminders on or off.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An Fristen erinnern"
+          }
+        }
+      }
+    },
+    "Reminders" : {
+      "comment" : "Settings: the section of the deadline reminders.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erinnerungen"
           }
         }
       }
@@ -2434,6 +2706,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Der Titel konnte nicht gespeichert werden."
+          }
+        }
+      }
+    },
+    "These settings apply to this Mac only. Your other devices remind you by their own settings." : {
+      "comment" : "Settings: the reminder settings are per device.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Einstellungen gelten nur für diesen Mac. Deine anderen Geräte erinnern dich nach ihren eigenen Einstellungen."
+          }
+        }
+      }
+    },
+    "These settings apply to this iPhone only. Your other devices remind you by their own settings." : {
+      "comment" : "Settings: the reminder settings are per device.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Einstellungen gelten nur für dieses iPhone. Deine anderen Geräte erinnern dich nach ihren eigenen Einstellungen."
           }
         }
       }

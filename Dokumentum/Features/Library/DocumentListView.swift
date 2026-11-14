@@ -92,6 +92,8 @@ struct DocumentListView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { indexingLine }
+        // Deadlines' "Allow Notifications" while the system has not been asked (#12, part 3).
+        .safeAreaInset(edge: .top, spacing: 0) { DeadlineReminderNotice(model: model) }
         .searchable(
             text: $model.search.text, tokens: $model.search.tokens, placement: searchPlacement, prompt: Text("Search")
         ) { token in

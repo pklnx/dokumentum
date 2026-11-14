@@ -5,7 +5,8 @@ import XCTest
 /// document whose text recognition failed says so and offers "Try again" (#6, part 4), one waiting for its
 /// suggestions says that (#8, part 3). The sidebar footer's sync line opens "iCloud Sync" (#31, with an injected
 /// status). The settings show the suggestions switch and the model's availability (#8, part 3, with an injected
-/// availability). Deadlines (#12, part 2a) lists the open deadlines in day order, the overdue one marked, with a count
+/// availability) and, from #12's part 3, the "Reminders" section (on, 3 days, 09:00, allowed, the footnote). Deadlines
+/// (#12, part 2a) lists the open deadlines in day order, the overdue one marked, with a count
 /// of overdue plus due soon, and the detail's deadline bar marks one done. On the iPhone the split view is a navigation
 /// stack, on the Mac three columns.
 final class LibrarySmokeTests: XCTestCase {
@@ -157,7 +158,8 @@ final class LibrarySmokeTests: XCTestCase {
         // The suggestions settings with an injected availability (`-UITestClassifierAvailability`, #8 part 3): turned
         // off in the system (the switch disabled, the reason shown) and getting ready (the switch works).
         assertSuggestionsSettings(availability: "appleIntelligenceNotEnabled", switchIsEnabled: false)
-        assertSuggestionsSettings(availability: "notReady", switchIsEnabled: true)
+        // The second launch also checks the "Reminders" section (#12, part 3).
+        assertSuggestionsSettings(availability: "notReady", switchIsEnabled: true, checksReminders: true)
     }
 
     /// Deadlines (#12, part 2a): the sidebar row counts 2 (overdue, and due within the default 3 days; maintainer
@@ -332,10 +334,12 @@ final class LibrarySmokeTests: XCTestCase {
     /// With `-UITestClassifierAvailability <availability>` the settings (the Mac's Settings window through ⌘,, the
     /// iPhone's sheet from the sidebar's toolbar) show the switch, enabled or not, the availability's note and the
     /// privacy statement, and pass the audit. An enabled switch turns off and on again (the in-memory launch keeps the
-    /// switch in a suite of its own, never this Mac's real setting).
+    /// switch in a suite of its own, never this Mac's real setting). With `checksReminders`, the "Reminders" section too
+    /// (`assertRemindersSettings`).
     @MainActor
     private func assertSuggestionsSettings(
-        availability: String, switchIsEnabled: Bool, file: StaticString = #filePath, line: UInt = #line
+        availability: String, switchIsEnabled: Bool, checksReminders: Bool = false, file: StaticString = #filePath,
+        line: UInt = #line
     ) {
         let ui = UITestApp()
         ui.launch(extraArguments: ["-UITestClassifierAvailability", availability])
@@ -380,11 +384,43 @@ final class LibrarySmokeTests: XCTestCase {
             Self.flip(toggle)
             XCTAssertTrue(Self.waitForValue(toggle, on: true), "the switch did not turn on", file: file, line: line)
         }
+        if checksReminders { assertRemindersSettings(ui, file: file, line: line) }
         #if os(iOS)
             ui.activate("settings.done", file: file, line: line)
             XCTAssertTrue(
                 ui.element("sidebar").waitForExistence(timeout: 10), "the sheet did not close", file: file, line: line)
         #endif
+    }
+
+    /// The settings' "Reminders" section (#12, part 3; maintainer decisions Q3–Q5): on, 3 days before, at 09:00 (each
+    /// picker's identifier names its value, so no localized text is read), "allowed" (the launch's in-memory center
+    /// answers `authorized` through `-UITestNotifications`, so there is no "Allow Notifications"), and the footnote
+    /// on what a reminder shows. It passes the audit, and on the Mac its texts reach the contrast.
+    @MainActor
+    private func assertRemindersSettings(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
+        let footnote = ui.element("settings.reminders.footnote")
+        #if os(iOS)
+            // The section is after "Matching": scrolled into view.
+            for _ in 0..<6 where !(footnote.exists && footnote.isHittable) {
+                ui.element("settings").swipeUp(velocity: .slow)
+            }
+        #endif
+        XCTAssertTrue(footnote.waitForExistence(timeout: 10), "no reminders footnote", file: file, line: line)
+        let toggle = ui.element("settings.reminders.switch")
+        XCTAssertTrue(toggle.exists, "no reminders switch", file: file, line: line)
+        XCTAssertEqual(Self.isOn(toggle), true, "reminders are on by default", file: file, line: line)
+        XCTAssertTrue(ui.element("settings.reminders.lead.3").exists, "not 3 days before", file: file, line: line)
+        XCTAssertTrue(ui.element("settings.reminders.time.0900").exists, "not at 09:00", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("settings.reminders.status.authorized").exists, "not allowed", file: file, line: line)
+        XCTAssertFalse(
+            ui.element("settings.reminders.allow").exists, "Allow Notifications while allowed", file: file, line: line)
+        attachSettingsScreenshot(ui, "18-settings-reminders")
+        #if os(macOS)
+            ui.assertTextContrast("settings.reminders.status.authorized", in: self, file: file, line: line)
+            ui.assertTextContrast("settings.reminders.footnote", in: self, file: file, line: line)
+        #endif
+        ui.auditAccessibility("settings-reminders", in: self, file: file, line: line)
     }
 
     /// The settings' own pixels: on the Mac the Settings window is not the library's, so the view's screenshot.
