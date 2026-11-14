@@ -2,7 +2,7 @@ import DokumentumKit
 import SwiftUI
 
 /// The app's settings (#8, part 3): the Mac's Settings window (⌘,) and, on the iPhone, a sheet from the sidebar's
-/// toolbar (`SettingsButton`). One section so far, "Suggestions".
+/// toolbar (`SettingsButton`). Two sections: "Suggestions" and "Matching" (#10, part 2, `MatchingSettingsSection`).
 ///
 /// Below the switch and its availability note come what suggestions do, the privacy statement and the per-device
 /// consequence (`about`): on the Mac in the section's footer, on the iPhone in a row without a background below the
@@ -11,6 +11,8 @@ import SwiftUI
 /// smaller text whatever its contrast.
 struct SettingsView: View {
     let model: SuggestionSettings
+    /// The app's one "Apply Matching Rules" run.
+    let matching: MatchingRunModel
 
     var body: some View {
         Form {
@@ -50,8 +52,10 @@ struct SettingsView: View {
                         .listRowBackground(Color.clear)
                 }
             #endif
+            MatchingSettingsSection(model: matching)
         }
         .formStyle(.grouped)
+        .modifier(MatchingRunConfirmation(model: matching))
         // Read again on each appearance: the observation runs only while the view is shown.
         .task {
             model.refresh()
@@ -85,10 +89,11 @@ struct SettingsView: View {
     /// model (unit tests that build the sidebar alone).
     struct SettingsButton: View {
         @Environment(SuggestionSettings.self) private var model: SuggestionSettings?
+        @Environment(MatchingRunModel.self) private var matching: MatchingRunModel?
         @State private var isPresented = false
 
         var body: some View {
-            if let model {
+            if let model, let matching {
                 Button {
                     isPresented = true
                 } label: {
@@ -101,7 +106,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier(AccessibilityID.settingsOpen)
                 .sheet(isPresented: $isPresented) {
                     NavigationStack {
-                        SettingsView(model: model)
+                        SettingsView(model: model, matching: matching)
                             .navigationTitle(Text("Settings"))
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
