@@ -4,6 +4,10 @@ import Foundation
 import Observation
 import PDFKit
 
+#if os(iOS)
+    import UIKit
+#endif
+
 /// What the detail column shows.
 enum DetailState: Equatable {
     /// No document is selected, or the selected one is gone.
@@ -68,6 +72,16 @@ final class LibraryModel {
     private(set) var snapshot = LibrarySnapshot.empty
     private(set) var tree = TagTree([])
     private(set) var counts = LibraryCounts()
+
+    /// The local day the deadlines' status and the Deadlines count are computed for (#12, part 2a): `AppDay`'s, read
+    /// again at each read of the library and when the day changes (`observeDayChanges`).
+    private(set) var today: DeadlineDay
+    /// Where "today" comes from: `AppDay`, or a test's fixed day.
+    private let readToday: @MainActor () -> DeadlineDay
+    /// The Deadlines count's lead time in days (maintainer decision Q7 on #12): a deadline at most this many days
+    /// ahead counts. **The seam for #12's part 3**, which replaces it with this device's reminder lead time; until then
+    /// `LibraryCounts.defaultDeadlineLeadDays` (3).
+    private let deadlineLeadDays: @MainActor () -> Int
     /// The documents of `selection`, in list order.
     private(set) var documents: [LibraryDocument] = []
     private(set) var detail = DetailState.noSelection
@@ -113,15 +127,23 @@ final class LibraryModel {
     /// Counts `loadDetail` calls: only the newest one's result is shown.
     private var detailGeneration = 0
 
-    /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
-    ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
+    /// - Parameters:
+    ///   - loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when it appears,
+    ///     because SwiftUI may create it again on any re-evaluation and discards that model.
+    ///   - today: the local day (`AppDay`); tests fix one.
+    ///   - deadlineLeadDays: the Deadlines count's lead time (#12, Q7), the seam part 3 replaces.
     init(
         source: any LibrarySource, searcher: (any DocumentSearching)? = nil,
-        retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true
+        retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true,
+        today: @escaping @MainActor () -> DeadlineDay = { AppDay.today() },
+        deadlineLeadDays: @escaping @MainActor () -> Int = { LibraryCounts.defaultDeadlineLeadDays }
     ) {
         self.source = source
         self.searcher = searcher
         self.retrier = retrier
+        readToday = today
+        self.today = today()
+        self.deadlineLeadDays = deadlineLeadDays
         if loadNow { reload() }
     }
 
@@ -136,9 +158,53 @@ final class LibraryModel {
         revision += 1
         snapshot = source.snapshot()
         tree = TagTree(snapshot.tags)
-        counts = LibraryCounts(snapshot.documents, tree: tree)
+        today = readToday()
+        recount()
         dropGoneTokens()
         applySelection()
+    }
+
+    private func recount() {
+        counts = LibraryCounts(snapshot.documents, tree: tree, today: today, deadlineLeadDays: deadlineLeadDays())
+    }
+
+    /// Reads "today" again at each change of the calendar day (`NSCalendarDayChanged`: midnight, a time zone or clock
+    /// change that moves the day), so the deadlines' status and the Deadlines count follow it while the window stays
+    /// open, until the calling task is cancelled. The root view runs it in `.task`.
+    func observeDayChanges(center: NotificationCenter = .default) async {
+        let (changes, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let tokens = Self.dayChangeNotifications.map { name in
+            center.addObserver(forName: name, object: nil, queue: nil) { _ in continuation.yield() }
+        }
+        defer { for token in tokens { center.removeObserver(token) } }
+        for await _ in changes {
+            dayMayHaveChanged()
+        }
+    }
+
+    /// The notifications after which "today" is read again. On the iPhone also the significant time change, which iOS
+    /// queues for a suspended app (review N4 of #219: whether a suspended app gets `NSCalendarDayChanged` after midnight
+    /// is not documented). The root view also reads it again when the scene becomes active.
+    nonisolated static var dayChangeNotifications: [Notification.Name] {
+        #if os(iOS)
+            [.NSCalendarDayChanged, UIApplication.significantTimeChangeNotification]
+        #else
+            [.NSCalendarDayChanged]
+        #endif
+    }
+
+    /// Reads "today" again; a new day recounts. The list itself does not depend on the day: it lists every open
+    /// deadline.
+    func dayMayHaveChanged() {
+        let day = readToday()
+        guard day != today else { return }
+        today = day
+        recount()
+    }
+
+    /// The status of the open document's or a row's deadline on `today`; `nil` without a deadline.
+    func deadlineStatus(of document: LibraryDocument) -> DeadlineStatus? {
+        document.deadline.map { DeadlineStatus($0, today: today) }
     }
 
     /// The documents of the selection, narrowed by the search when it is active (`LibrarySearch.apply`).
@@ -318,7 +384,7 @@ final class LibraryModel {
         switch outcome {
         case .saved, .unchanged:
             return
-        case .noDocument, .trashed, .noMetadata, nil:
+        case .noDocument, .trashed, .noMetadata, .noDeadline, nil:
             // A document that is gone has no title to show: it left the list, and the panel closed with it.
             guard let stored = snapshot.documents.first(where: { $0.instanceID == commit.document }) else { return }
             draft.show(commit.document, title: stored.title)
@@ -350,6 +416,21 @@ final class LibraryModel {
         // itself was saved.
         if outcome == .unchanged { reload() }
         return outcome
+    }
+
+    /// Saves the info panel's deadline label draft to its own document if the user changed it (#12, part 2a). A label-only
+    /// edit (`.deadlineLabel`, review N1 of #219): it carries no day, so a snapshot older than the store can never send
+    /// an old day back, set `deadlineSetAt` or clear `deadlineDoneAt`. A draft that was not saved (the deadline was
+    /// removed, the document trashed or gone, the save failed) starts again from the stored label.
+    func commitDeadlineLabel(_ draft: inout TitleDraft) {
+        guard let commit = draft.commit() else { return }
+        switch edit(.deadlineLabel(commit.title), of: commit.document) {
+        case .saved, .unchanged:
+            return
+        case .noDocument, .trashed, .noMetadata, .noDeadline, nil:
+            guard let stored = snapshot.documents.first(where: { $0.instanceID == commit.document }) else { return }
+            draft.show(commit.document, title: stored.deadline?.label ?? "")
+        }
     }
 
     /// The user typed in the title field again: the "could not be saved" line goes away.

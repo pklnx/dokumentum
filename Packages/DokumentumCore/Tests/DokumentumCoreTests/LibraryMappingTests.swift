@@ -55,6 +55,8 @@ struct LibraryMappingTests {
         #expect(row.documentType == LibraryDocument.Reference(instanceID: invoice.instanceID, name: "Invoice"))
         #expect(row.tagIDs == [tax.instanceID])
         #expect(row.fileState == .unknown)
+        #expect(row.deadline == nil)
+        #expect(row.dismissedSuggestionDay == nil)
 
         // No correspondent, no type, no tags: the row has none, and the trash date comes along.
         let other = try #require(snapshot.documents.first { $0.instanceID == bare.instanceID })
@@ -63,6 +65,26 @@ struct LibraryMappingTests {
         #expect(other.tagIDs.isEmpty)
         #expect(other.deletedAt == trashedAt)
         #expect(snapshot.unlistedTagNames.isEmpty)
+    }
+
+    /// The deadline and the dismissed day (#12, part 2a) come along unchanged, done or open, so the Deadlines list,
+    /// its count and the detail read them from the row.
+    @Test func aRowCarriesTheDeadline() throws {
+        let day = try #require(DeadlineDay(storedValue: "2026-11-27"))
+        let dismissed = try #require(DeadlineDay(storedValue: "2026-11-20"))
+        var open = Self.summary("Wasser")
+        open.deadline = DocumentDeadline(day: day, label: "Pay", setAt: Self.base)
+        open.dismissedSuggestionDay = dismissed
+        var done = Self.summary("Versicherung")
+        done.deadline = DocumentDeadline(day: day, setAt: Self.base, doneAt: Self.base.addingTimeInterval(60))
+        let snapshot = LibraryMapping.snapshot(documents: [open, done], metadata: [])
+        let openRow = try #require(snapshot.documents.first { $0.instanceID == open.instanceID })
+        #expect(openRow.deadline == open.deadline)
+        #expect(openRow.dismissedSuggestionDay == dismissed)
+        #expect(openRow.openDeadline == open.deadline)
+        let doneRow = try #require(snapshot.documents.first { $0.instanceID == done.instanceID })
+        #expect(doneRow.deadline == done.deadline)
+        #expect(doneRow.openDeadline == nil)
     }
 
     @Test func tombstonesAreLeftOutOfTheSidebar() {

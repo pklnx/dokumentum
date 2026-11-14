@@ -3,12 +3,14 @@ import DokumentumKit
 import SwiftUI
 
 /// The detail column: the open document's PDF, or why there is none (PQ12), its processing state when it is not
-/// processed yet (`ProcessingStatusBar`, #6 P2), and its info panel.
+/// processed yet (`ProcessingStatusBar`, #6 P2), its open deadline (`DeadlineBar`, #12 part 2a), and its info panel.
 struct DocumentDetailView: View {
     @Bindable var model: LibraryModel
 
     var body: some View {
         content
+            // The deadline under the processing line (#12, part 2a): the inner inset lies below the outer one.
+            .safeAreaInset(edge: .top, spacing: 0) { DeadlineBar(model: model) }
             .safeAreaInset(edge: .top, spacing: 0) { ProcessingStatusBar(model: model) }
             .navigationTitle(title)
             #if os(iOS)

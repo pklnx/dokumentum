@@ -14,6 +14,11 @@ import SwiftData
 ///   `MetadataName.normalized` name, a tag only with the same parent and normalized name, the key of the
 ///   repair's pass 2. Among several such records the first in `keeperOrder` is used, the one pass 2 keeps.
 ///   So the editor creates none of the duplicates pass 2 would merge later.
+/// - **Deadlines** (#12, part 2a; plan §6): a new day is a new deadline, so it also sets `deadlineSetAt` and clears
+///   `deadlineDoneAt` in the same save; a label edit or a done toggle writes only its own field and never rewrites
+///   `deadlineDay` (review N8), so a suffix a later build appended to the day survives it. `deadlineDismissedDay` is
+///   only ever raised: every write stores `max(stored, new)` (re-review N3), so two devices dismissing at once, or a
+///   removal that dismisses, never bring back a day that was dismissed.
 /// - **A failed save is rolled back.** Otherwise the change would stay pending in the main context, the library
 ///   would show it as saved, and the next edit's save (or an autosave) would write it after all.
 @MainActor
@@ -31,6 +36,25 @@ public struct DocumentEditor {
         /// Adds (`true`) or removes (`false`) the live tag with this `instanceID`. Removing it also removes the
         /// document's references to tombstones merged into it, which the library shows as that tag.
         case tag(UUID, Bool)
+        /// Sets the deadline's day and label (#12), the label without the whitespace around it. A day other than the
+        /// one the document reads is a new deadline: it also sets `deadlineSetAt` to now and clears `deadlineDoneAt`.
+        /// The day it already reads writes only a changed label, and leaves the stored day string as it is.
+        case deadline(DeadlineDay, label: String)
+        /// Sets only the deadline's day (the info panel's date picker; review N1 of #219): a day other than the one the
+        /// document reads is a new deadline (`deadlineSetAt` now, `deadlineDoneAt` cleared); the label stays as stored.
+        /// A document without a deadline gets one with an empty label.
+        case deadlineDay(DeadlineDay)
+        /// Sets only the deadline's label, without the whitespace around it (the info panel's label field; review N1 of
+        /// #219). It never carries a day, so a caller's stale day can never be written back: it writes only
+        /// `deadlineLabel`, never the day, `deadlineSetAt` or `deadlineDoneAt`. `.noDeadline` without a deadline.
+        case deadlineLabel(String)
+        /// Removes the deadline: empties `deadlineDay`, `deadlineLabel`, `deadlineSetAt` and `deadlineDoneAt`. With a
+        /// day, the same save also dismisses due-date suggestions up to it (review N9: removing the deadline that a
+        /// suggestion set must not offer it again), by the `max` rule.
+        case clearDeadline(dismissing: DeadlineDay?)
+        /// Marks the deadline done (`true`, `deadlineDoneAt` = now) or open again (`false`); writes only
+        /// `deadlineDoneAt`. A document without a deadline reports `.noDeadline`.
+        case deadlineDone(Bool)
     }
 
     /// What an edit did.
@@ -45,6 +69,8 @@ public struct DocumentEditor {
         case trashed
         /// The correspondent, type or tag is not a live record (gone or merged meanwhile).
         case noMetadata
+        /// A done toggle on a document that has no deadline (removed meanwhile, on this device or by sync).
+        case noDeadline
     }
 
     public enum MetadataError: Error, Equatable {
@@ -111,6 +137,38 @@ public struct DocumentEditor {
             let removed = try tagsShownAs(target, among: tags)
             guard !removed.isEmpty else { return .unchanged }
             document.tags = tags.filter { !removed.contains($0.instanceID) }
+        case .deadline(let day, let label):
+            let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if document.deadline?.day == day {
+                guard document.deadlineLabel != label else { return .unchanged }
+                document.deadlineLabel = label
+            } else {
+                setNewDay(day, of: document)
+                if document.deadlineLabel != label { document.deadlineLabel = label }
+            }
+        case .deadlineDay(let day):
+            guard document.deadline?.day != day else { return .unchanged }
+            setNewDay(day, of: document)
+        case .deadlineLabel(let label):
+            guard document.deadline != nil else { return .noDeadline }
+            let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard document.deadlineLabel != label else { return .unchanged }
+            document.deadlineLabel = label
+        case .clearDeadline(let dismissed):
+            let raisesDismissal = dismissed.map { Self.raises(document.deadlineDismissedDay, to: $0) } ?? false
+            guard
+                !document.deadlineDay.isEmpty || !document.deadlineLabel.isEmpty || document.deadlineSetAt != nil
+                    || document.deadlineDoneAt != nil || raisesDismissal
+            else { return .unchanged }
+            if !document.deadlineDay.isEmpty { document.deadlineDay = "" }
+            if !document.deadlineLabel.isEmpty { document.deadlineLabel = "" }
+            if document.deadlineSetAt != nil { document.deadlineSetAt = nil }
+            if document.deadlineDoneAt != nil { document.deadlineDoneAt = nil }
+            if let dismissed, raisesDismissal { document.deadlineDismissedDay = dismissed.storedValue }
+        case .deadlineDone(let isDone):
+            guard document.deadline != nil else { return .noDeadline }
+            guard (document.deadlineDoneAt != nil) != isDone else { return .unchanged }
+            document.deadlineDoneAt = isDone ? now() : nil
         }
         document.touch(now())
         try save()
@@ -188,6 +246,13 @@ public struct DocumentEditor {
 
     // MARK: Writing
 
+    /// A new deadline day: the day, `deadlineSetAt` now, and `deadlineDoneAt` cleared, in the caller's one save.
+    private func setNewDay(_ day: DeadlineDay, of document: Document) {
+        document.deadlineDay = day.storedValue
+        document.deadlineSetAt = now()
+        if document.deadlineDoneAt != nil { document.deadlineDoneAt = nil }
+    }
+
     private func insert(_ record: some PersistentModel & MetadataRecord) throws -> UUID {
         context.insert(record)
         try save()
@@ -203,6 +268,13 @@ public struct DocumentEditor {
             context.rollback()
             throw error
         }
+    }
+
+    /// Whether writing `day` as the dismissed day raises it: the `max(stored, new)` rule (re-review N3 of #12's plan).
+    /// A stored value that does not read as a day (the read rule) counts as none, so any day raises it.
+    static func raises(_ stored: String, to day: DeadlineDay) -> Bool {
+        guard let current = DeadlineDay(storedValue: stored) else { return true }
+        return day > current
     }
 
     /// The first record in `keeperOrder`: oldest `createdAt`, then the smallest `instanceID.uuidString`.

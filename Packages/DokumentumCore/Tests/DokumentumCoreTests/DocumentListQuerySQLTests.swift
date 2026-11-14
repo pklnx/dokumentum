@@ -22,7 +22,8 @@ struct DocumentListQuerySQLTests {
         // After seeding, which writes `INSERT INTO ZDOCUMENTTEXT` and the like.
         let recording = try SQLLog.Recording()
         let rows = try DocumentListQuery.fetch(filter, in: ModelContext(container))
-        _ = rows.map { ($0.title, $0.correspondent?.name, $0.tagInstanceIDs.count) }
+        _ = rows.map { ($0.title, $0.correspondent?.name, $0.tagInstanceIDs.count, $0.deadline?.label) }
+        #expect(rows.allSatisfy { $0.deadline != nil })
         let statements = try recording.statements()
 
         #expect(rows.count == (filter == .trash ? 1 : 2))
@@ -83,6 +84,8 @@ struct DocumentListQuerySQLTests {
         for index in 0..<3 {
             let document = Document(title: "Document \(index)")
             if index == 2 { document.deletedAt = .now }
+            // Deadlines (#12, part 2a) are columns of the document row: no table more is read for them.
+            (document.deadlineDay, document.deadlineLabel) = ("2026-12-0\(index + 1)", "Pay")
             context.insert(document)
             let file = DocumentFile(documentID: document.id, pdfData: Data(count: 200_000))
             let thumbnail = DocumentThumbnail(documentID: document.id, imageData: Data(count: 20_000))

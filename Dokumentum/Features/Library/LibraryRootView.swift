@@ -18,6 +18,8 @@ struct LibraryRootView: View {
     let launchStore: LaunchStore
     /// The sidebar footer's sync line (#31).
     let syncStatus: SyncStatusSource?
+    /// "Today" is read again when the window's scene becomes active (#12, review N4 of #219).
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
@@ -58,6 +60,11 @@ struct LibraryRootView: View {
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .task { await model.observeSearchIndex() }
+        // The deadlines' status and count follow the calendar day (#12, part 2a).
+        .task { await model.observeDayChanges() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.dayMayHaveChanged() }
+        }
         .focusedSceneValue(\.libraryModel, model)
         .environment(trash)
         .focusedSceneValue(\.libraryTrash, trash)

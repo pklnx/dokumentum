@@ -344,6 +344,10 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
 |---|---|---|---|
 | 11 | Deadlines and reminders | Deadlines on documents, an overview, local notifications, detection from the text as a suggestion | M |
 
+Step 11 so far: the schema (V3, #12 part 1), the overview and editing (part 2a: the Deadlines list with its count, the
+Go menu's ⌘4, the detail's deadline bar and the info panel's "Deadline" section), as built in
+[`index.md`, "Deadlines"](./index.md#deadlines). Part 2b suggests a due date from the text, part 3 reminds.
+
 ### Milestone 4: System integration
 | # | Step | Content | Size |
 |---|---|---|---|

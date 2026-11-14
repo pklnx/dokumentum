@@ -8,12 +8,15 @@ enum AccessibilityID {
     static let sidebar = "sidebar"
     static let sidebarInbox = "sidebar.inbox"
     static let sidebarAll = "sidebar.all"
+    /// "Deadlines" (#12, part 2a).
+    static let sidebarDeadlines = "sidebar.deadlines"
     static let sidebarTrash = "sidebar.trash"
 
     static func sidebarRow(_ selection: LibrarySelection) -> String {
         switch selection {
         case .inbox: sidebarInbox
         case .all: sidebarAll
+        case .upcoming: sidebarDeadlines
         case .trash: sidebarTrash
         case .tag(let id): "sidebar.tag.\(id.uuidString)"
         case .correspondent(let id): "sidebar.correspondent.\(id.uuidString)"
@@ -43,6 +46,18 @@ enum AccessibilityID {
     /// The line while suggestions are made for the document (#8, part 3).
     static let detailProcessingClassify = "documentDetail.processing.classify"
 
+    /// The detail's deadline bar (#12, part 2a): the line, named by the deadline's status, and its two buttons.
+    static func detailDeadline(_ status: DeadlineStatus) -> String {
+        switch status {
+        case .overdue: "documentDetail.deadline.overdue"
+        case .today: "documentDetail.deadline.today"
+        case .upcoming: "documentDetail.deadline.upcoming"
+        case .done: "documentDetail.deadline.done"
+        }
+    }
+    static let detailDeadlineMarkDone = "documentDetail.deadline.markDone"
+    static let detailDeadlineEdit = "documentDetail.deadline.edit"
+
     /// The detail's toolbar button that shows the info panel.
     static let detailShowInfo = "documentDetail.showInfo"
 
@@ -58,6 +73,12 @@ enum AccessibilityID {
     static func infoTag(_ id: UUID) -> String { "documentInfo.tag.\(id.uuidString)" }
     static let infoNewTag = "documentInfo.newTag"
     static let infoNewName = "documentInfo.newName"
+    /// The info panel's "Deadline" section (#12, part 2a).
+    static let infoDeadlineAdd = "documentInfo.deadline.add"
+    static let infoDeadlineDate = "documentInfo.deadline.date"
+    static let infoDeadlineLabel = "documentInfo.deadline.label"
+    static let infoDeadlineDone = "documentInfo.deadline.done"
+    static let infoDeadlineRemove = "documentInfo.deadline.remove"
     /// The iPhone sheet's "Done".
     static let infoDone = "documentInfo.done"
 

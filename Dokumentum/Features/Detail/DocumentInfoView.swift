@@ -3,8 +3,10 @@ import DokumentumKit
 import SwiftUI
 
 /// The open document's info panel (plan of #3, part 3; PQ6): an inspector, a trailing column on the Mac and a
-/// sheet on the iPhone. Every edit saves at once through `LibraryModel.edit`, the title on Return or when the
-/// field loses focus. Choosing and creating metadata by name only (PQ7). A trashed document is shown, not edited.
+/// sheet on the iPhone. Every edit saves at once through `LibraryModel.edit`, the title and the deadline's label on
+/// Return or when the field loses focus. Choosing and creating metadata by name only (PQ7). The "Deadline" section
+/// (#12, part 2a) adds, changes, completes and removes the document's one deadline. A trashed document is shown, not
+/// edited.
 struct DocumentInfoView: View {
     let model: LibraryModel
 
@@ -64,6 +66,10 @@ private struct DocumentInfoForm: View {
     /// panel closes, and only if the user changed it (`TitleDraft`).
     @State private var titleDraft = TitleDraft()
     @FocusState private var titleFocused: Bool
+    /// The deadline's label as typed (#12, part 2a), with the same rules as the title: saved on Return, when the field
+    /// loses focus, when the selection moves on or when the panel closes, and only if the user changed it.
+    @State private var labelDraft = TitleDraft()
+    @FocusState private var labelFocused: Bool
     /// The kind of record "New…" asks a name for.
     @State private var newKind: MetadataKind?
     @State private var newName = ""
@@ -106,6 +112,7 @@ private struct DocumentInfoForm: View {
                     records: model.snapshot.documentTypes, identifier: AccessibilityID.infoDocumentType,
                     change: { .documentType($0) })
             }
+            deadlineSection
             Section("Tags") {
                 ForEach(model.tagChoices, id: \.instanceID) { choice in
                     tagRow(choice.instanceID, path: choice.path)
@@ -124,6 +131,16 @@ private struct DocumentInfoForm: View {
         .onChange(of: document.title) { _, title in
             titleDraft.titleChanged(to: title)
         }
+        .onChange(of: document.instanceID, initial: true) { _, _ in
+            commitLabel()
+            labelDraft.show(document.instanceID, title: document.deadline?.label ?? "")
+        }
+        .onChange(of: document.deadline?.label ?? "") { _, label in
+            labelDraft.titleChanged(to: label)
+        }
+        .onChange(of: labelFocused) { _, focused in
+            if !focused { commitLabel() }
+        }
         .onChange(of: titleDraft.text) { _, _ in
             // Typing ends the "could not be saved" line; showing the stored title again (text equals base) does not.
             if titleDraft.isChanged { model.titleEditStarted() }
@@ -131,7 +148,10 @@ private struct DocumentInfoForm: View {
         .onChange(of: titleFocused) { _, focused in
             if !focused { commitTitle() }
         }
-        .onDisappear(perform: commitTitle)
+        .onDisappear {
+            commitTitle()
+            commitLabel()
+        }
         .alert(newKindTitle, isPresented: isAskingForName) {
             TextField("Name", text: $newName)
                 .accessibilityIdentifier(AccessibilityID.infoNewName)
@@ -148,6 +168,62 @@ private struct DocumentInfoForm: View {
     /// Saves the draft to its document if the user changed it; a draft that was not saved shows the stored title.
     private func commitTitle() {
         model.commitTitle(&titleDraft)
+    }
+
+    // MARK: Deadline
+
+    /// "Add Deadline" without a deadline, 7 days after today (part 2b offers the suggestion's day instead); with one,
+    /// its day (a date-only picker, four-digit years), its label, "Completed" and "Remove Deadline". A done deadline
+    /// stays here with "Completed" on, so it can be opened again.
+    @ViewBuilder
+    private var deadlineSection: some View {
+        Section("Deadline") {
+            if let deadline = document.deadline {
+                DatePicker(
+                    "Due Date", selection: deadlineDayBinding(deadline), in: DeadlineText.pickerRange,
+                    displayedComponents: .date
+                )
+                .accessibilityIdentifier(AccessibilityID.infoDeadlineDate)
+                TextField("Label", text: $labelDraft.text, prompt: Text("Optional"))
+                    .focused($labelFocused)
+                    .onSubmit(commitLabel)
+                    .accessibilityIdentifier(AccessibilityID.infoDeadlineLabel)
+                Toggle("Completed", isOn: deadlineDoneBinding)
+                    .accessibilityIdentifier(AccessibilityID.infoDeadlineDone)
+                Button("Remove Deadline") {
+                    model.edit(.clearDeadline(dismissing: nil), of: document.instanceID)
+                }
+                .accessibilityIdentifier(AccessibilityID.infoDeadlineRemove)
+            } else {
+                Button("Add Deadline") {
+                    let day = model.today.adding(days: 7) ?? model.today
+                    model.edit(.deadline(day, label: ""), of: document.instanceID)
+                }
+                .accessibilityIdentifier(AccessibilityID.infoDeadlineAdd)
+            }
+        }
+    }
+
+    /// A day-only edit (review N1 of #219): it keeps the stored label; the label draft is saved on its own.
+    private func deadlineDayBinding(_ deadline: DocumentDeadline) -> Binding<Date> {
+        Binding(
+            get: { DeadlineText.date(of: deadline.day) },
+            set: { date in
+                guard let day = DeadlineText.day(of: date) else { return }
+                model.edit(.deadlineDay(day), of: document.instanceID)
+            })
+    }
+
+    private var deadlineDoneBinding: Binding<Bool> {
+        Binding(
+            get: { document.deadline?.isDone ?? false },
+            set: { model.edit(.deadlineDone($0), of: document.instanceID) })
+    }
+
+    /// Saves the label draft to its own document's deadline if the user changed it, as a label-only edit
+    /// (`LibraryModel.commitDeadlineLabel`).
+    private func commitLabel() {
+        model.commitDeadlineLabel(&labelDraft)
     }
 
     // MARK: Date and inbox

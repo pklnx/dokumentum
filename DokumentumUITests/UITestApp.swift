@@ -73,9 +73,19 @@ struct UITestApp {
         ProcessInfo.processInfo.environment["DOKUMENTUM_UI_APPEARANCE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// The runner's local day as `yyyy-MM-dd`, which every launch passes as `-UITestToday` (#12, plan review B2): the
+    /// app's "today" (`AppDay`), so the sample deadlines' status and the Deadlines count do not depend on the day or the
+    /// hour a run starts in, and a run across midnight keeps the day it started with.
+    static let today: String = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let parts = calendar.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }()
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
-        var arguments = Self.launchArguments(store) + extraArguments
+        var arguments = Self.launchArguments(store) + ["-UITestToday", Self.today] + extraArguments
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
         }

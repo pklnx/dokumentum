@@ -1,7 +1,7 @@
 import XCTest
 
 /// The Mac's menu commands on the sample documents (`-UITestSeed`, in memory; plan of #3, part 5, PQ15): Go
-/// (⌘1-⌘3), Document › Show Info (⌘I), Edit › Move to Trash (⌘⌫) and File › Empty Trash… (⌘⇧⌫), through the real
+/// (⌘1-⌘3, and ⌘4 for Deadlines, #12 part 2a), Document › Show Info (⌘I), Edit › Move to Trash (⌘⌫) and File › Empty Trash… (⌘⇧⌫), through the real
 /// menu bar's key equivalents. It includes reviewer B's ⌘⌫ probe of #67 (#70): ⌘⌫ in the title field edits only
 /// the text.
 final class MenuCommandsSmokeTests: XCTestCase {
@@ -13,6 +13,8 @@ final class MenuCommandsSmokeTests: XCTestCase {
 
     /// Account statement: not in the Inbox, so only All Documents lists it.
     private static let accountStatement = 4
+    /// Medical invoice: an overdue deadline, so Deadlines lists it; the electricity bill (1) has none.
+    private static let medicalInvoice = 2
 
     override func setUp() {
         continueAfterFailure = false
@@ -82,6 +84,17 @@ final class MenuCommandsSmokeTests: XCTestCase {
             XCTAssertTrue(
                 ui.element(Self.documentRow(1)).waitForExistence(timeout: 10), "⌘1 did not show the Inbox")
             XCTAssertFalse(row.exists)
+
+            // ⌘4: Deadlines, with the medical invoice and without the electricity bill; the trashed account statement
+            // is not there either.
+            ui.app.typeKey("4", modifierFlags: .command)
+            XCTAssertTrue(
+                ui.element(Self.documentRow(1)).waitForNonExistence(timeout: 10), "⌘4 did not leave the Inbox")
+            XCTAssertTrue(
+                ui.element(Self.documentRow(Self.medicalInvoice)).waitForExistence(timeout: 10),
+                "⌘4 did not show Deadlines")
+            XCTAssertFalse(row.exists, "a trashed document in Deadlines")
+            ui.attachWindowScreenshot("5-deadlines", to: self)
         }
     #endif
 }

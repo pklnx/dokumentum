@@ -35,6 +35,10 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
     public var documentType: MetadataReference?
     /// The `instanceID`s of the document's tags.
     public var tagInstanceIDs: Set<UUID>
+    /// The deadline (#12), by the read rule (`Document.deadline`); `nil` for none.
+    public var deadline: DocumentDeadline?
+    /// The day up to which due-date suggestions are dismissed (`Document.dismissedSuggestionDay`).
+    public var dismissedSuggestionDay: DeadlineDay?
 
     public var id: UUID { instanceID }
 
@@ -54,7 +58,9 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
         processingState: ProcessingState,
         correspondent: MetadataReference?,
         documentType: MetadataReference?,
-        tagInstanceIDs: Set<UUID>
+        tagInstanceIDs: Set<UUID>,
+        deadline: DocumentDeadline? = nil,
+        dismissedSuggestionDay: DeadlineDay? = nil
     ) {
         self.instanceID = instanceID
         self.documentID = documentID
@@ -72,6 +78,8 @@ public struct DocumentSummary: Hashable, Sendable, Identifiable {
         self.correspondent = correspondent
         self.documentType = documentType
         self.tagInstanceIDs = tagInstanceIDs
+        self.deadline = deadline
+        self.dismissedSuggestionDay = dismissedSuggestionDay
     }
 
     /// The list order: newest `documentDate` first, then newest `createdAt`, then the smaller
@@ -102,7 +110,8 @@ public enum DocumentListQuery {
     /// `Document` (measured on #29); it stays as documentation of what a row reads, and nothing relies on it.
     public nonisolated(unsafe) static let fetchedProperties: [PartialKeyPath<Document>] = [
         \.id, \.instanceID, \.title, \.createdAt, \.modifiedAt, \.documentDate, \.isInbox, \.deletedAt,
-        \.pageCount, \.fileSize, \.originalFileName, \.sourceRaw, \.processingStateRaw,
+        \.pageCount, \.fileSize, \.originalFileName, \.sourceRaw, \.processingStateRaw, \.deadlineDay, \.deadlineLabel,
+        \.deadlineSetAt, \.deadlineDoneAt, \.deadlineDismissedDay,
     ]
 
     /// The relationships a row shows. Never `file`, `thumbnail` or `text`.
@@ -154,6 +163,7 @@ public enum DocumentListQuery {
             processingState: document.processingState,
             correspondent: document.correspondent.map { MetadataReference(instanceID: $0.instanceID, name: $0.name) },
             documentType: document.documentType.map { MetadataReference(instanceID: $0.instanceID, name: $0.name) },
-            tagInstanceIDs: Set((document.tags ?? []).map(\.instanceID)))
+            tagInstanceIDs: Set((document.tags ?? []).map(\.instanceID)), deadline: document.deadline,
+            dismissedSuggestionDay: document.dismissedSuggestionDay)
     }
 }
