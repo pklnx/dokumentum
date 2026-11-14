@@ -42,6 +42,129 @@
         }
       }
     },
+    "%lld documents changed meanwhile and were skipped. Apply the rules again." : {
+      "comment" : "Settings: result of applying the matching rules.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Dokument wurde zwischendurch geändert und übersprungen. Wende die Regeln erneut an."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dokumente wurden zwischendurch geändert und übersprungen. Wende die Regeln erneut an."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 document changed meanwhile and was skipped. Apply the rules again."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld documents changed meanwhile and were skipped. Apply the rules again."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld documents changed." : {
+      "comment" : "Settings: result of applying the matching rules: documents that got a correspondent, type or tags.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Dokument geändert."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Dokumente geändert."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 document changed."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld documents changed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld documents matched several correspondents or document types; that field stays empty." : {
+      "comment" : "Settings: result of applying the matching rules.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Bei 1 Dokument passten mehrere Korrespondenten oder Dokumenttypen; das Feld bleibt leer."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Bei %lld Dokumenten passten mehrere Korrespondenten oder Dokumenttypen; das Feld bleibt leer."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 document matched several correspondents or document types; that field stays empty."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld documents matched several correspondents or document types; that field stays empty."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld files are already in the archive and were skipped:" : {
       "comment" : "Import notice: heading of the list of skipped duplicates (two or more).",
       "localizations" : {
@@ -234,6 +357,58 @@
         }
       }
     },
+    "%lld rules are not applied because their item exists twice in the archive." : {
+      "comment" : "Settings: result of applying the matching rules.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 Regel wird nicht angewendet, weil ihr Eintrag doppelt im Archiv ist."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Regeln werden nicht angewendet, weil ihr Eintrag doppelt im Archiv ist."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 rule is not applied because its item exists twice in the archive."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld rules are not applied because their item exists twice in the archive."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "A newer version of Dokumentum set this rule. It is kept unless you choose another match." : {
+      "comment" : "Matching rule sheet: explanation of a mode written by a newer app version.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine neuere Version von Dokumentum hat diese Regel festgelegt. Sie bleibt erhalten, solange du keinen anderen Abgleich wählst."
+          }
+        }
+      }
+    },
     "Account" : {
       "comment" : "Sync status detail: label of the iCloud account's state.",
       "localizations" : {
@@ -278,6 +453,17 @@
         }
       }
     },
+    "All words" : {
+      "comment" : "Matching rule mode: every word occurs, in any order.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Wörter"
+          }
+        }
+      }
+    },
     "Already in the archive" : {
       "comment" : "Import notice title: every file was a duplicate.",
       "localizations" : {
@@ -295,6 +481,17 @@
         }
       }
     },
+    "Any word" : {
+      "comment" : "Matching rule mode: one of the words occurs.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eines der Wörter"
+          }
+        }
+      }
+    },
     "Apple Intelligence is getting ready. Suggestions start once it is ready." : {
       "comment" : "Settings, under the suggestions switch: the on-device model is still being downloaded or prepared.",
       "localizations" : {
@@ -306,6 +503,61 @@
         }
       }
     },
+    "Apply" : {
+      "comment" : "Settings: the confirmation's button that applies the matching rules.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anwenden"
+          }
+        }
+      }
+    },
+    "Apply Matching Rules to All Documents…" : {
+      "comment" : "Settings: button that applies the matching rules to every document (asks first).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleichsregeln auf alle Dokumente anwenden …"
+          }
+        }
+      }
+    },
+    "Apply matching rules to all documents?" : {
+      "comment" : "Settings: title of the confirmation before the matching rules are applied.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleichsregeln auf alle Dokumente anwenden?"
+          }
+        }
+      }
+    },
+    "Applying rules…" : {
+      "comment" : "Settings: progress line while the matching rules are applied, before the first batch.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regeln werden angewendet …"
+          }
+        }
+      }
+    },
+    "Applying rules… %lld of %lld" : {
+      "comment" : "Settings: progress line while the matching rules are applied: documents done of all.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regeln werden angewendet … %1$lld von %2$lld"
+          }
+        }
+      }
+    },
     "Available" : {
       "comment" : "Sync status detail, Account: signed in and available.",
       "localizations" : {
@@ -313,6 +565,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verfügbar"
+          }
+        }
+      }
+    },
+    "Back-references such as \\1 or \\k<name> are not supported." : {
+      "comment" : "Matching rule sheet: error under the pattern field. Keep \\1 and \\k<name> as written.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rückverweise wie \\1 oder \\k<name> werden nicht unterstützt."
           }
         }
       }
@@ -548,6 +811,17 @@
         }
       }
     },
+    "Edit Matching…" : {
+      "comment" : "Sidebar: context menu item and accessibility action of a tag, correspondent or document type; opens its matching rule.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleich bearbeiten …"
+          }
+        }
+      }
+    },
     "Empty Trash" : {
       "comment" : "Confirmation of Empty Trash: the button that deletes.",
       "localizations" : {
@@ -570,6 +844,17 @@
         }
       }
     },
+    "Empty correspondents and document types are filled in, and matching tags are added, also tags you removed by hand. A correspondent or document type is never replaced, also not one that Apple Intelligence or detection filled in. When several correspondents or document types match a document, that field stays empty. Documents in the trash are not changed." : {
+      "comment" : "Settings: message of the confirmation before the matching rules are applied.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leere Korrespondenten und Dokumenttypen werden ausgefüllt, und passende Tags werden hinzugefügt, auch Tags, die du von Hand entfernt hast. Ein Korrespondent oder Dokumenttyp wird nie ersetzt, auch keiner, den Apple Intelligence oder die Erkennung ausgefüllt hat. Wenn zu einem Dokument mehrere Korrespondenten oder Dokumenttypen passen, bleibt das Feld leer. Dokumente im Papierkorb werden nicht geändert."
+          }
+        }
+      }
+    },
     "Enhanced" : {
       "comment" : "Photo cleanup filter: whitened paper, colours kept (the default).",
       "localizations" : {
@@ -577,6 +862,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Optimiert"
+          }
+        }
+      }
+    },
+    "Exact phrase" : {
+      "comment" : "Matching rule mode: the words occur in this order.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Genaue Wortfolge"
           }
         }
       }
@@ -859,6 +1155,72 @@
         }
       }
     },
+    "Match" : {
+      "comment" : "Matching rule sheet: label of the mode picker.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleich"
+          }
+        }
+      }
+    },
+    "Matches when the regular expression is found in the text. Only case is ignored: accents and ae, oe, ue count as written, so write M(ü|ue)ller to find both." : {
+      "comment" : "Matching rule sheet: explanation of the mode Regular expression (case-insensitive only).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passt, wenn der reguläre Ausdruck im Text gefunden wird. Nur Groß- und Kleinschreibung wird ignoriert: Akzente und ae, oe, ue zählen wie geschrieben, schreibe also M(ü|ue)ller, um beides zu finden."
+          }
+        }
+      }
+    },
+    "Matches when the text contains all of the words, in any order. Whole words only; case and accents are ignored, and ä matches ae. Put a phrase in quotes." : {
+      "comment" : "Matching rule sheet: explanation of the mode All words.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passt, wenn der Text alle Wörter enthält, in beliebiger Reihenfolge. Nur ganze Wörter; Groß- und Kleinschreibung und Akzente werden ignoriert, und ä passt zu ae. Setze eine Wortfolge in Anführungszeichen."
+          }
+        }
+      }
+    },
+    "Matches when the text contains one of the words. Whole words only; case and accents are ignored, and ä matches ae. Put a phrase in quotes." : {
+      "comment" : "Matching rule sheet: explanation of the mode Any word.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passt, wenn der Text eines der Wörter enthält. Nur ganze Wörter; Groß- und Kleinschreibung und Akzente werden ignoriert, und ä passt zu ae. Setze eine Wortfolge in Anführungszeichen."
+          }
+        }
+      }
+    },
+    "Matches when the text contains these words in this order. Whole words only; case and accents are ignored, and ä matches ae." : {
+      "comment" : "Matching rule sheet: explanation of the mode Exact phrase.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passt, wenn der Text diese Wörter in dieser Reihenfolge enthält. Nur ganze Wörter; Groß- und Kleinschreibung und Akzente werden ignoriert, und ä passt zu ae."
+          }
+        }
+      }
+    },
+    "Matching" : {
+      "comment" : "Settings: the section header of the matching rules.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgleich"
+          }
+        }
+      }
+    },
     "More" : {
       "comment" : "The open document's menu in the iPhone's detail bar.",
       "localizations" : {
@@ -1002,6 +1364,17 @@
         }
       }
     },
+    "No document was changed." : {
+      "comment" : "Settings: result of applying the matching rules.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Dokument wurde geändert."
+          }
+        }
+      }
+    },
     "No documents" : {
       "comment" : "A list without documents (not the Inbox).",
       "localizations" : {
@@ -1024,13 +1397,35 @@
         }
       }
     },
+    "No rule: nothing is assigned from a document's text." : {
+      "comment" : "Matching rule sheet: explanation of the mode None.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Regel: Aus dem Text eines Dokuments wird nichts zugeordnet."
+          }
+        }
+      }
+    },
     "None" : {
-      "comment" : "Info panel: the picker item for no correspondent or no document type.",
+      "comment" : "Info panel: no correspondent or document type; matching rule sheet: the mode without a rule (German \"Keiner\" fits both: der Korrespondent, der Abgleich).",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keiner"
+          }
+        }
+      }
+    },
+    "Not applied, not valid: %@" : {
+      "comment" : "Settings: result of applying the matching rules. %@ lists the names of the tags, correspondents or types whose rule is not valid.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht angewendet, ungültig: %@"
           }
         }
       }
@@ -1185,6 +1580,17 @@
         }
       }
     },
+    "Pattern" : {
+      "comment" : "Matching rule sheet: label of the pattern field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Muster"
+          }
+        }
+      }
+    },
     "Permanently delete %lld documents?" : {
       "comment" : "Title of the Empty Trash confirmation: how many documents it deletes.",
       "localizations" : {
@@ -1282,6 +1688,17 @@
         }
       }
     },
+    "Regular expression" : {
+      "comment" : "Matching rule mode: a regular expression.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regulärer Ausdruck"
+          }
+        }
+      }
+    },
     "Remove Page" : {
       "comment" : "Photo cleanup sheet: leaves the selected page out of the document.",
       "localizations" : {
@@ -1322,6 +1739,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Drehen"
+          }
+        }
+      }
+    },
+    "Rules assign tags, correspondents and document types from a document's text. New documents get them after text recognition; this applies them to the documents you already have." : {
+      "comment" : "Settings: what the Matching section does.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regeln ordnen Dokumenten anhand ihres Texts Tags, Korrespondenten und Dokumenttypen zu. Neue Dokumente erhalten sie nach der Texterkennung; hiermit wendest du sie auf die Dokumente an, die du schon hast."
           }
         }
       }
@@ -1427,6 +1855,17 @@
         }
       }
     },
+    "Set by a newer version of Dokumentum" : {
+      "comment" : "Matching rule mode written by a newer app version, shown in the mode picker.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Von einer neueren Version von Dokumentum festgelegt"
+          }
+        }
+      }
+    },
     "Settings" : {
       "comment" : "iPhone: the sidebar's toolbar button that opens the settings, and the settings sheet's title.",
       "localizations" : {
@@ -1456,6 +1895,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wird noch geladen"
+          }
+        }
+      }
+    },
+    "Stopped before every document was checked." : {
+      "comment" : "Settings: result of applying the matching rules after Cancel.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abgebrochen, bevor jedes Dokument geprüft war."
           }
         }
       }
@@ -1592,6 +2042,39 @@
         }
       }
     },
+    "The pattern can have at most %lld characters." : {
+      "comment" : "Matching rule sheet: error under the pattern field. %lld is the limit (1000).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Muster darf höchstens %lld Zeichen lang sein."
+          }
+        }
+      }
+    },
+    "The rule could not be saved." : {
+      "comment" : "Matching rule sheet: line under the pattern field when saving failed.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Regel konnte nicht gespeichert werden."
+          }
+        }
+      }
+    },
+    "The rules could not be applied to every document." : {
+      "comment" : "Settings: result of applying the matching rules when the store failed.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Regeln konnten nicht auf jedes Dokument angewendet werden."
+          }
+        }
+      }
+    },
     "The title could not be saved." : {
       "comment" : "Info panel: shown under the title field when saving the title failed and it was rolled back.",
       "localizations" : {
@@ -1642,6 +2125,50 @@
         }
       }
     },
+    "This item no longer exists." : {
+      "comment" : "Matching rule sheet of a tag, correspondent or document type that was deleted or merged meanwhile.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diesen Eintrag gibt es nicht mehr."
+          }
+        }
+      }
+    },
+    "This regular expression is not valid." : {
+      "comment" : "Matching rule sheet: error under the pattern field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser reguläre Ausdruck ist ungültig."
+          }
+        }
+      }
+    },
+    "This regular expression takes too long to check." : {
+      "comment" : "Matching rule sheet: error under the pattern field (the test run ran out of time).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser reguläre Ausdruck braucht zu lange zum Prüfen."
+          }
+        }
+      }
+    },
+    "This rule is not applied: “%@” exists twice in the archive." : {
+      "comment" : "Matching rule sheet of a record with copies sharing its identity. %@ is its name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Regel wird nicht angewendet: „%@“ ist doppelt im Archiv."
+          }
+        }
+      }
+    },
     "Title" : {
       "comment" : "Info panel: the document's title field.",
       "localizations" : {
@@ -1649,6 +2176,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Titel"
+          }
+        }
+      }
+    },
+    "Too slow on some documents: %@" : {
+      "comment" : "Settings: result of applying the matching rules. %@ lists the names whose regular expression ran out of time.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei manchen Dokumenten zu langsam: %@"
           }
         }
       }

@@ -99,4 +99,23 @@ struct MatchingRuleEditorTests {
         #expect(try editor.rule(of: .correspondent, id) == nil)
         #expect(try editor.save(.correspondent, id, pattern: "Telekom") == .noMetadata)
     }
+
+    /// #200: the sheet tells a record with copies from a gone one and from a record it edits (counter-proof: a record
+    /// with copies reads as gone, as `rule(of:)` gives `nil` for both).
+    @Test(arguments: [false, true])
+    func theStateTellsCopiesFromAGoneRecord(tombstoneFirst: Bool) throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let copied = try store.insertCopiedCorrespondent(tombstoneFirst: tombstoneFirst)
+        let keeper = try store.insertMetadata(.correspondent, "Telekom")
+        let tombstone = try store.insertRule(.correspondent, "Telekom alt", .any, "x", mergedInto: keeper)
+        let ruled = try store.insertRule(.tag, "Strom", .regex, "Strom\\s+\\d+")
+        let editor = MatchingRuleEditor(context: ModelContext(store.container))
+
+        #expect(try editor.state(of: .correspondent, copied) == .copies)
+        #expect(try editor.state(of: .correspondent, tombstone) == .gone)
+        #expect(try editor.state(of: .tag, UUID()) == .gone)
+        #expect(try editor.state(of: .tag, ruled) == .rule(MatchingRuleValue(mode: .regex, pattern: "Strom\\s+\\d+")))
+        #expect(try editor.state(of: .correspondent, keeper) == .rule(MatchingRuleValue(mode: .none, pattern: "")))
+    }
 }

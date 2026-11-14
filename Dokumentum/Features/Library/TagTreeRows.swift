@@ -32,10 +32,12 @@ private struct TagTreeRow: View {
         #if os(macOS)
             content
                 .tag(LibrarySelection.tag(id))
+                .modifier(MatchingRuleContextMenu(model: model, tag: row.tag))
         #else
             NavigationLink(value: LibrarySelection.tag(id)) {
                 content
             }
+            .modifier(MatchingRuleContextMenu(model: model, tag: row.tag))
         #endif
     }
 
@@ -49,6 +51,14 @@ private struct TagTreeRow: View {
             .accessibilityActions {
                 if row.hasChildren {
                     Button(isExpanded ? "Collapse" : "Expand") { toggle() }
+                }
+                // The rule sheet (#10, part 2), as the context menu offers it.
+                if model.canEditMatching {
+                    Button {
+                        model.editMatching(.tag, id, name: row.tag.name)
+                    } label: {
+                        Text(MatchingRuleText.edit)
+                    }
                 }
             }
             .accessibilityAddTraits(.isButton)
@@ -94,5 +104,32 @@ private struct TagTreeRow: View {
 
     private func toggle() {
         model.toggleExpanded(id)
+    }
+}
+
+/// A tag row's context menu: "Edit Matching…" (#10, part 2). The named accessibility action is with the row's other
+/// actions, on its label (`TagTreeRow`).
+private struct MatchingRuleContextMenu: ViewModifier {
+    let model: LibraryModel
+    let tag: TagRecord
+
+    func body(content: Content) -> some View {
+        if model.canEditMatching {
+            content
+                .contextMenu {
+                    Button {
+                        model.editMatching(.tag, tag.instanceID, name: tag.name)
+                    } label: {
+                        Label {
+                            Text(MatchingRuleText.edit)
+                        } icon: {
+                            Image(systemName: "text.magnifyingglass")
+                        }
+                    }
+                    .accessibilityIdentifier(AccessibilityID.matchingEdit)
+                }
+        } else {
+            content
+        }
     }
 }

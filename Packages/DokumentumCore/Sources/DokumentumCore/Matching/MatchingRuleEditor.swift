@@ -52,6 +52,26 @@ public struct MatchingRuleEditor {
         try StoreLibrarySource.matchingRule(of: kind, instanceID, in: context)
     }
 
+    /// What the rule sheet (#200) shows for a record.
+    public enum RecordState: Sendable, Equatable {
+        /// The live record's rule: the sheet edits it.
+        case rule(MatchingRuleValue)
+        /// A live record whose `instanceID` other records share: matching never applies its rule
+        /// (`MatchingStore.withoutCopies`), and `save` refuses it (`noMetadata`), so the sheet says so instead of
+        /// offering an edit that would change nothing (review A of #205, N6).
+        case copies
+        /// No live record with that `instanceID` (gone, or merged away).
+        case gone
+    }
+
+    /// The state of the record of `kind` with `instanceID`: its rule, `copies`, or `gone`.
+    public func state(of kind: MetadataKind, _ instanceID: UUID) throws -> RecordState {
+        let records = try Self.records(kind, instanceID, in: context)
+        guard records.contains(where: \.isLive) else { return .gone }
+        guard records.count == 1 else { return .copies }
+        return .rule(MatchingRuleValue(mode: records[0].matchMode, pattern: records[0].matchPattern))
+    }
+
     /// Saves the changed fields of the rule of the live record of `kind` with `instanceID`.
     /// - Parameters:
     ///   - mode: the mode the user picked, `nil` when untouched; `.unknown` writes nothing.
@@ -91,25 +111,26 @@ public struct MatchingRuleEditor {
     nonisolated static func live(_ kind: MetadataKind, _ instanceID: UUID, in context: ModelContext) throws
         -> (any MatchingRuleRecord)?
     {
-        switch kind {
-        case .tag:
-            return try first(FetchDescriptor<Tag>(predicate: #Predicate { $0.instanceID == instanceID }), in: context)
-        case .correspondent:
-            return try first(
-                FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == instanceID }), in: context)
-        case .documentType:
-            return try first(
-                FetchDescriptor<DocumentType>(predicate: #Predicate { $0.instanceID == instanceID }), in: context)
-        }
-    }
-
-    private nonisolated static func first<T: PersistentModel & MatchingRuleRecord>(
-        _ descriptor: FetchDescriptor<T>, in context: ModelContext
-    ) throws -> T? {
         // Only a record without copies (`MatchingStore.withoutCopies`): matching ignores a record with copies, so
         // editing one copy's rule would do nothing, and which copy a fetch returns first is not stable.
-        let records = try context.fetch(descriptor)
+        let records = try records(kind, instanceID, in: context)
         return records.count == 1 && records[0].isLive ? records[0] : nil
+    }
+
+    /// Every record of `kind` with `instanceID`, tombstones and copies included.
+    private nonisolated static func records(_ kind: MetadataKind, _ instanceID: UUID, in context: ModelContext) throws
+        -> [any MatchingRuleRecord]
+    {
+        switch kind {
+        case .tag:
+            return try context.fetch(FetchDescriptor<Tag>(predicate: #Predicate { $0.instanceID == instanceID }))
+        case .correspondent:
+            return try context.fetch(
+                FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == instanceID }))
+        case .documentType:
+            return try context.fetch(
+                FetchDescriptor<DocumentType>(predicate: #Predicate { $0.instanceID == instanceID }))
+        }
     }
 }
 
