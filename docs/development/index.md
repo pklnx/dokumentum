@@ -1410,7 +1410,8 @@ once. Kit holds the rule (`Packages/DokumentumKit/Sources/DokumentumKit/Reminder
 1, 2, 3, 7 or 14 days before; default 3) and the time of day (default 09:00). `ReminderSettingsModel` keeps them in the
 launch's settings suite (keys `reminders.isOn`, `reminders.leadDays`, `reminders.minuteOfDay`). The settings' "Reminders"
 section (`ReminderSettingsSection`, after "Matching") has the switch, the two pickers, the permission's status line
-("allowed", "Allow Notifications", or turned off with a button to the system's settings) and the footnote: a reminder
+("allowed", "Allow Notifications", or turned off with a button to the system's settings; shown with its button only
+while the switch is on, maintainer decision on review B N4 of #222) and the footnote: a reminder
 shows the document's title, its due day and the deadline's label, never the document's text, and the lock screen follows
 "Show Previews" (Q5). Identifiers `settings.reminders.switch`, `…lead.<days>`, `…time.<HHmm>`,
 `…status.authorized|notDetermined|denied`, `…allow`, `…openSettings`, `…footnote`: the pickers' and the status line's

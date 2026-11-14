@@ -7,8 +7,8 @@ import SwiftUI
 
 /// The settings' "Reminders" section (#12, part 3; plan §7; maintainer decisions Q3–Q5), after "Matching": the switch,
 /// the lead time and the time of day (this device's, never synced), the permission's status with "Allow
-/// Notifications" or, when it was refused, a button to the system's settings, and what a reminder shows (the footnote
-/// names "Show Previews"). As the other sections: the texts below it in the footer on the Mac and in a row without a
+/// Notifications" or, when it was refused, a button to the system's settings (both only while reminders are on), and
+/// what a reminder shows (the footnote names "Show Previews"). As the other sections: the texts below it in the footer on the Mac and in a row without a
 /// background on the iPhone, primary text in callout medium.
 struct ReminderSettingsSection: View {
     let reminders: Reminders
@@ -37,7 +37,10 @@ struct ReminderSettingsSection: View {
             }
             .disabled(!settings.isOn)
             .accessibilityIdentifier(AccessibilityID.settingsRemindersTime(settings.minuteOfDay))
-            statusLine
+            // The status and its button only while reminders are on (maintainer decision on review B N4 of #222).
+            if reminders.showsPermissionStatus {
+                statusLine
+            }
         } header: {
             Text(ReminderSettingsText.section)
         } footer: {

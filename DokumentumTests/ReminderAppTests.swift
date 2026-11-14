@@ -249,6 +249,26 @@ struct ReminderAppTests {
         #expect(model.selectedDocumentID == Self.carInsurance, "a gone document opens nothing")
     }
 
+    /// The settings show the permission's status line and its button only while reminders are on (maintainer decision on
+    /// review B N4 of #222), whatever the status.
+    @Test(arguments: [ReminderAuthorizationStatus.notDetermined, .denied, .authorized])
+    func thePermissionLineShowsOnlyWhileRemindersAreOn(status: ReminderAuthorizationStatus) async throws {
+        let suite = Self.suite()
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        let environment = ReminderEnvironment(
+            choice: .inMemory, center: InMemoryNotificationCenter(status: status), settingsSuite: suite,
+            scheduledSet: InMemoryScheduledSet())
+        let reminders = Reminders(environment: environment, container: try makeInMemoryContainer(), storeChanges: nil)
+        await reminders.authorization.refresh()
+        #expect(reminders.authorization.status == status)
+        #expect(reminders.showsPermissionStatus)
+        reminders.settings.setOn(false)
+        #expect(!reminders.showsPermissionStatus)
+        #expect(!reminders.offersPermission)
+        reminders.settings.setOn(true)
+        #expect(reminders.showsPermissionStatus)
+    }
+
     /// A tapped reminder of a document in the trash opens it in the Trash (review B N3 of #222).
     @Test func aTapOnATrashedDocumentOpensTheTrash() throws {
         let container = try makeInMemoryContainer()

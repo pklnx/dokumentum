@@ -89,6 +89,12 @@ final class Reminders {
         }
     }
 
+    /// Whether the settings show the permission's status line and its button ("Allow Notifications", "Open (System)
+    /// Settings"): only while reminders are on (maintainer decision on review B N4 of #222).
+    var showsPermissionStatus: Bool {
+        settings.settings.isOn
+    }
+
     /// Whether the Deadlines list offers "Allow Notifications": reminders are on and the system has not been asked.
     var offersPermission: Bool {
         settings.settings.isOn && authorization.status == .notDetermined
