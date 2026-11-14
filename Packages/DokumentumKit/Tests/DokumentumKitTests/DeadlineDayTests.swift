@@ -101,6 +101,46 @@ struct DeadlineDayTests {
         #expect(max(try Self.day(2026, 11, 27), try Self.day(2026, 12, 15)) == (try Self.day(2026, 12, 15)))
     }
 
+    // MARK: Day arithmetic (#12, part 2a)
+
+    /// `dayNumber` counts days since 1970-01-01, across month and year ends and leap days, and `init(dayNumber:)` is
+    /// its inverse for every day of the years 1000–9999 that this test visits.
+    @Test func dayNumbersCountDaysAndRoundTrip() throws {
+        #expect(try Self.day(1970, 1, 1).dayNumber == 0)
+        #expect(try Self.day(1969, 12, 31).dayNumber == -1)
+        #expect(try Self.day(2000, 3, 1).dayNumber == 11_017)
+        #expect(try Self.day(2026, 11, 27).dayNumber == 20_784)
+        #expect(try Self.day(2028, 2, 29).adding(days: 1) == (try Self.day(2028, 3, 1)))
+        #expect(try Self.day(2026, 2, 28).adding(days: 1) == (try Self.day(2026, 3, 1)))
+        #expect(try Self.day(2026, 12, 31).adding(days: 1) == (try Self.day(2027, 1, 1)))
+        #expect(try Self.day(2026, 1, 1).adding(days: -1) == (try Self.day(2025, 12, 31)))
+        #expect(try Self.day(2026, 11, 14).adding(days: 30) == (try Self.day(2026, 12, 14)))
+        #expect(try Self.day(9999, 12, 31).adding(days: 1) == nil)
+        #expect(try Self.day(1000, 1, 1).adding(days: -1) == nil)
+        // Every day from 1999-12-01 for three years (two century rules, one leap year), and the first and last days.
+        var day = try Self.day(1999, 12, 1)
+        for _ in 0..<(3 * 366) {
+            let next = try #require(day.adding(days: 1))
+            #expect(DeadlineDay(dayNumber: day.dayNumber) == day)
+            #expect(day.days(until: next) == 1)
+            #expect(next > day)
+            day = next
+        }
+        for edge in [try Self.day(1000, 1, 1), try Self.day(9999, 12, 31), try Self.day(1600, 2, 29)] {
+            #expect(DeadlineDay(dayNumber: edge.dayNumber) == edge)
+        }
+    }
+
+    @Test func daysUntilIsSignedAndIgnoresTimeZones() throws {
+        let today = try Self.day(2026, 11, 14)
+        #expect(today.days(until: today) == 0)
+        #expect(today.days(until: try Self.day(2026, 11, 17)) == 3)
+        #expect(today.days(until: try Self.day(2026, 11, 12)) == -2)
+        #expect(today.days(until: try Self.day(2027, 11, 14)) == 365)
+        // Across the March daylight saving change in Europe: still whole days.
+        #expect(try Self.day(2027, 3, 27).days(until: try Self.day(2027, 3, 29)) == 2)
+    }
+
     @Test func aDeadlineIsDoneWhileItHasADoneDate() throws {
         var deadline = DocumentDeadline(day: try Self.day(2026, 11, 27), label: "Pay")
         #expect(!deadline.isDone)

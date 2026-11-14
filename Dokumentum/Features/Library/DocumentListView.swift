@@ -42,7 +42,8 @@ struct DocumentListView: View {
                         // (#80, #81): see below.
                         .id(
                             RowKey(
-                                inputs: RowInputs(document: document, tagPaths: tagPaths),
+                                inputs: RowInputs(
+                                    document: document, tagPaths: tagPaths, deadlineStatus: rowDeadlineStatus(document)),
                                 generation: generations[document.instanceID] ?? 0))
                     #endif
             }
@@ -145,7 +146,7 @@ struct DocumentListView: View {
     // push and the row's disclosure indicator.
     @ViewBuilder
     private func row(_ document: LibraryDocument, tagPaths: [String]) -> some View {
-        let content = DocumentRow(document: document, tagPaths: tagPaths)
+        let content = DocumentRow(document: document, tagPaths: tagPaths, deadlineStatus: rowDeadlineStatus(document))
         #if os(macOS)
             content
                 .accessibilityAction { model.selectedDocumentID = document.instanceID }
@@ -167,7 +168,7 @@ struct DocumentListView: View {
         /// Its thumbnail is the placeholder and loads nothing: the thumbnail has a fixed size, so the height is the
         /// same with or without the image (#6, part 4).
         private func heightProbe(_ document: LibraryDocument, tagPaths: [String]) -> some View {
-            DocumentRow(document: document, tagPaths: tagPaths)
+            DocumentRow(document: document, tagPaths: tagPaths, deadlineStatus: rowDeadlineStatus(document))
                 .environment(\.rowThumbnails, nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .hidden()
@@ -175,7 +176,8 @@ struct DocumentListView: View {
                 .onGeometryChange(for: CGFloat.self) {
                     $0.size.height
                 } action: { height in
-                    let inputs = RowInputs(document: document, tagPaths: tagPaths)
+                    let inputs = RowInputs(
+                        document: document, tagPaths: tagPaths, deadlineStatus: rowDeadlineStatus(document))
                     if rowHeights.noteChanged(height, for: inputs) { replaceLater(document.instanceID) }
                 }
         }
@@ -202,6 +204,11 @@ struct DocumentListView: View {
             }
         }
     #endif
+
+    /// The deadline line's status for a row (#12, part 2a): only in the Deadlines list, whose rows are there for it.
+    private func rowDeadlineStatus(_ document: LibraryDocument) -> DeadlineStatus? {
+        model.selection == .upcoming ? model.deadlineStatus(of: document) : nil
+    }
 
     /// The iPhone's field sits in the list's navigation bar, always shown (plan of #7, Approach 8); the Mac's in the
     /// window's toolbar.
@@ -262,6 +269,10 @@ struct DocumentListView: View {
             if model.selection == .inbox {
                 PlaceholderView(
                     title: "Inbox empty", systemImage: "tray", identifier: AccessibilityID.documentListEmpty)
+            } else if model.selection == .upcoming {
+                PlaceholderView(
+                    title: "No open deadlines", systemImage: "calendar.badge.clock",
+                    identifier: AccessibilityID.documentListEmpty)
             } else if model.selection == .trash {
                 PlaceholderView(
                     title: "Trash empty", systemImage: "trash", identifier: AccessibilityID.documentListEmpty)
@@ -272,6 +283,8 @@ struct DocumentListView: View {
         #else
             if model.selection == .inbox {
                 ContentUnavailableView("Inbox empty", systemImage: "tray")
+            } else if model.selection == .upcoming {
+                ContentUnavailableView("No open deadlines", systemImage: "calendar.badge.clock")
             } else if model.selection == .trash {
                 ContentUnavailableView("Trash empty", systemImage: "trash")
             } else {
@@ -284,6 +297,7 @@ struct DocumentListView: View {
         switch model.selection {
         case .inbox, nil: Text("Inbox")
         case .all: Text("All Documents")
+        case .upcoming: Text("Deadlines")
         case .trash: Text("Trash")
         case .tag(let id): Text(verbatim: model.tree.tags[id]?.name ?? "")
         case .correspondent(let id):
@@ -295,10 +309,11 @@ struct DocumentListView: View {
 }
 
 #if os(macOS)
-    /// Everything a `DocumentRow` shows: its two inputs, so the identity cannot miss a field the row adds later.
+    /// Everything a `DocumentRow` shows: its inputs, so the identity cannot miss a field the row adds later.
     private struct RowInputs: Hashable {
         let document: LibraryDocument
         let tagPaths: [String]
+        let deadlineStatus: DeadlineStatus?
     }
 
     /// A row's identity in the list: what it shows, and how often its needed height changed for that (#81).

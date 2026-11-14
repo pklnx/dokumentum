@@ -68,6 +68,16 @@ final class LibraryModel {
     private(set) var snapshot = LibrarySnapshot.empty
     private(set) var tree = TagTree([])
     private(set) var counts = LibraryCounts()
+
+    /// The local day the deadlines' status and the Deadlines count are computed for (#12, part 2a): `AppDay`'s, read
+    /// again at each read of the library and when the day changes (`observeDayChanges`).
+    private(set) var today: DeadlineDay
+    /// Where "today" comes from: `AppDay`, or a test's fixed day.
+    private let readToday: @MainActor () -> DeadlineDay
+    /// The Deadlines count's lead time in days (maintainer decision Q7 on #12): a deadline at most this many days
+    /// ahead counts. **The seam for #12's part 3**, which replaces it with this device's reminder lead time; until then
+    /// `LibraryCounts.defaultDeadlineLeadDays` (3).
+    private let deadlineLeadDays: @MainActor () -> Int
     /// The documents of `selection`, in list order.
     private(set) var documents: [LibraryDocument] = []
     private(set) var detail = DetailState.noSelection
@@ -113,15 +123,23 @@ final class LibraryModel {
     /// Counts `loadDetail` calls: only the newest one's result is shown.
     private var detailGeneration = 0
 
-    /// - Parameter loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when
-    ///   it appears, because SwiftUI may create it again on any re-evaluation and discards that model.
+    /// - Parameters:
+    ///   - loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when it appears,
+    ///     because SwiftUI may create it again on any re-evaluation and discards that model.
+    ///   - today: the local day (`AppDay`); tests fix one.
+    ///   - deadlineLeadDays: the Deadlines count's lead time (#12, Q7), the seam part 3 replaces.
     init(
         source: any LibrarySource, searcher: (any DocumentSearching)? = nil,
-        retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true
+        retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true,
+        today: @escaping @MainActor () -> DeadlineDay = { AppDay.today() },
+        deadlineLeadDays: @escaping @MainActor () -> Int = { LibraryCounts.defaultDeadlineLeadDays }
     ) {
         self.source = source
         self.searcher = searcher
         self.retrier = retrier
+        readToday = today
+        self.today = today()
+        self.deadlineLeadDays = deadlineLeadDays
         if loadNow { reload() }
     }
 
@@ -136,9 +154,42 @@ final class LibraryModel {
         revision += 1
         snapshot = source.snapshot()
         tree = TagTree(snapshot.tags)
-        counts = LibraryCounts(snapshot.documents, tree: tree)
+        today = readToday()
+        recount()
         dropGoneTokens()
         applySelection()
+    }
+
+    private func recount() {
+        counts = LibraryCounts(snapshot.documents, tree: tree, today: today, deadlineLeadDays: deadlineLeadDays())
+    }
+
+    /// Reads "today" again at each change of the calendar day (`NSCalendarDayChanged`: midnight, a time zone or clock
+    /// change that moves the day), so the deadlines' status and the Deadlines count follow it while the window stays
+    /// open, until the calling task is cancelled. The root view runs it in `.task`.
+    func observeDayChanges(center: NotificationCenter = .default) async {
+        let (changes, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let token = center.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: nil) { _ in
+            continuation.yield()
+        }
+        defer { center.removeObserver(token) }
+        for await _ in changes {
+            dayMayHaveChanged()
+        }
+    }
+
+    /// Reads "today" again; a new day recounts. The list itself does not depend on the day: it lists every open
+    /// deadline.
+    func dayMayHaveChanged() {
+        let day = readToday()
+        guard day != today else { return }
+        today = day
+        recount()
+    }
+
+    /// The status of the open document's or a row's deadline on `today`; `nil` without a deadline.
+    func deadlineStatus(of document: LibraryDocument) -> DeadlineStatus? {
+        document.deadline.map { DeadlineStatus($0, today: today) }
     }
 
     /// The documents of the selection, narrowed by the search when it is active (`LibrarySearch.apply`).
@@ -318,7 +369,7 @@ final class LibraryModel {
         switch outcome {
         case .saved, .unchanged:
             return
-        case .noDocument, .trashed, .noMetadata, nil:
+        case .noDocument, .trashed, .noMetadata, .noDeadline, nil:
             // A document that is gone has no title to show: it left the list, and the panel closed with it.
             guard let stored = snapshot.documents.first(where: { $0.instanceID == commit.document }) else { return }
             draft.show(commit.document, title: stored.title)

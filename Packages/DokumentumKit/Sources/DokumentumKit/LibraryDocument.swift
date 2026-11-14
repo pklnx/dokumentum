@@ -31,16 +31,27 @@ public struct LibraryDocument: Sendable, Hashable, Identifiable {
     public var fileState: FileState
     /// The processing queue's state, for the detail's status line (#6, P2); the list rows do not show it.
     public var processingState: ProcessingState
+    /// The deadline (#12), done or open; `nil` for none.
+    public var deadline: DocumentDeadline?
+    /// The day up to which due-date suggestions are dismissed (#12); `nil` for none.
+    public var dismissedSuggestionDay: DeadlineDay?
 
     public var id: UUID { instanceID }
 
     /// In the trash: such a document matches only the trash.
     public var isTrashed: Bool { deletedAt != nil }
 
+    /// The deadline while it is not done: what the Deadlines list shows and counts (#12, part 2a).
+    public var openDeadline: DocumentDeadline? {
+        guard let deadline, !deadline.isDone else { return nil }
+        return deadline
+    }
+
     public init(
         instanceID: UUID, title: String, documentDate: Date, createdAt: Date, isInbox: Bool,
         deletedAt: Date? = nil, correspondent: Reference? = nil, documentType: Reference? = nil,
-        tagIDs: Set<UUID> = [], fileState: FileState = .unknown, processingState: ProcessingState = .done
+        tagIDs: Set<UUID> = [], fileState: FileState = .unknown, processingState: ProcessingState = .done,
+        deadline: DocumentDeadline? = nil, dismissedSuggestionDay: DeadlineDay? = nil
     ) {
         self.instanceID = instanceID
         self.title = title
@@ -53,6 +64,8 @@ public struct LibraryDocument: Sendable, Hashable, Identifiable {
         self.tagIDs = tagIDs
         self.fileState = fileState
         self.processingState = processingState
+        self.deadline = deadline
+        self.dismissedSuggestionDay = dismissedSuggestionDay
     }
 }
 
@@ -65,6 +78,23 @@ extension LibraryDocument {
         if lhs.documentDate != rhs.documentDate { return lhs.documentDate > rhs.documentDate }
         if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
         return lhs.instanceID.uuidString < rhs.instanceID.uuidString
+    }
+
+    /// The Deadlines list's order (#12, part 2a): the earliest day first, so overdue deadlines lead; then the title
+    /// (`localizedStandardCompare`), then `instanceID`, so the order is the same on every run. A document without a
+    /// deadline comes after every one with a deadline (the Deadlines list has none).
+    public static func deadlineOrder(_ lhs: LibraryDocument, _ rhs: LibraryDocument) -> Bool {
+        switch (lhs.deadline?.day, rhs.deadline?.day) {
+        case (let left?, let right?) where left != right: return left < right
+        case (nil, _?): return false
+        case (_?, nil): return true
+        default: break
+        }
+        switch lhs.title.localizedStandardCompare(rhs.title) {
+        case .orderedAscending: return true
+        case .orderedDescending: return false
+        case .orderedSame: return lhs.instanceID.uuidString < rhs.instanceID.uuidString
+        }
     }
 }
 

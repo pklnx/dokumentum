@@ -4,11 +4,14 @@ import SwiftUI
 
 /// One list row (PQ4): the title, or "Untitled document"; the document date; correspondent and type;
 /// the tag names; in the trash, since when; the first page's thumbnail at the leading edge (#6, P1), decorative.
-/// VoiceOver reads it as one sentence, without the thumbnail.
+/// In the Deadlines list (#12, part 2a) also the deadline: its day, label and status, overdue with a warning symbol and
+/// the word "Overdue", never by colour alone. VoiceOver reads it as one sentence, without the thumbnail.
 struct DocumentRow: View {
     let document: LibraryDocument
     /// The display paths of the document's tags, sorted.
     let tagPaths: [String]
+    /// The deadline's status today, for its line; `nil` shows no deadline line (every list but Deadlines).
+    var deadlineStatus: DeadlineStatus?
 
     private var title: String {
         displayTitle(document.title, fallback: String(localized: "Untitled document"))
@@ -35,6 +38,9 @@ struct DocumentRow: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                if let deadline = document.deadline, let deadlineStatus {
+                    deadlineLine(deadline, status: deadlineStatus)
+                }
                 if !tagPaths.isEmpty {
                     Label {
                         Text(verbatim: tagPaths.joined(separator: ", "))
@@ -62,9 +68,25 @@ struct DocumentRow: View {
         .accessibilityLabel(Text(verbatim: accessibilityLabel))
     }
 
+    /// "Due 16 Nov 2026 · Pay · Overdue": the symbol is a warning triangle when overdue, red, and the line's text is
+    /// primary then; the word says it either way.
+    private func deadlineLine(_ deadline: DocumentDeadline, status: DeadlineStatus) -> some View {
+        Label {
+            Text(verbatim: DeadlineText.line(deadline, status: status))
+        } icon: {
+            Image(systemName: DeadlineText.symbol(status))
+                .foregroundStyle(status.isOverdue ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+        }
+        .font(.subheadline.weight(status.isOverdue ? .semibold : .regular))
+        .foregroundStyle(status.isOverdue ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+    }
+
     private var accessibilityLabel: String {
-        let label = document.accessibilityLabel(
+        var label = document.accessibilityLabel(
             displayTitle: title, tagPaths: tagPaths, strings: Self.accessibilityStrings)
+        if let deadline = document.deadline, let deadlineStatus {
+            label += ", " + DeadlineText.spoken(deadline, status: deadlineStatus)
+        }
         return trashedSince.map { "\(label), \(String(localized: $0))" } ?? label
     }
 

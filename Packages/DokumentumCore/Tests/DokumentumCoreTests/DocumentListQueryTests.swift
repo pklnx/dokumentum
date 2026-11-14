@@ -32,7 +32,8 @@ struct DocumentListQueryTests {
         for forbidden in ["extractedText", "text", "pdfData", "imageData", "file", "thumbnail"] {
             #expect(!labels.contains(forbidden), "\(forbidden)")
         }
-        #expect(labels.count == 16)
+        // 16, and the deadline and the dismissed day of #12 (plain values, no large field).
+        #expect(labels.count == 18)
     }
 
     private struct Fixture {
@@ -59,6 +60,9 @@ struct DocumentListQueryTests {
         inbox.originalFileName = "strom.pdf"
         inbox.source = .scan
         inbox.processingState = .done
+        // A deadline with a later build's suffix (#12, part 2a): the row reads the day by the read rule.
+        (inbox.deadlineDay, inbox.deadlineLabel, inbox.deadlineSetAt) = ("2026-11-27T14:00", "Pay", Self.base)
+        inbox.deadlineDismissedDay = "2026-11-20"
         let filed = Document(title: "Vertrag", createdAt: Self.base)
         filed.documentDate = Self.base.addingTimeInterval(2 * Self.day)
         filed.isInbox = false
@@ -106,7 +110,16 @@ struct DocumentListQueryTests {
                     source: .scan, processingState: .done,
                     correspondent: MetadataReference(instanceID: fixture.correspondent.instanceID, name: "Stadtwerke"),
                     documentType: MetadataReference(instanceID: fixture.type.instanceID, name: "Rechnung"),
-                    tagInstanceIDs: Set(fixture.tags.map(\.instanceID))))
+                    tagInstanceIDs: Set(fixture.tags.map(\.instanceID)),
+                    deadline: DocumentDeadline(
+                        day: try #require(DeadlineDay(storedValue: "2026-11-27")), label: "Pay", setAt: Self.base),
+                    dismissedSuggestionDay: DeadlineDay(storedValue: "2026-11-20")))
+        // A document without a deadline has none.
+        let filed = try DocumentListQuery.fetch(.all, in: ModelContext(fixture.container)).first {
+            $0.instanceID == fixture.filed.instanceID
+        }
+        #expect(filed?.deadline == nil)
+        #expect(filed?.dismissedSuggestionDay == nil)
         #expect(row.id == fixture.inbox.instanceID, "rows are keyed by instanceID, never by the shared id")
     }
 

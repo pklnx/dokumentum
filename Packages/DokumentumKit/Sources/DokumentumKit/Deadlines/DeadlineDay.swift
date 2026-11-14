@@ -72,6 +72,44 @@ public struct DeadlineDay: Hashable, Comparable, Sendable, CustomStringConvertib
 
     public var description: String { storedValue }
 
+    // MARK: Day arithmetic (#12, part 2a)
+
+    /// Days since 1970-01-01 in the proleptic Gregorian calendar: plain integer arithmetic, with no `Calendar` and no
+    /// time zone, so a day is always 1 apart from the next, across daylight saving changes too.
+    public var dayNumber: Int {
+        // Howard Hinnant's `days_from_civil`; the years here are positive.
+        let shiftedYear = month <= 2 ? year - 1 : year
+        let era = shiftedYear / 400
+        let yearOfEra = shiftedYear - era * 400
+        let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        return era * 146_097 + dayOfEra - 719_468
+    }
+
+    /// The day with this `dayNumber`; `nil` outside the years 1000–9999.
+    public init?(dayNumber: Int) {
+        // Howard Hinnant's `civil_from_days`.
+        let shifted = dayNumber + 719_468
+        let era = (shifted >= 0 ? shifted : shifted - 146_096) / 146_097
+        let dayOfEra = shifted - era * 146_097
+        let yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+        let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+        let monthIndex = (5 * dayOfYear + 2) / 153
+        let day = dayOfYear - (153 * monthIndex + 2) / 5 + 1
+        let month = monthIndex + (monthIndex < 10 ? 3 : -9)
+        self.init(year: yearOfEra + era * 400 + (month <= 2 ? 1 : 0), month: month, day: day)
+    }
+
+    /// The day `days` later (earlier for a negative number); `nil` outside the years 1000–9999.
+    public func adding(days: Int) -> DeadlineDay? {
+        DeadlineDay(dayNumber: dayNumber + days)
+    }
+
+    /// How many days `other` lies after this day: 0 for the same day, negative when it lies before.
+    public func days(until other: DeadlineDay) -> Int {
+        other.dayNumber - dayNumber
+    }
+
     public static func < (lhs: DeadlineDay, rhs: DeadlineDay) -> Bool {
         (lhs.year, lhs.month, lhs.day) < (rhs.year, rhs.month, rhs.day)
     }

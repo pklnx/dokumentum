@@ -31,10 +31,10 @@
         /// The largest `extractedText` a sample gets, in UTF-8 bytes.
         static let textLimit = 1024
 
-        /// Fills the in-memory store of a `-UITestSeed` launch.
-        static func seedForUITests(_ context: ModelContext) {
+        /// Fills the in-memory store of a `-UITestSeed` launch, with the deadlines relative to `AppDay`'s today.
+        static func seedForUITests(_ context: ModelContext, today: DeadlineDay = AppDay.today()) {
             do {
-                try write(into: context, instanceIDs: .fixed)
+                try write(into: context, instanceIDs: .fixed, today: today)
             } catch {
                 Log.store.error("Could not seed the sample documents: \(Log.code(of: error), privacy: .public)")
             }
@@ -43,19 +43,26 @@
         /// The debug command: adds the samples that are not in the store yet. Returns how many documents it
         /// added.
         @discardableResult
-        static func addSampleDocuments(to context: ModelContext, now: Date = Date()) throws -> Int {
-            try write(into: context, instanceIDs: .fresh, now: now)
+        static func addSampleDocuments(
+            to context: ModelContext, now: Date = Date(), today: DeadlineDay = AppDay.today()
+        ) throws -> Int {
+            try write(into: context, instanceIDs: .fresh, now: now, today: today)
         }
 
+        /// - Parameter today: the day the samples' deadlines are relative to (#12, plan review B2).
         @discardableResult
-        static func write(into context: ModelContext, instanceIDs: InstanceIDs, now: Date = Date()) throws -> Int {
-            let sampleIDs = FixtureCatalog.samples.map(\.document.instanceID)
+        static func write(
+            into context: ModelContext, instanceIDs: InstanceIDs, now: Date = Date(),
+            today: DeadlineDay = AppDay.today()
+        ) throws -> Int {
+            let samples = FixtureCatalog.samples(today: today)
+            let sampleIDs = samples.map(\.document.instanceID)
             let present = Set(
                 try context.fetch(FetchDescriptor<Document>(predicate: #Predicate { sampleIDs.contains($0.id) }))
                     .map(\.id))
             var metadata = try MetadataIndex(context)
             var added = 0
-            for sample in FixtureCatalog.samples where !present.contains(sample.document.instanceID) {
+            for sample in samples where !present.contains(sample.document.instanceID) {
                 let values = sample.document
                 let document = Document(
                     id: values.instanceID, title: values.title,
@@ -88,6 +95,12 @@
                         context.insert(thumbnail)
                         document.thumbnail = thumbnail
                     }
+                }
+                if let deadline = values.deadline {
+                    document.deadlineDay = deadline.day.storedValue
+                    document.deadlineLabel = deadline.label
+                    document.deadlineSetAt = instanceIDs == .fixed ? deadline.setAt : now
+                    document.deadlineDoneAt = deadline.doneAt.map { instanceIDs == .fixed ? $0 : now }
                 }
                 document.processingState = values.processingState
                 if values.processingState == .done, !text.extractedText.isEmpty { document.textSource = .pdfText }

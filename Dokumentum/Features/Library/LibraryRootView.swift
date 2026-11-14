@@ -58,6 +58,8 @@ struct LibraryRootView: View {
         .onAppear { model.loadIfNeeded() }
         .task { await model.observeChanges() }
         .task { await model.observeSearchIndex() }
+        // The deadlines' status and count follow the calendar day (#12, part 2a).
+        .task { await model.observeDayChanges() }
         .focusedSceneValue(\.libraryModel, model)
         .environment(trash)
         .focusedSceneValue(\.libraryTrash, trash)

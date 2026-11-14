@@ -290,7 +290,7 @@ Berlin midnight reads as the day before in London), which sorts in day order and
 ten characters of the string (`DeadlineDay(storedValue:)`), so a later build may append a time (`2026-11-27T14:00`)
 without a schema change. A value that does not read as a day (`""`, `garbage`, `2026-02-30`) reads as none, and
 reading never rewrites it. `DeadlineDay.storedValue` writes exactly ten characters: only the years 1000–9999 are days.
-The accessors only read; the editing that writes these fields comes with #12's part 2a (`DocumentEditor`), and
+The accessors only read; `DocumentEditor` writes these fields (#12, part 2a; see "Deadlines"), and
 nothing automatic (processing, repair, rules, classifier, detection) writes them. `RowState.DocumentRow` holds all
 five, so a background writer's whole-row save backs off instead of writing an old deadline back ("Concurrent saves
 (I6)" below).
@@ -1087,9 +1087,12 @@ thumbnail as the importer makes it; the samples are processed except "Medical in
 a title (`classify`, for "Suggesting metadata…"), the annual
 statement with the long title and "Scanned receipt" (failed; the receipt is not a PDF), for the detail's status
 line. `LibrarySmokeTests` audits the failed line over the annual statement's PDF, not over a placeholder, whose
-description is a known false positive of the audit in light.
+description is a known false positive of the audit in light. Four samples have a deadline relative to "today"
+(`AppDay`, see "Deadlines"): the medical invoice overdue by 2 days, the water bill due in 2, the account statement in
+10, and the car insurance in 30, done; every other sample date stays on the fixed anchor.
 - `-UITestSeed YES`: an in-memory store with the samples. UI tests, screenshots and a look at the app use it;
-  nothing is saved. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
+  nothing is saved. `-UITestToday yyyy-MM-dd` (Debug builds): fixes "today" (`AppDay`); `UITestApp` passes the
+  runner's local day in every launch. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
   store on disk in a temporary folder, removed when the app quits. `-UITestFailingSaves YES` (in-memory stores
   only): every save of the info panel's editor fails and is rolled back, for the "The title could not be saved."
   line under the title field. `-UITestSyncStatus <case>` (Debug builds): the sidebar footer shows an injected
@@ -1111,7 +1114,8 @@ no window. On the maintainer's signed, sandboxed build (#1, step 9, 2026-11-11) 
 from the old root (`75340a0`) to `LibraryRootView`. The container's `Saved Application State` stayed empty in both
 runs, though, so that run did not show whether the scene id overrides a stale state.
 
-**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3. Document: Show Info ⌘I. Edit: Find… ⌘F
+**Mac menus (PQ15).** Go: Inbox ⌘1, All Documents ⌘2, Trash ⌘3, Deadlines ⌘4 (#12, part 2a: after Trash, so the
+shortcuts stay in order; the place is part of the maintainer's string check). Document: Show Info ⌘I. Edit: Find… ⌘F
 (the search field, see "The search field"), Move to Trash ⌘⌫. File: Import Documents… ⌘O, Empty Trash… ⌘⇧⌫ (asks first). Each item is disabled when it has
 nothing to act on (`@FocusedValue` of the focused window). ⌘⌫ while a text field is edited stays with the
 field (`CommandDeleteRouting`), so the field must lose the focus when the user turns to the list: a click on a
@@ -1120,7 +1124,7 @@ without it ⌘⌫ emptied the title instead of trashing the document, review of 
 drives them through the menu bar's key equivalents.
 
 **Accessibility.** Tests query identifiers (`AccessibilityID`), never localized text. Every sidebar row has
-the count as its VoiceOver value ("3 documents"): on the Mac the rows are tagged labels, not
+the count as its VoiceOver value ("3 documents"; Deadlines: "2 overdue or due soon"): on the Mac the rows are tagged labels, not
 `NavigationLink`s, because a link exposes no value there. Such a label is a button to VoiceOver, so it has an
 accessibility action that selects the row, as a click does. Document rows read as one sentence; their thumbnail is
 decorative and hidden from VoiceOver
@@ -1226,6 +1230,78 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
   screenshot failed with "Failed to create screenshot. Image creation failed" (#67).
 - A window screenshot can still show another window lying over the app's; whoever passes PNGs on opens each
   first. PNGs never go into the repository: a PR lists each with its SHA-256.
+
+## Deadlines
+
+#12, part 2a (plan of #12, Revision 2, §6 and §8; maintainer decisions Q1 and Q7): one deadline per document, with an
+optional label, its overview and its editing. Due-date suggestions from the text are part 2b (#216), reminders part 3
+(#217). The fields and the read rule: "Data model and sync" above.
+
+**"Today" is a day** (plan review B2). `AppDay.today()` (`Dokumentum/App/AppDay.swift`) is the local day as a Kit
+`DeadlineDay`, in the device's current time zone; in Debug builds `-UITestToday yyyy-MM-dd` fixes it (`UITestToday`,
+ten characters exactly, otherwise ignored), and `UITestApp` passes the runner's local day in every launch. The status,
+the count, the sample deadlines and "Add Deadline"'s default read it; unit tests pass their own day
+(`LibraryModel(today:)`, `FixtureLibrarySource(today:)`, `FixtureSeeder.write(…today:)`). `LibraryModel` reads it again
+at each read of the library and at `NSCalendarDayChanged` (`observeDayChanges`, run by the root view). Day arithmetic is
+integer arithmetic on the Gregorian day number (`DeadlineDay.dayNumber`, `adding(days:)`, `days(until:)`), so a daylight
+saving change cannot shift a status.
+
+**The list.** The sidebar's Library section has "Deadlines" after All Documents (`LibrarySelection.upcoming`,
+`calendar.badge.clock`, `sidebar.deadlines`); the Mac's Go menu has it as ⌘4. It lists every open deadline (not done)
+of a document that is not in the trash, in `LibraryDocument.deadlineOrder`: by day, so the overdue ones come first, then
+by title (`localizedStandardCompare`), then by `instanceID`. `LibrarySelection.filter` sorts each selection by its
+`order`; every other list keeps `listOrder`. A search inside Deadlines keeps that order; Deadlines is not a search token.
+- **The count (Q7)** is `LibraryCounts.deadlines`: open deadlines that are overdue or due at most the lead time ahead
+  (with 3 days a deadline in 3 days counts, one in 4 does not); the list shows the others too. The lead time comes
+  through `LibraryModel`'s `deadlineLeadDays` closure, `LibraryCounts.defaultDeadlineLeadDays` (3) until part 3 passes
+  this device's reminder setting. VoiceOver reads the row's value as "2 overdue or due soon", not "documents".
+- **Rows** in the Deadlines list (only there) get one more line, "Due 16 Nov 2026 · Pay · Overdue": the day, the label
+  and `DeadlineStatus` (Kit): `overdue`, `today` ("Due today") or `upcoming` ("Due in 2 days"). Overdue is never colour
+  alone: a warning triangle (red) in place of the calendar, the word "Overdue", and semibold primary text; the other
+  states are secondary text, as the row's other lines. The row's VoiceOver sentence ends with the same words ("…, Due 16
+  November 2026, Pay, Overdue"). The row's identity on the Mac (`RowInputs`) includes the status, so a new day
+  re-measures it.
+
+**The detail's deadline bar** (`DeadlineBar`, under the processing line): for an open deadline of a document that is not
+in the trash, the same line in callout medium, primary on the window's background, its identifier naming the status
+(`documentDetail.deadline.overdue|today|upcoming`), and two buttons, "Mark as Done" (`documentDetail.deadline.markDone`,
+writes `.deadlineDone(true)`; the document then leaves Deadlines) and "Edit…" (`documentDetail.deadline.edit`, opens the
+info panel). Nothing for a done deadline or none. The buttons stand next to the line while it fits on one line beside
+them (`ViewThatFits`), under it otherwise (the iPhone, large text sizes). Part 2b adds the suggestion to this bar.
+
+**The info panel's "Deadline" section** (after the correspondent and type): without a deadline "Add Deadline"
+(`documentInfo.deadline.add`, 7 days after today; part 2b pre-fills the suggestion's day); with one a date-only picker
+"Due Date" limited to the years 1000–9999 (so the stored day is always ten characters, review N8), the label field
+(saved on Return, on focus loss, on a selection change and when the panel closes, only if changed, as the title:
+`TitleDraft`), the "Completed" switch and "Remove Deadline". Identifiers `documentInfo.deadline.date|label|done|remove`.
+A picker date is read as its day in the current time zone; a day is shown as noon of it (`DeadlineText`).
+
+**Editing** (`DocumentEditor`, Core; plan §6). Three changes, each with the editor's usual rules (the same value writes
+nothing, a gone or trashed document is refused, `touch()`, one save, rolled back on failure):
+- `.deadline(day, label:)`: a day other than the one the document reads is a new deadline: it writes the day, the label,
+  `deadlineSetAt` = now and clears `deadlineDoneAt` in one save. The day it already reads writes only a changed label
+  and leaves the stored day string byte for byte (N8: a later build's `2026-11-27T14:00` survives).
+- `.deadlineDone(Bool)`: writes only `deadlineDoneAt` (now, or `nil`); `.noDeadline` for a document without one.
+- `.clearDeadline(dismissing:)`: empties `deadlineDay`, `deadlineLabel`, `deadlineSetAt` and `deadlineDoneAt`. With a
+  day it also dismisses suggestions up to it in the same save (N9; part 2b passes the offered suggestion, part 2a's
+  "Remove Deadline" passes none).
+- **`deadlineDismissedDay` is only ever raised** (re-review N3): every write stores `max(stored, new)`
+  (`DocumentEditor.raises`); a stored value that does not read as a day counts as none, and an equal day keeps the
+  stored string as it is. Part 2b's dismissal goes through the same rule.
+
+`DocumentEditorDeadlineTests` (Core) pins these, with SQL proof under `swift test` that a label edit and a done toggle
+update only their own column. The mapping (`DocumentListQuery` → `DocumentSummary` → `LibraryMapping` →
+`LibraryDocument`) carries `deadline` and `dismissedSuggestionDay`; they are columns of the document row, so the list
+read still names no text, file or thumbnail table (`DocumentListQuerySQLTests`).
+
+**Tests.** Kit: `DeadlineDayTests` (day numbers), `DeadlineStatusTests` (around midnight and both daylight saving
+changes in Berlin), `LibrarySelectionTests` (open only, the order under shuffles, the other lists' order, the count with
+3, 0 and 10 days). App: `DeadlineLibraryTests` (`AppDay` with and without the argument, the seeded deadlines relative to
+two days, the list's order and count, the seam, Done and the info panel's edits, the day change). UI:
+`LibrarySmokeTests.testSidebarFiltersAndOpensAPDF` opens Deadlines (count 2, the three rows in day order, neither the done
+car insurance nor a document without a deadline; the overdue row's sentence has the bar's words, whose identifier is
+`…overdue`), audits the water bill's bar, measures its contrast on the Mac and marks it done (count 1); screenshots
+`14-deadlines` and `15-deadline-bar`. `MenuCommandsSmokeTests` (Mac) drives ⌘4.
 
 ## Look
 

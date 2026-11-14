@@ -130,6 +130,96 @@ struct LibrarySelectionTests {
         }
     }
 
+    // MARK: Deadlines (#12, part 2a)
+
+    private static let today = DeadlineDay(year: 2026, month: 11, day: 14)!
+
+    /// A document with a deadline `offset` days from `today`, done or not, titled "Document <number>" unless `title`
+    /// is given.
+    private static func withDeadline(
+        _ number: Int, offset: Int, done: Bool = false, trashed: Bool = false, title: String? = nil, date: Int? = nil
+    ) -> LibraryDocument {
+        var document = document(number, trashed: trashed, date: date)
+        if let title { document.title = title }
+        document.deadline = DocumentDeadline(
+            day: today.adding(days: offset)!, label: "Pay", doneAt: done ? day(1) : nil)
+        return document
+    }
+
+    /// 20: overdue, 21: today, 22: in 3 days, 23: in 4 days, 24: done, 25: trashed, 26: none, 27: in 10 days.
+    private static let deadlineDocuments = [
+        withDeadline(23, offset: 4), withDeadline(20, offset: -2), withDeadline(24, offset: -5, done: true),
+        withDeadline(22, offset: 3), withDeadline(25, offset: -1, trashed: true), document(26),
+        withDeadline(21, offset: 0), withDeadline(27, offset: 10),
+    ]
+
+    private static func numbers(_ documents: [LibraryDocument]) -> [Int] {
+        documents.map { Int($0.instanceID.uuidString.suffix(12))! }
+    }
+
+    /// Deadlines lists the open deadlines only: not a done one, not a trashed one, not a document without one.
+    @Test func deadlinesListsOpenDeadlinesOnly() {
+        let listed = LibrarySelection.upcoming.filter(Self.deadlineDocuments, in: Self.tree)
+        #expect(Self.numbers(listed) == [20, 21, 22, 23, 27])
+        for document in Self.deadlineDocuments {
+            let open = document.deadline.map { !$0.isDone } ?? false
+            #expect(
+                LibrarySelection.upcoming.matches(document, in: Self.tree) == (open && !document.isTrashed),
+                "\(document.title)")
+        }
+        // Every document of `documents` has no deadline.
+        #expect(LibrarySelection.upcoming.filter(Self.documents, in: Self.tree).isEmpty)
+    }
+
+    /// By day, the overdue first; on one day by title, then by `instanceID`, whatever the input order.
+    @Test func deadlinesAreOrderedByDayThenTitleThenInstanceID() {
+        // 30–33 share a day; 31 and 33 also share a title, so instanceID decides. Their document dates run the other
+        // way, so the list order (newest document first) would give another result.
+        let documents = [
+            Self.withDeadline(30, offset: 5, title: "Water", date: 1),
+            Self.withDeadline(31, offset: 5, title: "Electricity", date: 2),
+            Self.withDeadline(32, offset: 5, title: "Bank", date: 3),
+            Self.withDeadline(33, offset: 5, title: "Electricity", date: 4),
+            Self.withDeadline(34, offset: -3, title: "Zoo", date: 5),
+            Self.withDeadline(35, offset: 6, title: "Apple", date: 6),
+        ]
+        let expected = [34, 32, 31, 33, 30, 35]
+        var generator = SeededGenerator(seed: 0x5EED)
+        for _ in 0..<50 {
+            let sorted = LibrarySelection.upcoming.filter(documents.shuffled(using: &generator), in: Self.tree)
+            #expect(Self.numbers(sorted) == expected)
+        }
+    }
+
+    /// Every other list keeps its order (newest document first) when documents have deadlines.
+    @Test func theOtherListsKeepTheirOrder() {
+        let all = LibrarySelection.all.filter(Self.deadlineDocuments, in: Self.tree)
+        #expect(Self.numbers(all) == [27, 26, 24, 23, 22, 21, 20])
+        #expect(all == Self.deadlineDocuments.filter { !$0.isTrashed }.sorted(by: LibraryDocument.listOrder))
+    }
+
+    /// The count (maintainer decision Q7): overdue plus due within the lead time. With 3 days a deadline in 3 days
+    /// counts and one in 4 does not; with 0 the overdue one and today's. The list shows every open deadline anyway.
+    @Test func theDeadlinesCountIsOverduePlusDueWithinTheLeadTime() {
+        let documents = Self.deadlineDocuments
+        let withThree = LibraryCounts(documents, tree: Self.tree, today: Self.today, deadlineLeadDays: 3)
+        #expect(withThree.count(for: .upcoming) == 3)
+        let withZero = LibraryCounts(documents, tree: Self.tree, today: Self.today, deadlineLeadDays: 0)
+        #expect(withZero.count(for: .upcoming) == 2)
+        let withTen = LibraryCounts(documents, tree: Self.tree, today: Self.today, deadlineLeadDays: 10)
+        #expect(withTen.count(for: .upcoming) == 5)
+        // The default is 3 days, until part 3 gives each device its own lead time.
+        #expect(LibraryCounts.defaultDeadlineLeadDays == 3)
+        #expect(LibraryCounts(documents, tree: Self.tree, today: Self.today) == withThree)
+        // Without a day, no count; the list is the same.
+        #expect(LibraryCounts(documents, tree: Self.tree).count(for: .upcoming) == 0)
+        #expect(LibrarySelection.upcoming.filter(documents, in: Self.tree).count == 5)
+        // The next day the deadline in 4 days is in 3.
+        let tomorrow = LibraryCounts(
+            documents, tree: Self.tree, today: Self.today.adding(days: 1)!, deadlineLeadDays: 3)
+        #expect(tomorrow.count(for: .upcoming) == 4)
+    }
+
     // MARK: VoiceOver
 
     private static let strings = LibraryDocument.AccessibilityStrings(

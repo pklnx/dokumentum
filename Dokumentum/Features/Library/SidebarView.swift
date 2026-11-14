@@ -2,8 +2,9 @@ import DokumentumCore
 import DokumentumKit
 import SwiftUI
 
-/// The sidebar (PQ2): Library (Inbox, All Documents), then Tags, Correspondents and Document Types,
-/// each row with its count, and Trash at the bottom (part 4 of #3).
+/// The sidebar (PQ2): Library (Inbox, All Documents, Deadlines), then Tags, Correspondents and Document Types,
+/// each row with its count, and Trash at the bottom (part 4 of #3). The Deadlines row (#12, part 2a) counts the open
+/// deadlines that are overdue or due within the lead time (Q7), not every one it lists.
 struct SidebarView: View {
     @Bindable var model: LibraryModel
     /// Where the footer's sync line comes from (#31); no footer for `nil`.
@@ -14,6 +15,7 @@ struct SidebarView: View {
             Section("Library") {
                 row(.inbox, title: Text("Inbox"), symbol: "tray")
                 row(.all, title: Text("All Documents"), symbol: "doc.on.doc")
+                row(.upcoming, title: Text("Deadlines"), symbol: "calendar.badge.clock")
             }
             if !model.tree.roots.isEmpty {
                 Section("Tags") {
@@ -89,7 +91,10 @@ struct SidebarView: View {
     // click does (the Mac audit's "Action is missing", review of #74, finding 2).
     @ViewBuilder
     private func row(_ selection: LibrarySelection, title: Text, symbol: String) -> some View {
-        let label = SidebarRowLabel(title: title, symbol: symbol, count: model.counts.count(for: selection))
+        let count = model.counts.count(for: selection)
+        // The Deadlines row counts only what is overdue or due soon (Q7), so VoiceOver says so instead of "documents".
+        let value = selection == .upcoming ? Text("\(count) overdue or due soon") : nil
+        let label = SidebarRowLabel(title: title, symbol: symbol, count: count, accessibilityCount: value)
         #if os(macOS)
             label
                 .accessibilityAddTraits(.isButton)
@@ -121,6 +126,8 @@ struct SidebarRowLabel: View {
     let symbol: String
     let count: Int
     var accessibilityTitle: Text?
+    /// VoiceOver's value in place of "3 documents".
+    var accessibilityCount: Text?
 
     var body: some View {
         HStack {
@@ -138,7 +145,7 @@ struct SidebarRowLabel: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? title)
-        .accessibilityValue(Text("\(count) documents"))
+        .accessibilityValue(accessibilityCount ?? Text("\(count) documents"))
     }
 }
 

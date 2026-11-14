@@ -33,7 +33,8 @@ public enum LibraryMapping {
                 createdAt: summary.createdAt, isInbox: summary.isInbox, deletedAt: summary.deletedAt,
                 correspondent: summary.correspondent.map(resolver.reference(for:)),
                 documentType: summary.documentType.map(resolver.reference(for:)), tagIDs: tagIDs, fileState: .unknown,
-                processingState: summary.processingState)
+                processingState: summary.processingState, deadline: summary.deadline,
+                dismissedSuggestionDay: summary.dismissedSuggestionDay)
         }
         let live = metadata.filter(\.isLive)
         let tags = live.filter { $0.kind == .tag }.map { tag in

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The Mac's "Go" menu: Inbox (⌘1), All Documents (⌘2) and Trash (⌘3), "Document": Show Info (⌘I), and Edit ›
+/// The Mac's "Go" menu: Inbox (⌘1), All Documents (⌘2), Trash (⌘3) and Deadlines (⌘4, #12 part 2a: after Trash, so the
+/// shortcuts stay in order; its place goes to the maintainer's string check), "Document": Show Info (⌘I), and Edit ›
 /// Find… (⌘F), which puts the focus into the search field (#7, part 3, P7), for the focused window (PQ15). `.searchable`
 /// in the toolbar adds no Find item and does not answer ⌘F by itself (measured on macOS 27 for #123: the Edit menu had
 /// no Find item, and ⌘F left the field without focus). The trash's commands are in `TrashCommands`, import's in `ImportCommands`. Each item is
@@ -18,6 +19,9 @@ struct LibraryCommands: Commands {
                 .disabled(model == nil)
             Button("Trash") { model?.selection = .trash }
                 .keyboardShortcut("3")
+                .disabled(model == nil)
+            Button("Deadlines") { model?.selection = .upcoming }
+                .keyboardShortcut("4")
                 .disabled(model == nil)
         }
         CommandGroup(after: .textEditing) {

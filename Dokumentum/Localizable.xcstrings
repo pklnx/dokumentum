@@ -275,6 +275,47 @@
         }
       }
     },
+    "%lld overdue or due soon" : {
+      "comment" : "VoiceOver value of the Deadlines sidebar row: how many open deadlines are overdue or due within the lead time.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 überfällig oder bald fällig"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld überfällig oder bald fällig"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "1 overdue or due soon"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld overdue or due soon"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld pages could not be read and were left out." : {
       "comment" : "Import notice line: pages of a scan are missing from the new document (two or more).",
       "localizations" : {
@@ -427,6 +468,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hinzufügen"
+          }
+        }
+      }
+    },
+    "Add Deadline" : {
+      "comment" : "Info panel: gives the document a deadline, 7 days from today.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frist hinzufügen"
           }
         }
       }
@@ -668,6 +720,17 @@
         }
       }
     },
+    "Completed" : {
+      "comment" : "A deadline's status, and the info panel's switch: the deadline was marked done.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erledigt"
+          }
+        }
+      }
+    },
     "Correspondent" : {
       "comment" : "Info panel: the picker for the document's correspondent.",
       "localizations" : {
@@ -719,6 +782,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Datum"
+          }
+        }
+      }
+    },
+    "Deadline" : {
+      "comment" : "Info panel: the section of the document's deadline.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frist"
+          }
+        }
+      }
+    },
+    "Deadlines" : {
+      "comment" : "Sidebar row, list title and Go menu item: every document with an open deadline.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fristen"
           }
         }
       }
@@ -811,6 +896,80 @@
         }
       }
     },
+    "Due %@" : {
+      "comment" : "A deadline's day, e.g. “Due 16 Nov 2026”. %@ is the date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fällig am %@"
+          }
+        }
+      }
+    },
+    "Due Date" : {
+      "comment" : "Info panel: the date picker of the deadline's day.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fällig am"
+          }
+        }
+      }
+    },
+    "Due in %lld days" : {
+      "comment" : "A deadline's status: how many days until it is due.",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "In 1 Tag fällig"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "In %lld Tagen fällig"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Due in 1 day"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Due in %lld days"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Due today" : {
+      "comment" : "A deadline's status: it is due today.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heute fällig"
+          }
+        }
+      }
+    },
     "Edit Matching…" : {
       "comment" : "Sidebar: context menu item and accessibility action of a tag, correspondent or document type; opens its matching rule.",
       "localizations" : {
@@ -818,6 +977,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatische Zuordnung bearbeiten …"
+          }
+        }
+      }
+    },
+    "Edit…" : {
+      "comment" : "Button in the detail's deadline bar: opens the info panel to change the deadline.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bearbeiten …"
           }
         }
       }
@@ -1122,6 +1292,17 @@
         }
       }
     },
+    "Label" : {
+      "comment" : "Info panel: the text field of the deadline's optional label, e.g. “Pay”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bezeichnung"
+          }
+        }
+      }
+    },
     "Last download" : {
       "comment" : "Sync status detail: when the last CloudKit import ended.",
       "localizations" : {
@@ -1151,6 +1332,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bibliothek"
+          }
+        }
+      }
+    },
+    "Mark as Done" : {
+      "comment" : "Button in the detail's deadline bar: marks the open deadline done.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erledigt"
           }
         }
       }
@@ -1397,6 +1589,17 @@
         }
       }
     },
+    "No open deadlines" : {
+      "comment" : "The Deadlines list without documents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine offenen Fristen"
+          }
+        }
+      }
+    },
     "No rule: nothing is assigned from a document's text." : {
       "comment" : "Matching rule sheet: explanation of the mode None.",
       "localizations" : {
@@ -1575,6 +1778,17 @@
         }
       }
     },
+    "Optional" : {
+      "comment" : "Info panel: the placeholder of the deadline's label field.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optional"
+          }
+        }
+      }
+    },
     "Original" : {
       "comment" : "Photo cleanup filter: the photo's pixels as they are.",
       "localizations" : {
@@ -1582,6 +1796,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Original"
+          }
+        }
+      }
+    },
+    "Overdue" : {
+      "comment" : "A deadline's status: its day has passed and it is not done.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Überfällig"
           }
         }
       }
@@ -1712,6 +1937,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Regulärer Ausdruck"
+          }
+        }
+      }
+    },
+    "Remove Deadline" : {
+      "comment" : "Info panel: removes the document's deadline.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frist entfernen"
           }
         }
       }
