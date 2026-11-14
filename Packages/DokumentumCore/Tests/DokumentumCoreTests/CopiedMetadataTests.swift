@@ -127,6 +127,8 @@ struct CopiedMetadataTests {
     }
 
     /// The answer's tag exists only as two live copies: no classifier tag, and no new tag (tags are never created).
+    /// This case does not catch test 2's mutation (with two same-name candidates `MetadataMatcher.tag` links none
+    /// either way); `aDistinctLiveTagNextToCopiesIsLinked` does.
     @Test(arguments: [true, false])
     func aTagThatOnlyCopiesCarryIsNotLinked(youngerFirst: Bool) async throws {
         let store = try ProcessingStore()
@@ -141,6 +143,28 @@ struct CopiedMetadataTests {
         #expect(try store.classified(id).tags.isEmpty)
         #expect(try store.tagCount() == 2)
         try expectUnchanged(store, .tag, tag, name: "Strom")
+    }
+
+    /// Fix round 1 (review B P1, A-N3 = B-N2): two live copies "Strom" and one distinct live "Strom", the younger copy
+    /// inserted first or the older. Resolved as if the copies did not exist, the distinct tag is the only candidate
+    /// and is linked; the copies stay unlinked (counter-proofs: test 2's mutation, resolve on all live records with
+    /// the copies, links none; review A's M2, dedupe the live records by `instanceID` instead of leaving copies out,
+    /// keeps a copy as a second "Strom" and links none either).
+    @Test(arguments: [true, false])
+    func aDistinctLiveTagNextToCopiesIsLinked(youngerFirst: Bool) async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insertClassify()
+        let copies = try store.insertCopies(.tag, "Strom", gap: youngerFirst ? -60 : 60)
+        let distinct = try store.insertMetadata(.tag, "Strom")
+
+        let report = await store.classifyingQueue(classifier: StubClassifier(), clock: TestClock()).run()
+
+        #expect(report.classified == 1, "\(report)")
+        #expect(report.backedOff == 0)
+        let document = try #require(try ProcessingStore.fetch(id, in: ModelContext(store.container)))
+        #expect((document.tags ?? []).map(\.instanceID) == [distinct], "the distinct live tag")
+        try expectUnchanged(store, .tag, copies, name: "Strom")
     }
 
     /// Both copies are still live under `name`, and no document links either.
@@ -229,6 +253,70 @@ struct CopiedMetadataTests {
         #expect(next.backedOff == 0)
         #expect(try store.rawRule(.tag, energie)?.pattern == "Telekom", "the edit stays")
         #expect(try store.classified(id).tags == ["Energie", "Privat"])
+    }
+
+    /// Fix round 1 (review A P3, A-N1): the document already links a live correspondent or type without copies, and
+    /// one copy of a tag. A rename of that record in the write's window still makes the write back off, and the next
+    /// run lands with the rename kept (counter-proof: review A's M3, skip the capture of the linked correspondent and
+    /// type, and the first run lands over the rename).
+    @Test(arguments: [MetadataKind.correspondent, .documentType], Linked.allCases)
+    func aRenameOfALinkedRecordNextToACopyInTheWindowBacksOff(kind: MetadataKind, linked: Linked) async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insertClassify()
+        let known = try store.insertMetadata(kind, "Meine Wahl")
+        try store.link(id, kind, known)
+        let copies = try store.insertCopies(.tag, "Privat")
+        try store.linkCopy(id, .tag, row: Self.row(copies, linked))
+        let hooks = ProcessingQueue.Hooks(
+            beforeCheck: once({ $0 == ProcessingQueue.Write.classification }) {
+                try store.renameMetadata(kind, known, to: "Umbenannt")
+            })
+        let queue = store.classifyingQueue(classifier: StubClassifier(), clock: TestClock(), hooks: hooks)
+
+        let first = await queue.run()
+
+        #expect(first.backedOff == 1 && first.saves == 0, "\(first)")
+        #expect(try store.metadataName(kind, known) == "Umbenannt", "the rename was written over")
+        #expect(try store.classified(id).stateRaw == "classify")
+
+        let next = await queue.run()
+
+        #expect(next.classified == 1 && next.backedOff == 0, "\(next)")
+        #expect(try store.metadataName(kind, known) == "Umbenannt")
+        #expect(try store.detected(id).stateRaw == "done")
+    }
+
+    // MARK: A copy that is a tombstone
+
+    /// Fix round 1 (A-N2 = B-N1): the document links the live one of two records sharing an `instanceID`, and the
+    /// other is a merge's tombstone (#205's B1 shape), inserted first or second, for every kind. Copies are counted
+    /// among all records, tombstones included, so the live one is not captured and the write lands on its first run;
+    /// the next run writes nothing (counter-proof: review A's M1 = B's O2, count copies on live records only; with
+    /// the tombstone inserted first the check keeps the tombstone, and the write backs off on every run).
+    @Test(arguments: MetadataKind.allCases, [true, false])
+    func aLiveCopyNextToATombstoneCopyLands(kind: MetadataKind, tombstoneFirst: Bool) async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try store.insertClassify()
+        let keeper = try store.insertMetadata(kind, "Woanders")
+        let copies = try store.insertCopies(kind, "Privat")
+        let (tombstone, live) = tombstoneFirst ? (copies.first, copies.second) : (copies.second, copies.first)
+        try store.mergeCopy(kind, row: tombstone, into: keeper)
+        try store.linkCopy(id, kind, row: live)
+        let queue = store.classifyingQueue(classifier: StubClassifier(), clock: clock)
+
+        let first = await queue.run()
+
+        #expect(first.done == 1 && first.backedOff == 0, "\(first)")
+        #expect(try store.classified(id).stateRaw == "done")
+        #expect(try store.linkedRows(id, kind).contains(live), "the live copy stays linked")
+
+        clock.advance(by: 60)
+        let next = await queue.run()
+
+        #expect(next.saves == 0 && next.backedOff == 0 && next.done == 0, "\(next)")
     }
 
     // MARK: 4. The text write and the bulk run

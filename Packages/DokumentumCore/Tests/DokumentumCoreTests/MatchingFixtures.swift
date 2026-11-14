@@ -187,6 +187,38 @@ extension ProcessingStore {
         }
     }
 
+    /// Makes the row with `id` (one copy of a record with copies) a merge's tombstone of the record `target` (an
+    /// `instanceID`), in a context of its own: a merge's loser next to its live copy (#205's B1 shape).
+    func mergeCopy(_ kind: MetadataKind, row id: UUID, into target: UUID) throws {
+        let context = ModelContext(container)
+        switch kind {
+        case .tag:
+            let into = try #require(
+                try context.fetch(
+                    FetchDescriptor<DokumentumCore.Tag>(predicate: #Predicate { $0.instanceID == target })
+                )
+                .first)
+            let record = try #require(
+                try context.fetch(FetchDescriptor<DokumentumCore.Tag>(predicate: #Predicate { $0.id == id })).first)
+            (record.mergedIntoID, record.mergedAt) = (into.id, processingStart)
+        case .correspondent:
+            let into = try #require(
+                try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.instanceID == target }))
+                    .first)
+            let record = try #require(
+                try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.id == id })).first)
+            (record.mergedIntoID, record.mergedAt) = (into.id, processingStart)
+        case .documentType:
+            let into = try #require(
+                try context.fetch(FetchDescriptor<DocumentType>(predicate: #Predicate { $0.instanceID == target }))
+                    .first)
+            let record = try #require(
+                try context.fetch(FetchDescriptor<DocumentType>(predicate: #Predicate { $0.id == id })).first)
+            (record.mergedIntoID, record.mergedAt) = (into.id, processingStart)
+        }
+        try context.save()
+    }
+
     /// The `id`s of the rows of `kind` the document links.
     func linkedRows(_ document: UUID, _ kind: MetadataKind) throws -> [UUID] {
         let row = try #require(try Self.fetch(document, in: ModelContext(container)))
