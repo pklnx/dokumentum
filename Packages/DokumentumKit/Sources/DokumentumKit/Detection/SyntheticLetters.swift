@@ -308,6 +308,18 @@ public enum SyntheticLetters {
                 L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
             ] + germanRecipient + germanBody),
         letter(
+            "truncated-misread-return-line",
+            "review B7 of #209: the return line read `Finanzamt Musterstad` (a truncated misread, as the iOS simulator "
+                + "reads `Musterstad!`), the letterhead `Finanzamt Musterstadt`, known: the known record",
+            recipient: owner, known: ["Finanzamt Musterstadt"], sender: .known("Finanzamt Musterstadt"),
+            date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstad · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 130, top: 45, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
             "correct-return-line-in-the-letterhead",
             "review B N6 of #209: `Elektro Meier GmbH` in the return line and the letterhead, a known `Elektro Meyer "
                 + "GmbH` in the info block: Meier",

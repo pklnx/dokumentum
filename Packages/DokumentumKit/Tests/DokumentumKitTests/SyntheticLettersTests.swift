@@ -23,6 +23,7 @@ struct SyntheticLettersTests {
             "inkasso-creditor-info-block", "inkasso-on-behalf-info-block",
             "inkasso-partner-letterhead", "footer-known-parent-return-line", "near-known-not-on-the-page",
             "two-near-known-in-the-letterhead", "correct-return-line-in-the-letterhead",
+            "truncated-misread-return-line",
         ]
         for id in required { #expect(ids.contains(id), "\(id)") }
     }
