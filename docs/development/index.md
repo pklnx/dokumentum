@@ -1299,9 +1299,13 @@ changes in Berlin), `LibrarySelectionTests` (open only, the order under shuffles
 3, 0 and 10 days). App: `DeadlineLibraryTests` (`AppDay` with and without the argument, the seeded deadlines relative to
 two days, the list's order and count, the seam, Done and the info panel's edits, the day change). UI:
 `LibrarySmokeTests.testSidebarFiltersAndOpensAPDF` opens Deadlines (count 2, the three rows in day order, neither the done
-car insurance nor a document without a deadline; the overdue row's sentence has the bar's words, whose identifier is
-`…overdue`), audits the water bill's bar, measures its contrast on the Mac and marks it done (count 1); screenshots
-`14-deadlines` and `15-deadline-bar`. `MenuCommandsSmokeTests` (Mac) drives ⌘4.
+car insurance nor a document without a deadline; the overdue row's sentence ends with the status word of the bar, whose
+identifier is `…overdue`), audits the medical invoice's overdue bar over its PDF (over the water bill's "Still
+downloading" the audit fails the placeholder's description, its known false positive in light), measures both bars'
+contrast on the Mac, opens the info panel through "Edit…", and marks the water bill done (count 1). A combined static text
+reads its text as the label on the iPhone and as the value on the Mac, so the test takes whichever is set. Screenshots
+`14-deadlines`, `15-deadline-overdue`, `16-deadline-bar`, `17-deadline-info`. `MenuCommandsSmokeTests` (Mac) drives
+⌘4.
 
 ## Look
 
