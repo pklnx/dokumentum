@@ -3,7 +3,8 @@ import Foundation
 import Testing
 
 /// The `SyntheticLetters` corpus as layouts (#11, part 1; plan Tests part 1): every letter, evaluated with its
-/// recipient among the known correspondents (B1.5), gives its expected sender and date.
+/// recipient among the known correspondents (B1.5), gives its expected sender and date, and its due dates (#12,
+/// part 2b).
 struct SyntheticLettersTests {
     @Test func theCorpusHasEveryFixtureOfThePlan() {
         let ids = Set(SyntheticLetters.all.map(\.id))
@@ -23,7 +24,8 @@ struct SyntheticLettersTests {
             "inkasso-creditor-info-block", "inkasso-on-behalf-info-block",
             "inkasso-partner-letterhead", "footer-known-parent-return-line", "near-known-not-on-the-page",
             "two-near-known-in-the-letterhead", "correct-return-line-in-the-letterhead",
-            "truncated-misread-return-line",
+            "truncated-misread-return-line", "vertrag-kuendigung", "ausweis-gueltig-bis", "steuerbescheid-zwei-fristen",
+            "mahnung-bis-spaetestens",
         ]
         for id in required { #expect(ids.contains(id), "\(id)") }
     }
@@ -45,6 +47,20 @@ struct SyntheticLettersTests {
         if case .existing(_, let name) = sender { #expect(name != letter.recipient, "\(id): never the recipient") }
         let date = IssueDateDetector.detect(in: letter.text, createdAt: letter.createdAt)
         #expect(date == letter.date, "\(id)")
+    }
+
+    /// Every letter gives its due dates (#12, part 2b): the candidates with their kinds, or none.
+    @Test(arguments: SyntheticLetters.all.map(\.id))
+    func aLetterGivesItsDueDates(id: String) throws {
+        let letter = try #require(SyntheticLetters.letter(id))
+        #expect(DueDateDetector.candidates(in: letter.text, createdAt: letter.createdAt) == letter.due, "\(id)")
+    }
+
+    /// The corpus names due dates of every kind, and a letter with two.
+    @Test func theCorpusHasDueDatesOfEveryKind() {
+        let kinds = Set(SyntheticLetters.all.flatMap { $0.due.map(\.kind) })
+        #expect(kinds == Set(DueDateKind.allCases))
+        #expect(SyntheticLetters.all.contains { $0.due.count == 2 })
     }
 
     @Test func theLayoutKeepsTheMillimetres() throws {

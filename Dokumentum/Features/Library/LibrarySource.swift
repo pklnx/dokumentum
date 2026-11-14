@@ -16,6 +16,10 @@ protocol LibrarySource: Sendable {
     func loadPDF(instanceID: UUID) async -> PDFLoadState
     /// The thumbnail of one document's list row (#6, part 4), decoded off the main actor; `nil` while it has none.
     func loadThumbnail(instanceID: UUID) async -> CGImage?
+    /// The due-date suggestion in one document's text on `today` (#12, part 2b), read off the main actor: the earliest
+    /// candidate today or later and after the dismissed day, for a processed document outside the trash, also while it
+    /// has a deadline (`DocumentTextLoader`); the detail offers it only without one (`DueDateDetector.offers`).
+    func loadDeadlineSuggestion(instanceID: UUID, today: DeadlineDay) async -> DueDateCandidate?
     /// Writes edits to the documents (plan of #3, part 3); `nil` for a source that cannot be edited.
     @MainActor var editor: DocumentEditor? { get }
     /// Reads and saves the matching rules of tags, correspondents and types (#10, part 2); `nil` for a source that
@@ -27,6 +31,7 @@ extension LibrarySource {
     @MainActor var editor: DocumentEditor? { nil }
     @MainActor var ruleEditor: MatchingRuleEditor? { nil }
     func loadThumbnail(instanceID: UUID) async -> CGImage? { nil }
+    func loadDeadlineSuggestion(instanceID: UUID, today: DeadlineDay) async -> DueDateCandidate? { nil }
 }
 
 /// The store's library: Debug and Release builds alike. In a Debug build the store of a `-UITestSeed`

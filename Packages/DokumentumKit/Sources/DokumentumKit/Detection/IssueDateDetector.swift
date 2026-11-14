@@ -259,25 +259,41 @@ public enum IssueDateDetector {
 }
 
 extension Substring {
-    fileprivate func trimmingSuffix(_ predicate: (Character) -> Bool) -> Substring {
+    func trimmingSuffix(_ predicate: (Character) -> Bool) -> Substring {
         var result = self
         while let last = result.last, predicate(last) { result = result.dropLast() }
         return result
     }
 }
 
-/// The dates the detector accepts: valid, from 1900-01-01 to `createdAt` + 31 days.
+/// The dates a detector accepts, and how it reads a two-digit year; shared by `IssueDateDetector` and
+/// `DueDateDetector` (#12, part 2b), so both read the same forms the same way.
 struct Window {
-    let earliest = SuggestedDate(day: 1, month: 1, year: DetectionLimits.earliestYear)
+    let earliest: SuggestedDate
     let latest: SuggestedDate
-    /// `createdAt`'s year, for the two-digit years.
-    let createdYear: Int
+    /// The last year a two-digit year may name as `20yy`; later ones are `19yy`.
+    let pivotYear: Int
 
+    init(earliest: SuggestedDate, latest: SuggestedDate, pivotYear: Int) {
+        self.earliest = earliest
+        self.latest = latest
+        self.pivotYear = pivotYear
+    }
+
+    /// The issue date's window: valid, from 1900-01-01 to `createdAt` + 31 days; a two-digit year is `20yy` unless
+    /// that is after `createdAt`'s year + 1.
     init(createdAt: Date, calendar: Calendar) {
-        let end = calendar.date(byAdding: .day, value: DetectionLimits.dateWindowDays, to: createdAt) ?? createdAt
-        let parts = calendar.dateComponents([.year, .month, .day], from: end)
-        latest = SuggestedDate(day: parts.day ?? 1, month: parts.month ?? 1, year: parts.year ?? 1)
-        createdYear = calendar.component(.year, from: createdAt)
+        self.init(
+            earliest: SuggestedDate(day: 1, month: 1, year: DetectionLimits.earliestYear),
+            latest: Self.day(DetectionLimits.dateWindowDays, after: createdAt, calendar: calendar),
+            pivotYear: calendar.component(.year, from: createdAt) + 1)
+    }
+
+    /// The day `days` after `date` in `calendar` (before it for a negative number).
+    static func day(_ days: Int, after date: Date, calendar: Calendar) -> SuggestedDate {
+        let moved = calendar.date(byAdding: .day, value: days, to: date) ?? date
+        let parts = calendar.dateComponents([.year, .month, .day], from: moved)
+        return SuggestedDate(day: parts.day ?? 1, month: parts.month ?? 1, year: parts.year ?? 1)
     }
 
     func contains(_ date: SuggestedDate) -> Bool {
@@ -285,9 +301,9 @@ struct Window {
         return key >= (earliest.year, earliest.month, earliest.day) && key <= (latest.year, latest.month, latest.day)
     }
 
-    /// A two-digit year as a full year (`20yy`, or `19yy` when `20yy` is after `createdAt`'s year + 1).
+    /// A two-digit year as a full year: `20yy`, or `19yy` when `20yy` is after `pivotYear`.
     func fullYear(twoDigit year: Int) -> Int {
-        2000 + year > createdYear + 1 ? 1900 + year : 2000 + year
+        2000 + year > pivotYear ? 1900 + year : 2000 + year
     }
 }
 

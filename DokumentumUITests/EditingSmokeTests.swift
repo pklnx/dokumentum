@@ -4,9 +4,9 @@ import XCTest
 /// correspondent change, and the list shows the new values after leaving the Inbox and coming back. On the Mac
 /// the delete key in the title field only edits the text (a regression of the predecessor,
 /// `MacSmokeTests.testDeleteKeyInTheTitleFieldOnlyEditsText`). Then a matching rule is edited from the sidebar and
-/// applied from the settings (#10, part 2; plan review N9: in this test, not a suite of its own). A second launch
-/// shows the line under the title field when its save fails (part 5); it stays in this test, so the smoke suite keeps
-/// its count (plan §4).
+/// applied from the settings (#10, part 2; plan review N9: in this test, not a suite of its own). The electricity bill's
+/// due date is suggested from its text, added, and marked done (#12, part 2b). A second launch shows the line under the
+/// title field when its save fails (part 5); these stay in this test, so the smoke suite keeps its count (plan §4).
 final class EditingSmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test cannot see the
     // app's code. The titles and names are sample data, the same in every language.
@@ -112,6 +112,7 @@ final class EditingSmokeTests: XCTestCase {
         XCTAssertFalse(row.label.contains("Stadtwerke Musterstadt"), "the row still shows the old correspondent")
         ui.attachWindowScreenshot("3-row-updated", to: self)
 
+        checkDeadlineSuggestion(ui)
         checkMatchingRules(ui)
         checkATitleThatCannotBeSavedSaysSo(ui)
     }
@@ -219,6 +220,74 @@ final class EditingSmokeTests: XCTestCase {
                 "Musterbank AG's count is not \(before + 1): \(String(describing: row.value))")
         }
         ui.attachWindowScreenshot("8-matching-count", to: self)
+    }
+
+    /// The due-date suggestion (#12, part 2b; plan Tests 2b): the electricity bill's text says "Zahlbar bis" 14 days after
+    /// the run's `-UITestToday`, and the detail's bar offers that day (its identifier names the day, so no localized text
+    /// is read) with "Add Deadline" and "Dismiss". The bar passes the audit over the PDF. "Add Deadline" turns it into
+    /// the deadline (the bar then shows it, due in 14 days); the bill is in Deadlines, and "Mark as Done" takes it out.
+    /// Ends in the Inbox (on the Mac with the bill open), as the steps after it expect.
+    @MainActor
+    private func checkDeadlineSuggestion(_ ui: UITestApp) {
+        #if os(macOS)
+            // The info panel closed first: the audit covers the whole window, and the panel's correspondent picker is
+            // reported there ("Action is missing", as in `checkMatchingRules`).
+            if ui.element("documentInfo.title").exists {
+                ui.activate("documentDetail.showInfo")
+                XCTAssertTrue(
+                    ui.element("documentInfo.title").waitForNonExistence(timeout: 10), "the info panel stayed open")
+            }
+        #endif
+        ui.activate(Self.electricityBill)
+        XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        let day = UITestApp.day(daysAfterToday: 14)
+        let suggestion = ui.element("documentDetail.deadlineSuggestion.\(day)")
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 20), "no suggestion for \(day)")
+        XCTAssertTrue(ui.element("documentDetail.deadlineSuggestion.dismiss").exists, "no “Dismiss”")
+        XCTAssertFalse(ui.element("documentDetail.deadline.upcoming").exists, "a deadline before it was added")
+        ui.attachWindowScreenshot("9-deadline-suggestion", to: self)
+        #if os(macOS)
+            ui.assertTextContrast("documentDetail.deadlineSuggestion.\(day)", in: self)
+        #endif
+        ui.auditAccessibility("deadline-suggestion", in: self)
+
+        ui.activate("documentDetail.deadlineSuggestion.add")
+        XCTAssertTrue(
+            ui.element("documentDetail.deadline.upcoming").waitForExistence(timeout: 20),
+            "the deadline bar did not appear")
+        XCTAssertTrue(suggestion.waitForNonExistence(timeout: 10), "the suggestion stayed after Add")
+        ui.attachWindowScreenshot("10-deadline-added", to: self)
+
+        // In Deadlines; "Mark as Done" takes it out.
+        #if os(iOS)
+            goBack(ui)
+            goBack(ui)
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
+        #endif
+        ui.revealSidebarRow("sidebar.deadlines")
+        ui.activate("sidebar.deadlines")
+        let row = ui.element(Self.electricityBill)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the added deadline is not in Deadlines")
+        ui.activate(Self.electricityBill)
+        ui.activate("documentDetail.deadline.markDone")
+        XCTAssertTrue(row.waitForNonExistence(timeout: 20), "the done deadline stayed in Deadlines")
+        #if os(iOS)
+            // The detail closes with the selection; back from the list (once more if it stayed).
+            for _ in 0..<2 where !ui.element("sidebar").exists {
+                goBack(ui)
+                _ = ui.element("sidebar").waitForExistence(timeout: 5)
+            }
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
+        #endif
+        ui.revealSidebarRow("sidebar.inbox")
+        ui.activate("sidebar.inbox")
+        XCTAssertTrue(ui.element(Self.electricityBill).waitForExistence(timeout: 10), "the bill left the Inbox")
+        #if os(macOS)
+            // Open again, as before this step: the matching sheet's audit covers the window behind it, and "No document
+            // selected" there is a known false positive of the audit in light (#89).
+            ui.activate(Self.electricityBill)
+            XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+        #endif
     }
 
     /// The number a sidebar row's VoiceOver value starts with ("5 documents", "5 Dokumente").

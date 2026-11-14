@@ -57,6 +57,13 @@ enum AccessibilityID {
     }
     static let detailDeadlineMarkDone = "documentDetail.deadline.markDone"
     static let detailDeadlineEdit = "documentDetail.deadline.edit"
+    /// The same bar's due-date suggestion (#12, part 2b): the line, named by the suggested day (`yyyy-MM-dd`), so a UI
+    /// test checks the day without reading localized text, and its two buttons.
+    static func detailDeadlineSuggestion(_ day: DeadlineDay) -> String {
+        "documentDetail.deadlineSuggestion.\(day.storedValue)"
+    }
+    static let detailDeadlineSuggestionAdd = "documentDetail.deadlineSuggestion.add"
+    static let detailDeadlineSuggestionDismiss = "documentDetail.deadlineSuggestion.dismiss"
 
     /// The detail's toolbar button that shows the info panel.
     static let detailShowInfo = "documentDetail.showInfo"

@@ -172,9 +172,10 @@ private struct DocumentInfoForm: View {
 
     // MARK: Deadline
 
-    /// "Add Deadline" without a deadline, 7 days after today (part 2b offers the suggestion's day instead); with one,
-    /// its day (a date-only picker, four-digit years), its label, "Completed" and "Remove Deadline". A done deadline
-    /// stays here with "Completed" on, so it can be opened again.
+    /// "Add Deadline" without a deadline: the suggestion the detail offers (its day and kind, #12 part 2b), else 7 days
+    /// after today; with one, its day (a date-only picker, four-digit years), its label, "Completed" and "Remove
+    /// Deadline", which also dismisses the day when it is the text's suggestion (review N9). A done deadline stays here
+    /// with "Completed" on, so it can be opened again.
     @ViewBuilder
     private var deadlineSection: some View {
         Section("Deadline") {
@@ -191,13 +192,12 @@ private struct DocumentInfoForm: View {
                 Toggle("Completed", isOn: deadlineDoneBinding)
                     .accessibilityIdentifier(AccessibilityID.infoDeadlineDone)
                 Button("Remove Deadline") {
-                    model.edit(.clearDeadline(dismissing: nil), of: document.instanceID)
+                    model.removeDeadline(of: document.instanceID)
                 }
                 .accessibilityIdentifier(AccessibilityID.infoDeadlineRemove)
             } else {
                 Button("Add Deadline") {
-                    let day = model.today.adding(days: 7) ?? model.today
-                    model.edit(.deadline(day, label: ""), of: document.instanceID)
+                    model.addDeadline(to: document.instanceID)
                 }
                 .accessibilityIdentifier(AccessibilityID.infoDeadlineAdd)
             }
