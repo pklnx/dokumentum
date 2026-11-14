@@ -25,6 +25,8 @@ struct NameSimilarityTests {
         ("Inkasso Beispiel GmbH", "Stadtwerke Musterstadt GmbH"),
         ("Finanzamt Musterstadt", "Finanzamt Musterstadt Nord"),  // another word count
         ("Stadtwerke Musterstadt GmbH", "Stadtwerke Musterstadt"),
+        ("Fitness 2000 GmbH", "Fitness 3000 GmbH"),  // numbers must be equal (review B N7 of #209)
+        ("Fitness 2000 GmbH", "Fitness 200O GmbH"),
         ("", ""),
     ])
     func notNearEqual(_ pair: (String, String)) {

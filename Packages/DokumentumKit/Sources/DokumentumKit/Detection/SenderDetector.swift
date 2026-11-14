@@ -40,7 +40,9 @@ public enum DetectedSender: Equatable, Sendable {
 /// names and then its structural names; the first with a result wins. One exception (reviews B2 and B4 of #209): the
 /// return-address line's structural name yields to a known name in the letterhead that is **near-equal** to it
 /// (`NameSimilarity`), so a misread 7 pt return line links the known sender its letterhead names correctly, while a
-/// known third party beside a correctly read return line (`Gläubiger: Stadtwerke …`) never wins.
+/// known third party beside a correctly read return line (`Gläubiger: Stadtwerke …`) never wins. The exception needs
+/// the known name in the letterhead (never a record the page does not name), exactly one such name (two give the
+/// structural name), and a return-line name that the letterhead does not print itself (then it was read correctly).
 ///
 /// 1. A known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
 ///    yields to the longer; two distinct names give **none for the document**;
@@ -151,7 +153,11 @@ public enum SenderDetector {
                 return .existing(id: first.record.id, name: first.record.name)
             }
             for name in zone.structuralNames() where isAcceptable(name, recipientText: recipientText) {
-                if zone.kind == .returnAddress {
+                // The exception never applies to a name the letterhead itself prints: it was read correctly
+                // (review B N6 of #209, `Elektro Meier` beside a known `Elektro Meyer`).
+                if zone.kind == .returnAddress,
+                    !Folded.containsBounded(SuggestionRules.fold(name), in: letterheadText)
+                {
                     let near = candidates.filter {
                         NameSimilarity.isNearEqual($0.record.name, name)
                             && Folded.containsBounded($0.folded, in: letterheadText)

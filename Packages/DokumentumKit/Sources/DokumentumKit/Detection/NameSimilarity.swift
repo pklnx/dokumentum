@@ -10,7 +10,8 @@ import Foundation
 /// - 4 to 7 characters: at most 1 edit (`GmbH`, `Muster`);
 /// - 8 characters or more: at most 2 edits (`Musterstadt`, `Stadtbibliothek`).
 ///
-/// Punctuation is not a word, so `Musterstad!` is the word `musterstad`. A different word count is never near-equal,
+/// A word of digits only must be equal (`Fitness 2000` is not `Fitness 3000`). Punctuation is not a word, so
+/// `Musterstad!` is the word `musterstad`. A different word count is never near-equal,
 /// so a letterhead name with another word (`Inkasso Beispiel GmbH` against `Stadtwerke Musterstadt GmbH`) never is.
 public enum NameSimilarity {
     /// The edits allowed for a word of `length` characters.
@@ -27,7 +28,10 @@ public enum NameSimilarity {
         let right = words(rhs)
         guard !left.isEmpty, left.count == right.count else { return false }
         return zip(left, right).allSatisfy { a, b in
-            a == b || distance(a, b, limit: allowedEdits(forLength: max(a.count, b.count))) != nil
+            if a == b { return true }
+            // A number is equal or another number (`Fitness 2000` is not `Fitness 3000`; review B N7 of #209).
+            if a.allSatisfy(\.isNumber) || b.allSatisfy(\.isNumber) { return false }
+            return distance(a, b, limit: allowedEdits(forLength: max(a.count, b.count))) != nil
         }
     }
 

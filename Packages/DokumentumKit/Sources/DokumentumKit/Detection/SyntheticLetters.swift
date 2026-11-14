@@ -283,6 +283,44 @@ public enum SyntheticLetters {
                 L("Ein Unternehmen der Muster Holding AG", x: 20, top: 280, size: 7),
             ] + germanRecipient + germanBody),
         letter(
+            "near-known-not-on-the-page",
+            "review B6/A DN3 of #209: a correct return line `Stadtwerke Freiberg GmbH`; a near-equal `Stadtwerke "
+                + "Freiburg GmbH` is known but not on the page: the return line's own name",
+            recipient: owner, known: ["Stadtwerke Freiburg GmbH"], sender: .structural("Stadtwerke Freiberg GmbH"),
+            date: november13,
+            [
+                L("SWF Energie", x: 125, top: 12, size: 16),
+                L("Stadtwerke Freiberg GmbH · Postfach 12 34 · 09599 Freiberg", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum: 13.11.2026", x: 125, top: 45, size: 9),
+                L("Jahresabrechnung Strom 2026", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
+            "two-near-known-in-the-letterhead",
+            "review B6 of #209: a misread return line `Finanzamt Musterstact`, and two known names near-equal to it in "
+                + "the letterhead: ambiguous, so the return line's name, no link",
+            recipient: owner, known: ["Finanzamt Musterstadt", "Finanzamt Musterstedt"],
+            sender: .structural("Finanzamt Musterstact"), date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstact · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Außenstelle Finanzamt Musterstedt", x: 125, top: 55, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
+            "correct-return-line-in-the-letterhead",
+            "review B N6 of #209: `Elektro Meier GmbH` in the return line and the letterhead, a known `Elektro Meyer "
+                + "GmbH` in the info block: Meier",
+            recipient: owner, known: ["Elektro Meyer GmbH"], sender: .structural("Elektro Meier GmbH"),
+            date: november13,
+            [
+                L("Elektro Meier GmbH", x: 25, top: 10, size: 16),
+                L("Elektro Meier GmbH · Hauptstraße 1 · 12345 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Ihr Auftrag bei Elektro Meyer GmbH", x: 125, top: 55, size: 9),
+                L("Rechnung Elektroinstallation", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
             "rechnung-zeitraum", "an invoice with `Rechnungsdatum`, a service period, a due date and a column footer",
             recipient: owner, sender: .structural("Muster Versand GmbH"), date: november13,
             [
