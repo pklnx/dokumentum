@@ -29,6 +29,8 @@ public enum Log {
     public static let search = Logger(subsystem: subsystem, category: "search")
     /// Deadline reminders: each reconcile's counts, failed reads and adds (#12, part 3).
     public static let reminders = Logger(subsystem: subsystem, category: "reminders")
+    /// The Spotlight index: each pass's kind and counts, failed calls and writes (codes only) (#13, part 1).
+    public static let spotlight = Logger(subsystem: subsystem, category: "spotlight")
 
     /// An error's domain and code, such as "NSCocoaErrorDomain 134110": safe to log as `.public`. Log the
     /// `localizedDescription` separately, as `.private`.

@@ -12,6 +12,17 @@ public enum TextChange: Sendable, Hashable {
     case delete(PersistentIdentifier)
 }
 
+/// What the persistent history says about a Spotlight item beyond its metadata (#13, plan §3, N1): the rows are
+/// mapped to the documents they belong to by `SpotlightStoreReader`.
+public enum SpotlightChange: Sendable, Hashable {
+    /// A `DocumentText` row inserted, or updated in `extractedText` or `document`.
+    case text(PersistentIdentifier)
+    /// A `DocumentThumbnail` row inserted, or updated in `document`.
+    case thumbnail(PersistentIdentifier)
+    /// A `Document` row updated in `text` or `thumbnail` (a relink).
+    case document(PersistentIdentifier)
+}
+
 /// The history the indexer reads; `StoreSearchHistory` in the app, a stub in tests (N5).
 public protocol SearchHistoryReading: Sendable {
     /// The newest transaction's token; `nil` for a store without history.
@@ -42,16 +53,32 @@ public struct StoreSearchHistory: SearchHistoryReading {
     public func changes(since token: DefaultHistoryToken?) throws -> (
         changes: [TextChange], newest: DefaultHistoryToken?
     ) {
+        try mapped(since: token, Self.textChange)
+    }
+
+    /// The changes Spotlight's items depend on beyond the list query's metadata (#13, plan §3, N1), in order, and the
+    /// newest token among them; throws as `changes(since:)`. One type with the search's mapping, so the two indexers
+    /// read the same history the same way.
+    public func spotlightChanges(since token: DefaultHistoryToken?) throws -> (
+        changes: [SpotlightChange], newest: DefaultHistoryToken?
+    ) {
+        try mapped(since: token, Self.spotlightChange)
+    }
+
+    /// The history after `token` (all of it for `nil`), each change mapped by `map`.
+    private func mapped<Change>(since token: DefaultHistoryToken?, _ map: (HistoryChange) -> Change?) throws -> (
+        changes: [Change], newest: DefaultHistoryToken?
+    ) {
         var descriptor = HistoryDescriptor<DefaultHistoryTransaction>(
             sortBy: [SortDescriptor(\.transactionIdentifier)])
         if let token {
             descriptor.predicate = #Predicate { $0.token > token }
         }
         let transactions = try ModelContext(container).fetchHistory(descriptor)
-        var changes: [TextChange] = []
+        var changes: [Change] = []
         for transaction in transactions {
             for change in transaction.changes {
-                if let mapped = Self.textChange(change) { changes.append(mapped) }
+                if let mapped = map(change) { changes.append(mapped) }
             }
         }
         return (changes, transactions.last?.token)
@@ -77,6 +104,39 @@ public struct StoreSearchHistory: SearchHistoryReading {
             return .documentLink(update.changedPersistentIdentifier)
         case .delete(let delete as DefaultHistoryDelete<DocumentText>):
             return .delete(delete.changedPersistentIdentifier)
+        default:
+            return nil
+        }
+    }
+
+    /// The Spotlight change one history change stands for (#13, plan §3), `nil` for anything an item does not depend on
+    /// beyond the list query's metadata, which the fingerprints cover:
+    /// - a `DocumentText` inserted, or updated in `extractedText` or `document`;
+    /// - a `DocumentThumbnail` inserted, or updated in `document`;
+    /// - a `Document` updated in `text` or `thumbnail` (a relink).
+    static func spotlightChange(_ change: HistoryChange) -> SpotlightChange? {
+        switch change {
+        case .insert(let insert as DefaultHistoryInsert<DocumentText>):
+            return .text(insert.changedPersistentIdentifier)
+        case .update(let update as DefaultHistoryUpdate<DocumentText>):
+            let relevant: [AnyKeyPath] = [\DocumentText.extractedText, \DocumentText.document]
+            guard update.updatedAttributes.contains(where: { relevant.contains($0 as AnyKeyPath) }) else {
+                return nil
+            }
+            return .text(update.changedPersistentIdentifier)
+        case .insert(let insert as DefaultHistoryInsert<DocumentThumbnail>):
+            return .thumbnail(insert.changedPersistentIdentifier)
+        case .update(let update as DefaultHistoryUpdate<DocumentThumbnail>):
+            guard update.updatedAttributes.contains(where: { ($0 as AnyKeyPath) == \DocumentThumbnail.document }) else {
+                return nil
+            }
+            return .thumbnail(update.changedPersistentIdentifier)
+        case .update(let update as DefaultHistoryUpdate<Document>):
+            let relevant: [AnyKeyPath] = [\Document.text, \Document.thumbnail]
+            guard update.updatedAttributes.contains(where: { relevant.contains($0 as AnyKeyPath) }) else {
+                return nil
+            }
+            return .document(update.changedPersistentIdentifier)
         default:
             return nil
         }
