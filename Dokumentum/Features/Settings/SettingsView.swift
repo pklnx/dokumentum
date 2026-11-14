@@ -2,7 +2,8 @@ import DokumentumKit
 import SwiftUI
 
 /// The app's settings (#8, part 3): the Mac's Settings window (⌘,) and, on the iPhone, a sheet from the sidebar's
-/// toolbar (`SettingsButton`). Two sections: "Suggestions" and "Matching" (#10, part 2, `MatchingSettingsSection`).
+/// toolbar (`SettingsButton`). Three sections: "Suggestions", "Matching" (#10, part 2, `MatchingSettingsSection`) and
+/// "Reminders" (#12, part 3, `ReminderSettingsSection`).
 ///
 /// Below the switch and its availability note come what suggestions do, the privacy statement and the per-device
 /// consequence (`about`): on the Mac in the section's footer, on the iPhone in a row without a background below the
@@ -13,6 +14,8 @@ struct SettingsView: View {
     let model: SuggestionSettings
     /// The app's one "Apply Matching Rules" run.
     let matching: MatchingRunModel
+    /// The app's reminders; `nil` shows no "Reminders" section (unit tests that build the settings alone).
+    var reminders: Reminders?
 
     var body: some View {
         Form {
@@ -53,12 +56,17 @@ struct SettingsView: View {
                 }
             #endif
             MatchingSettingsSection(model: matching)
+            if let reminders {
+                ReminderSettingsSection(reminders: reminders)
+            }
         }
         .formStyle(.grouped)
         .modifier(MatchingRunConfirmation(model: matching))
         // Read again on each appearance: the observation runs only while the view is shown.
         .task {
             model.refresh()
+            // The permission may have changed in the system's settings meanwhile; reading it never asks.
+            if let reminders { await reminders.authorization.refresh() }
             await model.observeAvailability()
         }
         #if os(macOS)
@@ -90,6 +98,7 @@ struct SettingsView: View {
     struct SettingsButton: View {
         @Environment(SuggestionSettings.self) private var model: SuggestionSettings?
         @Environment(MatchingRunModel.self) private var matching: MatchingRunModel?
+        @Environment(Reminders.self) private var reminders: Reminders?
         @State private var isPresented = false
 
         var body: some View {
@@ -106,7 +115,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier(AccessibilityID.settingsOpen)
                 .sheet(isPresented: $isPresented) {
                     NavigationStack {
-                        SettingsView(model: model, matching: matching)
+                        SettingsView(model: model, matching: matching, reminders: reminders)
                             .navigationTitle(Text("Settings"))
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {

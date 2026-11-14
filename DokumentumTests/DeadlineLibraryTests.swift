@@ -12,7 +12,7 @@ import Testing
 #endif
 
 /// The Deadlines overview in the app (#12, part 2a): "today" from `AppDay` (`-UITestToday` in Debug), the sample
-/// deadlines relative to it, the Deadlines list in its order with Q7's count behind the lead-time seam, Done taking a
+/// deadlines relative to it, the Deadlines list in its order with Q7's count from the lead time, Done taking a
 /// document out of the list, and the day change. In-memory stores and fixed days only; never the real clock.
 @MainActor
 struct DeadlineLibraryTests {
@@ -99,7 +99,8 @@ struct DeadlineLibraryTests {
         #expect(model.documents.contains { $0.instanceID == Self.carInsurance })
     }
 
-    /// The count's lead time comes through the seam that #12's part 3 replaces with the device's setting.
+    /// The count's lead time comes through `deadlineLeadDays`, this device's reminder lead time in the app (#12, part 3;
+    /// `ReminderAppTests.theCountFollowsTheLeadTime`).
     @Test func theCountsLeadTimeComesThroughTheSeam() {
         let longer = LibraryModel(
             source: FixtureLibrarySource(today: Self.today), today: { Self.today }, deadlineLeadDays: { 10 })

@@ -27,6 +27,8 @@ public enum Log {
     public static let processing = Logger(subsystem: subsystem, category: "processing")
     /// The search index: builds, rebuilds, history errors (codes only), the benchmark's numbers (#7, part 2).
     public static let search = Logger(subsystem: subsystem, category: "search")
+    /// Deadline reminders: each reconcile's counts, failed reads and adds (#12, part 3).
+    public static let reminders = Logger(subsystem: subsystem, category: "reminders")
 
     /// An error's domain and code, such as "NSCocoaErrorDomain 134110": safe to log as `.public`. Log the
     /// `localizedDescription` separately, as `.private`.

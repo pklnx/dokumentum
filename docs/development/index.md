@@ -1205,6 +1205,14 @@ On the iPhone, with the matching rules (#200; `EditingSmokeTests` audits the rul
   above it instead. Both use text styles that follow Dynamic Type.
 - `settings.suggestions.privacy`, "Text clipped": reported first once the "Matching" section made the settings form
   longer than the screen, while the statement shows in full on the run's screenshot.
+- `settings.reminders.lead.3` (the Mac), "Action is missing": the "Reminders" lead-time picker, SwiftUI's own `Picker`
+  in a grouped `Form`, drawn by AppKit as a pop-up button; VoiceOver opening it is not verified.
+- `settings.reminders.status.authorized`, Dynamic Type "unsupported" and "Text clipped" (#12, part 3;
+  `LibrarySmokeTests` audits the "Reminders" section, which UI tests show only allowed): the status line was reported
+  as the row's own text, in a stack with its button, and laid out as the availability note (a hidden symbol and the
+  text in a stack) alike; it is primary callout medium text, a style that follows Dynamic Type, and wraps in full on
+  the screenshot `18-settings-reminders`. Not looked at in a large size: `LibrarySmokeTests` at AccessibilityXL stops
+  earlier, at the Scanned receipt row.
 - None of these was looked at in AccessibilityXXXL: `EditingSmokeTests` at that size stops earlier, at revealing
   Musterbank AG's sidebar row (`revealSidebarRow`), before the matching steps (#200, not verified).
 
@@ -1240,7 +1248,8 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
 
 #12, part 2a (plan of #12, Revision 2, §6 and §8; maintainer decisions Q1 and Q7): one deadline per document, with an
 optional label, its overview and its editing; #12, part 2b (#216): the due-date suggestion from the text ("Due-date
-suggestions" below). Reminders are part 3 (#217). The fields and the read rule: "Data model and sync" above.
+suggestions" below). Reminders are part 3 (#217): "Reminders" below. The fields and the read rule: "Data model and sync"
+above.
 
 **"Today" is a day** (plan review B2). `AppDay.today()` (`Dokumentum/App/AppDay.swift`) is the local day as a Kit
 `DeadlineDay`, in the device's current time zone; in Debug builds `-UITestToday yyyy-MM-dd` fixes it (`UITestToday`,
@@ -1259,9 +1268,11 @@ of a document that is not in the trash, in `LibraryDocument.deadlineOrder`: by d
 by title (`localizedStandardCompare`), then by `instanceID`. `LibrarySelection.filter` sorts each selection by its
 `order`; every other list keeps `listOrder`. A search inside Deadlines keeps that order; Deadlines is not a search token.
 - **The count (Q7)** is `LibraryCounts.deadlines`: open deadlines that are overdue or due at most the lead time ahead
-  (with 3 days a deadline in 3 days counts, one in 4 does not); the list shows the others too. The lead time comes
-  through `LibraryModel`'s `deadlineLeadDays` closure, `LibraryCounts.defaultDeadlineLeadDays` (3) until part 3 passes
-  this device's reminder setting. VoiceOver reads the row's value as "2 overdue or due soon", not "documents".
+  (with 3 days a deadline in 3 days counts, one in 4 does not); the list shows the others too. The lead time is this
+  device's reminder lead time (part 3, "Reminders" below), read through `LibraryModel`'s `deadlineLeadDays` at each
+  count; a change of the setting recounts every window (`leadTimeMayHaveChanged`). Without the app's reminders (unit
+  tests) it is `LibraryCounts.defaultDeadlineLeadDays` (3). VoiceOver reads the row's value as "2 overdue or due soon",
+  not "documents".
 - **Rows** in the Deadlines list (only there) get one more line, "Due 16 Nov 2026 · Pay · Overdue": the day, the label
   and `DeadlineStatus` (Kit): `overdue`, `today` ("Due today") or `upcoming` ("Due in 2 days"). Overdue is never colour
   alone: a warning triangle (red) in place of the calendar, the word "Overdue", and semibold primary text; the other
@@ -1387,6 +1398,137 @@ contrast on the Mac, opens the info panel through "Edit…", and marks the water
 reads its text as the label on the iPhone and as the value on the Mac, so the test takes whichever is set. Screenshots
 `14-deadlines`, `15-deadline-overdue`, `16-deadline-bar`, `17-deadline-info`. `MenuCommandsSmokeTests` (Mac) drives
 ⌘4.
+
+## Reminders
+
+#12, part 3 (#217; plan of #12, Revision 2, §3, §4, §7–§9; re-review 2's N1–N3; maintainer decisions Q3–Q7): local
+notifications of deadlines on the iPhone and the Mac, at most once per deadline and device, with a missed one caught up
+once. Kit holds the rule (`Packages/DokumentumKit/Sources/DokumentumKit/Reminders/`), Core the store's side
+(`…/DokumentumCore/Reminders/`), the app the settings, the permission, the router and the system's center.
+
+**Settings, per device, never synced (Q3, Q4).** `ReminderSettings` (Kit): on (default), the lead time (on the due day,
+1, 2, 3, 7 or 14 days before; default 3) and the time of day (default 09:00). `ReminderSettingsModel` keeps them in the
+launch's settings suite (keys `reminders.isOn`, `reminders.leadDays`, `reminders.minuteOfDay`). The settings' "Reminders"
+section (`ReminderSettingsSection`, after "Matching") has the switch, the two pickers, the permission's status line
+("allowed", "Allow Notifications", or turned off with a button to the system's settings; shown with its button only
+while the switch is on, maintainer decision on review B N4 of #222) and the footnote: a reminder
+shows the document's title, its due day and the deadline's label, never the document's text, and the lock screen follows
+"Show Previews" (Q5). Identifiers `settings.reminders.switch`, `…lead.<days>`, `…time.<HHmm>`,
+`…status.authorized|notDetermined|denied`, `…allow`, `…openSettings`, `…footnote`: the pickers' and the status line's
+identifiers name their value, so UI tests read no localized text.
+
+**The rule** (`ReminderPlanner`, Kit; pure). Identifiers are `deadline.<instanceID>.<yyyy-MM-dd>` (`ReminderIdentifier`),
+so a new day is a new identifier and adding one again replaces it. For each identifier at a reconcile:
+1. nothing unless reminders are on, the status is `.authorized`, `.provisional` or `.ephemeral`, the deadline is open
+   and its document not in the trash;
+2. a **fired** identifier is never planned again: fired means in delivered, **or in this device's scheduled set `S` and
+   no longer pending** (R1). An `S` entry leaves only with this device's own withdrawal or by pruning, so an entry that is
+   no longer pending was delivered by the system; no time is compared;
+3. the due moment `E`: the lead moment (day − lead days at the time) if it is after `setAt` (or `setAt` is `nil`), else
+   the due day at the time if that is after `setAt`, else nothing. So a deadline set inside the lead window reminds on
+   its due day on both devices, from the synced `setAt`, and one set on its due day after the time not at all;
+4. `E` after `now`: planned at `E`;
+5. **catch-up (Q6):** `E` passed and the due day is today or later: planned at `C`, the start of the minute after
+   `now` + 60 s; a pending moment `P` with `now < P ≤ C` is kept (N1), so frequent saves never push it back;
+6. the 60 earliest moments, tie-broken by identifier (`ReminderLimits.pending`; the system holds 64). One left out is
+   not in `S`, so a later reconcile picks it up, by catch-up once its moment has passed.
+
+Triggers are floating components (year, month, day, hour, minute; Gregorian, no zone): 09:00 is 09:00 wherever the
+device is. A time in the spring-forward gap moves on (02:30 → 03:30, `.nextTimePreservingSmallerComponents`), the
+repeated hour takes its first occurrence, and the trigger gets the resolved components. **Edge cases:** the clock set
+back changes nothing while the identifier's `S` entry is still there; once a reconcile has pruned it (more than a day
+after its day) and its banner is gone, setting the clock back to before the due day catches it up once more (review A
+N1 of #222; the plan's day of grace). Done before the moment and undone after it catches up once; done or undone after
+it fired: nothing; a request that left pending while notifications were turned off counts as fired, though nothing was
+shown (the rule prefers a miss to a second reminder). A failed save of `S` (a full disk) is healed at the next
+reconcile only for identifiers still pending or delivered: one delivered and removed meanwhile can remind once more,
+and an unsaved withdrawal reads as fired and that reminder may be missed (review A N2).
+
+**`S`** (`ScheduledSet`, `ScheduledSetStoring`): an identifier is inserted only after its `add` succeeded and removed
+with every withdrawal of a still-pending request. It is **pruned by the identifier's day only**: an entry goes when its
+day is before today − 1 (the day of grace keeps a westward zone change from bringing back a day just pruned). So an
+empty read (the local fallback store) never erases what has fired, and removing and adding the same day again does not
+remind again. Per device and never synced: in the app a JSON file `<Application Support>/Dokumentum/Reminders/Scheduled.json`
+(`ScheduledSetFile`, Core), **excluded from backup** (the file and its folder, set again after each atomic write), so a
+backup or a new device brings no stale `S`; a missing file is empty, an unreadable one ends the reconcile with no change,
+one that is no list starts empty.
+
+**The reconcile** (`ReminderReconciler`, Kit actor, behind `NotificationScheduling`; one at a time, a request during a
+run is served by exactly one more run):
+1. reads the deadlines (`ReminderStoreReader`, Core: the `Document` rows with a deadline day, in a context of its own;
+   never a text, file or thumbnail table). **A read that throws ends the reconcile with no change** (R2);
+2. reads pending and delivered, **then** takes `now` (N5), the calendar (Gregorian in the current zone), the status, the
+   settings and `S`; every pending or delivered `deadline.` identifier counts as scheduled;
+3. plans by the rule, and diffs against the pending requests **with the `deadline.` prefix only**: withdraws what is
+   not planned and removes it from `S`; reads delivered again and keeps in `S` every withdrawn identifier found there
+   (re-review 2, N1: the system delivered it meanwhile); adds what is missing or changed (trigger, title, body) and
+   inserts its identifier into `S` once `add` returned; never adds an identifier in delivered;
+4. removes delivered reminders of deadlines that are gone, done, trashed or moved, so a deadline done on the iPhone
+   clears the Mac's banner; **with reminders off or without authorization it leaves delivered notifications alone**
+   (re-review 2, N3) and withdraws every prefixed pending request;
+5. prunes `S` and saves it. Logs carry counts only (`Log.reminders`).
+
+The texts come from the app (`ReminderTexts`): the title is the document's display title, the body "Due today", "Due
+tomorrow" or "Due 27 Nov 2026" relative to **the moment's day** (N6), with " · <label>"; thread `deadlines`; `userInfo`
+carries the `instanceID`.
+
+**When it reconciles** (`ReminderScheduler`, Core, for every store): at launch; after every save of a context of the
+app's container; after each debounced store change (other devices' changes, and the end of each CloudKit import through
+`RepairScheduler`); at `NSCalendarDayChanged`, `NSSystemTimeZoneDidChange`, `NSSystemClockDidChange` (and on the iPhone
+the significant time change); after a settings change or an answer to the permission; when the scene becomes active.
+The scheduler never asks for permission.
+
+**The permission (Q4).** Only `ReminderAuthorization` (app) calls `requestAuthorization`, only while the status is
+`notDetermined`, and only from a user action on this device: saving a deadline's day here (by hand or from a
+suggestion; `LibraryModel.savesADeadline`, after the editor saved) while reminders are on, turning the switch on, or
+"Allow Notifications" in the settings or in the Deadlines list's notice (`DeadlineReminderNotice`, shown while the list
+has open deadlines, reminders are on and the system has not been asked; the Mac usually gets its deadlines by sync and
+relies on it). Never at launch, after a sync or in the background. Allowing later catches up what is inside the lead
+time.
+
+**A tapped reminder** (`ReminderRouter`): the system center's delegate (`ReminderNotificationDelegate`, set at launch
+for the system center only) hands the `instanceID` to the router; the library window that was active last takes it
+(`LibraryModel.openFromReminder`: Deadlines and the document, ending a search; a done deadline's document in All
+Documents, a trashed one in the Trash). On the Mac with no library window, one opens and takes it. While the app is in
+front, a reminder shows as a banner (`willPresent`).
+
+**Which center (N10, N2; D7).** `NotificationCenterChoice` (Core) decides at launch, and `ReminderEnvironment` (app)
+builds the center, the settings suite and `S` together:
+- **in memory** for every test run (`TestEnvironment.isRunningTests`), every launch with an argument that starts with
+  `-UITest` (`-UITestLocalStore` included, which `StoreChoice.isUITestLaunch` does not cover), and every in-memory store
+  (`-SearchBenchmark`): `InMemoryNotificationCenter` (Kit), the suite `Dokumentum.InMemoryReminderSettings` and an `S` in
+  memory, **all emptied at every such launch** (a stale `S` would read as fired). Without `-UITestNotifications` the
+  center answers `notDetermined` and a request `denied`; `UITestApp` passes `-UITestNotifications authorized` in every
+  launch (`UITestNotifications`, Debug builds);
+- **system** otherwise: `SystemNotificationCenter` (`Dokumentum/Platform/`, the app's only `UserNotifications` code,
+  which refuses to start in a test run), this device's suite and `ScheduledSetFile`.
+
+So no test and no UI-test launch reaches the system's notification center, shows a permission prompt, or writes this
+device's reminder state. No entitlement, capability, Info.plist or privacy-manifest change: local notifications need
+none, and `UserDefaults` is declared already.
+
+**Tests.** Kit (`swift test`, Linux too; fixed instants in Berlin, New York and Tokyo):
+- `ReminderRuleCaseTests`: the plan's twelve §3 cases and probes A–F, through the reconciler on the in-memory center,
+  which delivers by floating components in its current calendar;
+- `ReminderPlannerTests`: each lead time, `setAt`, the states that plan nothing, fired, the catch-up's minute and N1,
+  09:00 across both Berlin changes, the gap and the repeated hour, the cap's order, identifiers, pruning;
+- `ReminderReconcilerTests`: idempotence, a moved day and new texts, done/trashed/deleted, off and not authorized (N3),
+  authorization later, a failing add, an unreadable `S`, pruning, N5, re-review N1, the body (N6), a relaunch, two
+  devices, the cap filling in, coalescing, and 30 days of hourly steps with every event at most once.
+
+Core: `NotificationCenterChoiceTests` (every `-UITest*` argument, the prefix, an in-memory store, this run),
+`ScheduledSetFileTests` (round trip, excluded from backup, missing, unreadable, no list), `ReminderSQLTests` (the reader,
+no large table), `ReminderSchedulerTests` (launch, an editor save, another device's writes through the observer, an
+import's end, the day/zone/clock notifications, settings, authorization later, an empty fallback store between two
+launches, and zero requests for permission). App: `ReminderAppTests` (the test host on the in-memory center, N2's empty
+start for every in-memory launch, `-UITestNotifications`, the permission flow, a sync never asks, the settings suite, the
+count from the lead time, the router, texts in English and German). UI: `LibrarySmokeTests`' settings step checks the
+section (on, 3 days, 09:00, allowed, the footnote), its contrast on the Mac and the audit; screenshot `18-settings-reminders`.
+
+**Not verified here** (agents never use the system center): delivery on hardware, a tap's navigation, how the system
+treats floating components with a non-Gregorian user calendar, and whether Migration Assistant honours
+`isExcludedFromBackup`. The optional M1 (about 5 minutes, signed Debug builds on both devices) covers delivery, the tap
+and done on one device clearing the other's banner.
 
 ## Look
 
