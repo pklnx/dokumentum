@@ -304,7 +304,7 @@ public enum SyntheticLetters {
                 L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
                 L("Finanzamt Musterstact · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
                 L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
-                L("Außenstelle Finanzamt Musterstedt", x: 125, top: 55, size: 9),
+                L("Außenstelle Finanzamt Musterstedt", x: 130, top: 55, size: 9),
                 L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
             ] + germanRecipient + germanBody),
         letter(
@@ -317,7 +317,7 @@ public enum SyntheticLetters {
                 L("Elektro Meier GmbH", x: 25, top: 10, size: 16),
                 L("Elektro Meier GmbH · Hauptstraße 1 · 12345 Musterstadt", x: 25, top: 29, size: 7),
                 L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
-                L("Ihr Auftrag bei Elektro Meyer GmbH", x: 125, top: 55, size: 9),
+                L("Ihr Auftrag bei Elektro Meyer GmbH", x: 130, top: 55, size: 9),
                 L("Rechnung Elektroinstallation", x: 25, top: 95, size: 12),
             ] + germanRecipient + germanBody),
         letter(
