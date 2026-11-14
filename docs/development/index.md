@@ -346,7 +346,11 @@ a statement names `ZDOCUMENTTEXT`, `ZDOCUMENTFILE` or `ZDOCUMENTTHUMBNAIL`. Core
 under `swift test` (in the `xctest` runner of `xcodebuild` it logs none, measured on #29), so that test runs
 in `swift test --package-path Packages/DokumentumCore` and is skipped in Xcode. Core Data reads the SQL
 setting once per process, at its first store: `SQLLog.enable()` comes before any store opens (the container
-helpers call it).
+helpers call it). So every test's store logs its SQL, and late in a run the process's log holds about 130 000
+entries. A read of the log returns all of them, whatever start position, date or thread it asks for, and takes
+5–6 s; a `SQLLog.Recording` therefore runs in an `os_activity` of its own and reads only that activity's entries,
+which the log filters itself (about 1 s a read). It still keeps only its own thread's statements (#221,
+`SQLLogTests`).
 
 **The trash.** `DocumentTrash` (DokumentumCore) is the only code outside DEBUG tools that deletes a `Document`
 (#3, part 4). Moving to the trash and restoring set or clear `deletedAt` and `touch()` the document; nothing else
