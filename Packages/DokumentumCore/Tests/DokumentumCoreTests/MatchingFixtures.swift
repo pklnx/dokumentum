@@ -127,6 +127,76 @@ extension ProcessingStore {
         return original.instanceID
     }
 
+    /// Two live records of `kind` named `name` sharing one `instanceID` (a copied record, #207), with distinct `id`s,
+    /// each saved on its own so the store returns the first one first: the second is younger by `gap` (negative:
+    /// older). With `rule` both carry it. Returns the shared `instanceID` and both rows' `id`s, in insertion order.
+    @discardableResult
+    func insertCopies(
+        _ kind: MetadataKind, _ name: String, gap: TimeInterval = 60, rule: (MatchMode, String)? = nil
+    ) throws -> (instanceID: UUID, first: UUID, second: UUID) {
+        switch kind {
+        case .tag:
+            try insertPair({ DokumentumCore.Tag(name: name, createdAt: $0) }, \.instanceID, \.id, gap: gap, rule: rule)
+        case .correspondent:
+            try insertPair({ Correspondent(name: name, createdAt: $0) }, \.instanceID, \.id, gap: gap, rule: rule)
+        case .documentType:
+            try insertPair({ DocumentType(name: name, createdAt: $0) }, \.instanceID, \.id, gap: gap, rule: rule)
+        }
+    }
+
+    private func insertPair<T: MatchingRuleRecord & PersistentModel>(
+        _ make: (Date) -> T, _ instanceID: ReferenceWritableKeyPath<T, UUID>, _ id: KeyPath<T, UUID>,
+        gap: TimeInterval, rule: (MatchMode, String)?
+    ) throws -> (instanceID: UUID, first: UUID, second: UUID) {
+        let created = processingStart.addingTimeInterval(-hour)
+        let context = ModelContext(container)
+        func record(_ createdAt: Date) -> T {
+            let record = make(createdAt)
+            if let (mode, pattern) = rule {
+                record.matchMode = mode
+                record.matchPattern = pattern
+            }
+            return record
+        }
+        let first = record(created)
+        context.insert(first)
+        try context.save()
+        let second = record(created.addingTimeInterval(gap))
+        second[keyPath: instanceID] = first[keyPath: instanceID]
+        context.insert(second)
+        try context.save()
+        return (first[keyPath: instanceID], first[keyPath: id], second[keyPath: id])
+    }
+
+    /// Links the row with `id` (one copy of a record with copies) to the document in another context, without
+    /// `touch()`.
+    func linkCopy(_ document: UUID, _ kind: MetadataKind, row id: UUID) throws {
+        try edit(document) { document, context in
+            switch kind {
+            case .tag:
+                let tag = try #require(
+                    try context.fetch(FetchDescriptor<DokumentumCore.Tag>(predicate: #Predicate { $0.id == id })).first)
+                document.tags = (document.tags ?? []) + [tag]
+            case .correspondent:
+                document.correspondent = try #require(
+                    try context.fetch(FetchDescriptor<Correspondent>(predicate: #Predicate { $0.id == id })).first)
+            case .documentType:
+                document.documentType = try #require(
+                    try context.fetch(FetchDescriptor<DocumentType>(predicate: #Predicate { $0.id == id })).first)
+            }
+        }
+    }
+
+    /// The `id`s of the rows of `kind` the document links.
+    func linkedRows(_ document: UUID, _ kind: MetadataKind) throws -> [UUID] {
+        let row = try #require(try Self.fetch(document, in: ModelContext(container)))
+        switch kind {
+        case .tag: return (row.tags ?? []).map(\.id).sorted { $0.uuidString < $1.uuidString }
+        case .correspondent: return row.correspondent.map { [$0.id] } ?? []
+        case .documentType: return row.documentType.map { [$0.id] } ?? []
+        }
+    }
+
     /// A document in `stateRaw` with `text` in its text record, never edited.
     @discardableResult
     func insertWithText(
