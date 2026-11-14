@@ -404,7 +404,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Eine neuere Version von Dokumentum hat diese Regel festgelegt. Sie bleibt erhalten, solange du keinen anderen Abgleich wählst."
+            "value" : "Eine neuere Version von Dokumentum hat diese Regel festgelegt. Sie bleibt erhalten, solange du keine andere Zuordnung wählst."
           }
         }
       }
@@ -520,7 +520,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abgleichsregeln auf alle Dokumente anwenden …"
+            "value" : "Zuordnungsregeln auf alle Dokumente anwenden …"
           }
         }
       }
@@ -531,7 +531,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abgleichsregeln auf alle Dokumente anwenden?"
+            "value" : "Zuordnungsregeln auf alle Dokumente anwenden?"
           }
         }
       }
@@ -817,7 +817,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abgleich bearbeiten …"
+            "value" : "Automatische Zuordnung bearbeiten …"
           }
         }
       }
@@ -1161,7 +1161,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abgleich"
+            "value" : "Zuordnung"
           }
         }
       }
@@ -1216,7 +1216,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abgleich"
+            "value" : "Automatische Zuordnung"
           }
         }
       }
@@ -1409,12 +1409,29 @@
       }
     },
     "None" : {
-      "comment" : "Info panel: no correspondent or document type; matching rule sheet: the mode without a rule (German \"Keiner\" fits both: der Korrespondent, der Abgleich).",
+      "comment" : "Info panel: the picker item for no correspondent or no document type.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keiner"
+          }
+        }
+      }
+    },
+    "None (matching mode)" : {
+      "comment" : "Matching rule mode without a rule, an option of the picker labelled Match (German: \"Zuordnung: Keine\").",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
           }
         }
       }

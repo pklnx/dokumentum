@@ -30,9 +30,7 @@ import SwiftUI
             field.keyboardType = .asciiCapable
             field.returnKeyType = .done
             field.clearButtonMode = .whileEditing
-            let size = UIFont.preferredFont(forTextStyle: .body).pointSize
-            field.font = UIFontMetrics(forTextStyle: .body).scaledFont(
-                for: .monospacedSystemFont(ofSize: size, weight: .regular))
+            field.font = patternFont()
             field.adjustsFontForContentSizeCategory = true
             field.placeholder = String(localized: MatchingRuleText.pattern)
             field.accessibilityLabel = String(localized: MatchingRuleText.pattern)
@@ -40,6 +38,16 @@ import SwiftUI
             field.setContentHuggingPriority(.defaultLow, for: .horizontal)
             field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             return field
+        }
+
+        /// Monospaced, as large as body text at the traits' text size: body's own font with the monospaced design, so
+        /// it keeps body's text style and size and follows Dynamic Type. Not `UIFontMetrics.scaledFont` on a base taken
+        /// from body at the current size: that scales twice (review of #210, B1: 149 pt for a 53 pt body at
+        /// AccessibilityXXXL), and its own scaling from Large differs from body's sizes by a point (22 pt for 23 pt).
+        static func patternFont(compatibleWith traits: UITraitCollection? = nil) -> UIFont {
+            let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+            guard let monospaced = body.fontDescriptor.withDesign(.monospaced) else { return body }
+            return UIFont(descriptor: monospaced, size: 0)
         }
 
         func makeUIView(context: Context) -> UITextField {

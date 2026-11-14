@@ -14,7 +14,8 @@ enum MatchingRuleText {
     /// The five modes' names (P4), and a newer build's mode.
     static func name(_ mode: MatchMode) -> LocalizedStringResource {
         switch mode {
-        case .none: "None"
+        // A key of its own: German "Keine" (die Zuordnung), while the info panel's "None" is "Keiner".
+        case .none: LocalizedStringResource("None (matching mode)", defaultValue: "None")
         case .any: "Any word"
         case .all: "All words"
         case .exact: "Exact phrase"

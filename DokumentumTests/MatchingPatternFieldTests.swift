@@ -26,6 +26,22 @@ struct MatchingPatternFieldTests {
             #expect(field.adjustsFontForContentSizeCategory, "Dynamic Type")
             #expect(field.accessibilityIdentifier == AccessibilityID.matchingPattern)
         }
+
+        /// The field's font is as large as body text at every text size, scaled once, and monospaced (review of #210,
+        /// B1). Counter-proof: scaled again with `UIFontMetrics`, as before the fix → larger than body at XXXL and
+        /// AccessibilityXXXL.
+        @Test(arguments: [
+            UIContentSizeCategory.large, .extraExtraExtraLarge, .accessibilityExtraExtraExtraLarge,
+        ])
+        func theFontIsBodySizedAtEveryTextSize(size: UIContentSizeCategory) {
+            let traits = UITraitCollection(preferredContentSizeCategory: size)
+            let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits).pointSize
+            let pattern = MatchingPatternField.patternFont(compatibleWith: traits).pointSize
+            #expect(pattern == body, "\(size.rawValue): body is \(body) pt, the pattern field \(pattern) pt")
+            let font = MatchingPatternField.patternFont(compatibleWith: traits)
+            // SF Mono reports no monospace symbolic trait; its name says it.
+            #expect(font.fontName.localizedCaseInsensitiveContains("mono"), "not monospaced: \(font.fontName)")
+        }
     #else
         /// The field editor the window gives the field when it starts editing has its substitutions off, whatever the
         /// system's "Use smart quotes and dashes" says. Counter-proof: no override of `becomeFirstResponder` → the

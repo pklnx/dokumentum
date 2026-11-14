@@ -844,10 +844,13 @@ Code in `Dokumentum/Features/Matching/` and `Features/Settings/MatchingSettingsS
   the five modes (None, Any word, All words, Exact phrase, Regular expression; a newer build's mode is a sixth option,
   "Set by a newer version of Dokumentum", while it is the stored one), the **Pattern** field (disabled for None and a
   newer mode), a line under the field for a problem, and one explanation per mode (the regular expression's says it
-  ignores case only, B2); Cancel and Save.
+  ignores case only, B2); Cancel and Save. German calls matching "Automatische Zuordnung" and the picker "Zuordnung"
+  (maintainer, review of #210), so the mode "None" has a key of its own (`None (matching mode)`, "Keine"); the info
+  panel's "None" stays "Keiner".
 - **The pattern field** (`MatchingPatternField`) is the platform's own text field, because SwiftUI has no modifier for
   smart quotes and dashes: on the iPhone a `UITextField` with autocorrection, auto-capitalisation, spell checking,
-  smart quotes, smart dashes and smart insert off, monospaced body text that follows Dynamic Type; on the Mac an
+  smart quotes, smart dashes and smart insert off, monospaced body text that follows Dynamic Type (`patternFont`: Large's
+  body size scaled once; a base at the current size was scaled twice, review of #210, B1); on the Mac an
   `NSTextField` whose field editor gets its quote and dash substitution, text replacement and spelling correction
   turned off when it starts editing (the window's shared field editor follows the system's "Use smart quotes and
   dashes" otherwise). `("--` stays `("--` (`EditingSmokeTests`). XCUITest's `typeText` bypasses smart punctuation on the simulator and on

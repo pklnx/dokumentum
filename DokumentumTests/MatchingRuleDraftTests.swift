@@ -151,6 +151,58 @@ struct MatchingRuleDraftTests {
         #expect(debounce.started == 3)
     }
 
+    /// A probe answer that arrives after a newer change is dropped: it neither ends the newer probe nor enables Save
+    /// (plan §8, "only for the newest pattern"; review of #210, B2, the reviewer's test). Counter-proof S1: no
+    /// generation guard in the probe task → `isProbing` is false after the stale answer.
+    @Test func aStaleProbeAnswerNeverEnablesSave() async throws {
+        let container = try makeContainer()
+        let debounce = ManualDebounce()
+        let inFlight = Checkpoint()
+        defer { inFlight.release() }
+        let draft = draft(
+            container,
+            probe: { pattern in
+                if pattern == "a" { await inFlight.pass() }
+                return pattern == "slow" ? .tooSlow : nil
+            }, sleep: debounce.sleep)
+        draft.mode = .regex
+        draft.pattern = "a"
+        await debounce.waitForStarts(1)
+        debounce.fire()
+        await inFlight.reached()  // "a"'s probe is running
+        let stale = try #require(draft.probeTask)
+        draft.pattern = "slow"  // a newer pattern, its probe not answered
+        inFlight.release()
+        await stale.value  // the stale answer arrives
+        #expect(draft.isProbing, "the stale answer ended the newer probe")
+        #expect(!draft.canSave, "the stale answer enabled Save for the newer pattern")
+        await debounce.waitForStarts(2)
+        debounce.fire()
+        await draft.probeTask?.value
+        #expect(draft.shownProblem == .tooSlow && !draft.canSave)
+    }
+
+    /// The five mode names (P4) in English and German. The mode "None" has a key of its own: German "Keine" for "die
+    /// Zuordnung", while the info panel's "None" is "Keiner" (maintainer's wording, fix round 1 of #210).
+    /// Counter-proof: the mode "None" on the shared key "None" → German "Keiner".
+    @Test func theModeNamesResolveInEnglishAndGerman() {
+        func resolved(_ mode: MatchMode, _ language: String) -> String {
+            var resource = MatchingRuleText.name(mode)
+            resource.locale = Locale(identifier: language)
+            return String(localized: resource)
+        }
+        let modes: [MatchMode] = [.none, .any, .all, .exact, .regex]
+        #expect(
+            modes.map { resolved($0, "en") } == ["None", "Any word", "All words", "Exact phrase", "Regular expression"])
+        #expect(
+            modes.map { resolved($0, "de") } == [
+                "Keine", "Eines der Wörter", "Alle Wörter", "Genaue Wortfolge", "Regulärer Ausdruck",
+            ])
+        var match = MatchingRuleText.match
+        match.locale = Locale(identifier: "de")
+        #expect(String(localized: match) == "Zuordnung")
+    }
+
     /// A record with copies sharing its `instanceID` shows that state, never an editor (review A of #205, N6); a gone
     /// record says so. Counter-proof: read `copies` as `gone` → the first expectation fails.
     @Test func aRecordWithCopiesOrAGoneRecordShowsItsState() throws {
