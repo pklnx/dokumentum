@@ -186,7 +186,7 @@ struct ReminderAppTests {
         #expect(ReminderSettingsModel(suite: suite).settings.minuteOfDay == 1110, "read again at the next launch")
     }
 
-    /// The Deadlines count follows this device's lead time (Q7): 3 days counts 2, 10 days 3, on the day 1.
+    /// The Deadlines count follows this device's lead time (Q7): 3 days counts 2, 14 days 3, on the day 1.
     @Test func theCountFollowsTheLeadTime() {
         let suite = Self.suite()
         defer { UserDefaults().removePersistentDomain(forName: suite) }
@@ -247,6 +247,50 @@ struct ReminderAppTests {
 
         model.openFromReminder(UUID())
         #expect(model.selectedDocumentID == Self.carInsurance, "a gone document opens nothing")
+    }
+
+    /// A tapped reminder of a document in the trash opens it in the Trash (review B N3 of #222).
+    @Test func aTapOnATrashedDocumentOpensTheTrash() throws {
+        let container = try makeInMemoryContainer()
+        FixtureSeeder.seedForUITests(container.mainContext, today: Self.today)
+        let document = try #require(
+            try container.mainContext.fetch(FetchDescriptor<Document>()).first { $0.instanceID == Self.waterBill })
+        document.deletedAt = Date(timeIntervalSince1970: 1_793_000_000)
+        try container.mainContext.save()
+        let model = LibraryModel(source: StoreLibrarySource(container: container), today: { Self.today })
+        model.selection = .inbox
+        model.openFromReminder(Self.waterBill)
+        #expect(model.selection == .trash)
+        #expect(model.selectedDocumentID == Self.waterBill)
+    }
+
+    /// The gate in `LibraryModel.edit` (review B N1 of #222): only a saved deadline day calls `deadlineSaved`; a label,
+    /// done, a removal and an edit that changes nothing never do. Counted synchronously, right after each edit.
+    @Test func onlyASavedDeadlineDayCallsDeadlineSaved() throws {
+        let container = try makeInMemoryContainer()
+        FixtureSeeder.seedForUITests(container.mainContext, today: Self.today)
+        var saved = 0
+        let model = LibraryModel(
+            source: StoreLibrarySource(container: container), today: { Self.today }, deadlineSaved: { saved += 1 })
+        let accountStatement = FixtureCatalog.documentID(4)
+
+        #expect(model.edit(.deadlineLabel("Zahlen"), of: Self.waterBill) == .saved)
+        #expect(saved == 0, "a label")
+        #expect(model.edit(.deadlineDone(true), of: Self.waterBill) == .saved)
+        #expect(model.edit(.deadlineDone(false), of: Self.waterBill) == .saved)
+        #expect(saved == 0, "done and undone")
+        #expect(model.edit(.clearDeadline(dismissing: nil), of: accountStatement) == .saved)
+        #expect(saved == 0, "a removal")
+        model.reload()
+        #expect(saved == 0, "a read of the library")
+
+        let day = Self.today.adding(days: 20)!
+        #expect(model.edit(.deadline(day, label: "Pay"), of: Self.electricityBill) == .saved)
+        #expect(saved == 1, "a new deadline")
+        #expect(model.edit(.deadline(day, label: "Pay"), of: Self.electricityBill) == .unchanged)
+        #expect(saved == 1, "the same value saves nothing")
+        #expect(model.edit(.deadlineDay(day.adding(days: 1)!), of: Self.electricityBill) == .saved)
+        #expect(saved == 2, "a new day from the picker")
     }
 
     // MARK: Texts (Q5, N6)

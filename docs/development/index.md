@@ -1207,12 +1207,12 @@ On the iPhone, with the matching rules (#200; `EditingSmokeTests` audits the rul
   longer than the screen, while the statement shows in full on the run's screenshot.
 - `settings.reminders.lead.3` (the Mac), "Action is missing": the "Reminders" lead-time picker, SwiftUI's own `Picker`
   in a grouped `Form`, drawn by AppKit as a pop-up button; VoiceOver opening it is not verified.
-- `settings.reminders.status.<status>`, Dynamic Type "unsupported" and "Text clipped", and
-  `settings.reminders.footnote`, "Text clipped" (#12, part 3; `LibrarySmokeTests` audits the "Reminders" section): the
-  status line was reported as the row's own text, in a stack with its button, and laid out as the availability note
-  (a hidden symbol and the text in a stack) alike; it is primary callout medium text, a style that follows Dynamic
-  Type, and wraps in full on the screenshot `18-settings-reminders`. The footnote is laid out as the privacy statement.
-  Not looked at in a large size: `LibrarySmokeTests` at AccessibilityXL stops earlier, at the Scanned receipt row.
+- `settings.reminders.status.authorized`, Dynamic Type "unsupported" and "Text clipped" (#12, part 3;
+  `LibrarySmokeTests` audits the "Reminders" section, which UI tests show only allowed): the status line was reported
+  as the row's own text, in a stack with its button, and laid out as the availability note (a hidden symbol and the
+  text in a stack) alike; it is primary callout medium text, a style that follows Dynamic Type, and wraps in full on
+  the screenshot `18-settings-reminders`. Not looked at in a large size: `LibrarySmokeTests` at AccessibilityXL stops
+  earlier, at the Scanned receipt row.
 - None of these was looked at in AccessibilityXXXL: `EditingSmokeTests` at that size stops earlier, at revealing
   Musterbank AG's sidebar row (`revealSidebarRow`), before the matching steps (#200, not verified).
 
@@ -1435,9 +1435,13 @@ so a new day is a new identifier and adding one again replaces it. For each iden
 Triggers are floating components (year, month, day, hour, minute; Gregorian, no zone): 09:00 is 09:00 wherever the
 device is. A time in the spring-forward gap moves on (02:30 → 03:30, `.nextTimePreservingSmallerComponents`), the
 repeated hour takes its first occurrence, and the trigger gets the resolved components. **Edge cases:** the clock set
-back changes nothing; done before the moment and undone after it catches up once; done or undone after it fired:
-nothing; a request that left pending while notifications were turned off counts as fired, though nothing was shown
-(the rule prefers a miss to a second reminder).
+back changes nothing while the identifier's `S` entry is still there; once a reconcile has pruned it (more than a day
+after its day) and its banner is gone, setting the clock back to before the due day catches it up once more (review A
+N1 of #222; the plan's day of grace). Done before the moment and undone after it catches up once; done or undone after
+it fired: nothing; a request that left pending while notifications were turned off counts as fired, though nothing was
+shown (the rule prefers a miss to a second reminder). A failed save of `S` (a full disk) is healed at the next
+reconcile only for identifiers still pending or delivered: one delivered and removed meanwhile can remind once more,
+and an unsaved withdrawal reads as fired and that reminder may be missed (review A N2).
 
 **`S`** (`ScheduledSet`, `ScheduledSetStoring`): an identifier is inserted only after its `add` succeeded and removed
 with every withdrawal of a still-pending request. It is **pruned by the identifier's day only**: an entry goes when its

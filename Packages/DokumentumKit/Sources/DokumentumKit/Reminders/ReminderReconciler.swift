@@ -19,7 +19,10 @@ public struct ReminderReconcileReport: Sendable, Equatable {
     public var removedDelivered = 0
     /// The reminders pending afterwards, by the rule.
     public var planned = 0
-    /// Whether saving the scheduled set failed (it is written again at the next reconcile).
+    /// Whether saving the scheduled set failed (a full disk). The next reconcile writes it again, but only partly heals
+    /// it (review A N2 of #222): it adds back every identifier that is still pending or delivered, not one the system
+    /// delivered and the user removed from Notification Center meanwhile, which can then be caught up once more; and an
+    /// unsaved withdrawal leaves its entry, so that reminder reads as fired and may be missed.
     public var scheduledSetSaveFailed = false
 
     public init(outcome: Outcome) {
@@ -43,7 +46,8 @@ public struct ReminderReconcileReport: Sendable, Equatable {
 /// 5. removes the delivered reminders of deadlines that are gone, done, trashed or moved, so a deadline done on the
 ///    iPhone clears the Mac's banner. **With reminders off or without authorization it leaves delivered notifications
 ///    alone** (re-review 2, N3) and withdraws every prefixed pending request;
-/// 6. prunes `S` by day and saves it.
+/// 6. prunes `S` by day and saves it. A failed save is reported (`scheduledSetSaveFailed`) and only partly healed by
+///    the next reconcile, see there.
 public actor ReminderReconciler {
     public typealias ReadDeadlines = @Sendable () async throws -> [ReminderDeadline]
 

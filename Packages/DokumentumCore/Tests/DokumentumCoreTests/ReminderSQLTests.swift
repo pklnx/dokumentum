@@ -59,6 +59,40 @@ struct ReminderSQLTests {
         #expect(trashed.isTrashed && !trashed.isOpen)
     }
 
+    /// Copies sharing an `instanceID` (review A N3 of #222): the oldest `createdAt` stands for them, as in every other
+    /// reader (`RowRecords.oldestFirst`), whatever order the store gives. A done copy older than an open one: one done
+    /// deadline, no reminder. Two open copies with other titles: one deadline with the oldest copy's title.
+    @Test(arguments: [false, true])
+    func copiesSharingAnInstanceIDReadAsTheOldest(newestFirst: Bool) async throws {
+        let container = try TestSupport.makeContainer()
+        let context = ModelContext(container)
+        let doneID = UUID()
+        let openID = UUID()
+        func copy(_ instanceID: UUID, _ title: String, createdAt: TimeInterval, done: Bool) {
+            let document = Document(title: title, createdAt: Date(timeIntervalSince1970: createdAt))
+            document.instanceID = instanceID
+            document.deadlineDay = "2026-11-27"
+            if done { document.deadlineDoneAt = Date(timeIntervalSince1970: 1_793_100_000) }
+            context.insert(document)
+        }
+        let copies: [(UUID, String, TimeInterval, Bool)] = [
+            (doneID, "Old done", 1_790_000_000, true), (doneID, "New open", 1_791_000_000, false),
+            (openID, "Alt", 1_790_000_000, false), (openID, "Neu", 1_791_000_000, false),
+        ]
+        for (instanceID, title, createdAt, done) in newestFirst ? copies.reversed() : copies {
+            copy(instanceID, title, createdAt: createdAt, done: done)
+        }
+        try context.save()
+
+        let read = try await ReminderStoreReader(container: container).read()
+        #expect(read.count == 2)
+        let done = try #require(read.first { $0.instanceID == doneID })
+        #expect(done.title == "Old done")
+        #expect(!done.isOpen)
+        let open = try #require(read.first { $0.instanceID == openID })
+        #expect(open.title == "Alt")
+    }
+
     /// Synchronous on purpose: `SQLLog` records the statements of one thread.
     @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
     func theReaderReadsNoLargeTable() throws {

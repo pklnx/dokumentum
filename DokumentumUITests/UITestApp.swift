@@ -358,31 +358,22 @@ struct UITestApp {
                         + "follow Dynamic Type; a look at AccessibilityXXXL is still open (#200, not verified)."
                 )
             }
-            + ["authorized", "notDetermined", "denied"].flatMap { status in
-                [
-                    AcceptedAuditIssue(
-                        identifier: "settings.reminders.status.\(status)", auditType: .dynamicType,
-                        description: "Dynamic Type font sizes are unsupported",
-                        reason:
-                            "the settings' \"Reminders\" status line (#12, part 3): primary callout medium text laid "
-                            + "out as the availability note (a hidden symbol and the text in a stack); reported as the "
-                            + "row's own text, in a stack with its button and in this form alike. It uses a text style "
-                            + "that follows Dynamic Type; a look at AccessibilityXL is still open: LibrarySmokeTests at "
-                            + "that size stops earlier, at the Scanned receipt row (PR of #217, not verified)."),
-                    AcceptedAuditIssue(
-                        identifier: "settings.reminders.status.\(status)", auditType: .textClipped,
-                        description: "Text clipped",
-                        reason:
-                            "the same status line, laid out as the availability note, which the audit reports the "
-                            + "same way (#139); it wraps in full on 18-settings-reminders at the default size."),
-                ]
-            }
             + [
                 AcceptedAuditIssue(
-                    identifier: "settings.reminders.footnote", auditType: .textClipped, description: "Text clipped",
+                    identifier: "settings.reminders.status.authorized", auditType: .dynamicType,
+                    description: "Dynamic Type font sizes are unsupported",
                     reason:
-                        "the \"Reminders\" footnote, laid out as the \"Suggestions\" privacy statement below its "
-                        + "section (#139, #200); it wraps in full on 18-settings-reminders at the default size.")
+                        "the settings' \"Reminders\" status line (#12, part 3): primary callout medium text laid "
+                        + "out as the availability note (a hidden symbol and the text in a stack); reported as the "
+                        + "row's own text, in a stack with its button and in this form alike. It uses a text style "
+                        + "that follows Dynamic Type; a look at AccessibilityXL is still open: LibrarySmokeTests at "
+                        + "that size stops earlier, at the Scanned receipt row (PR of #217, not verified)."),
+                AcceptedAuditIssue(
+                    identifier: "settings.reminders.status.authorized", auditType: .textClipped,
+                    description: "Text clipped",
+                    reason:
+                        "the same status line, laid out as the availability note, which the audit reports the "
+                        + "same way (#139); it wraps in full on 18-settings-reminders at the default size."),
             ]
     #endif
 

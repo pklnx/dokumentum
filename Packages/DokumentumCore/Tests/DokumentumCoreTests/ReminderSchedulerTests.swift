@@ -202,8 +202,9 @@ struct ReminderSchedulerTests {
         #expect(harness.scheduler.requests == 2)
     }
 
-    /// The calendar day, the system time zone and the system clock: each reconciles.
-    @Test(arguments: ReminderScheduler.timeNotifications)
+    /// The calendar day, the system time zone and the system clock: each reconciles. The names are listed here, not
+    /// taken from `ReminderScheduler.timeNotifications`, so one dropped there fails its case (review B N2 of #222).
+    @Test(arguments: [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange, .NSSystemClockDidChange])
     func aDayZoneOrClockChangeReconciles(name: Notification.Name) async throws {
         let container = try TestSupport.makeContainer()
         let harness = Self.harness(on: container)

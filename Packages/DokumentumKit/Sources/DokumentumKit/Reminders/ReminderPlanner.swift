@@ -44,7 +44,10 @@ public struct PlannedReminder: Hashable, Sendable {
 /// 2. A **fired** identifier is never planned again on this device. Fired means: in delivered, **or in the scheduled set
 ///    `S` and no longer pending** (R1). An `S` entry leaves only with this device's own withdrawal or by pruning, so an
 ///    entry that is no longer pending was delivered by the system. No time is compared, so a time-zone change in either
-///    direction and the clock set back change nothing.
+///    direction changes nothing, and so does the clock set back while the identifier's entry is still in `S`. **The
+///    limit (review A N1 of #222):** an entry is pruned once a reconcile runs more than a day after its day (the day of
+///    grace); if its banner is gone too (tapped or cleared) and the clock is then set back to before the due day, the
+///    deadline is caught up once more. The plan accepts that grace.
 /// 3. **The due moment `E`.** `L` is the day − `leadDays` at `minuteOfDay`, `U` the day at `minuteOfDay`. `E = L` if `L`
 ///    is after `setAt` (or `setAt` is `nil`), else `E = U` if `U` is after `setAt`, else nothing: the deadline was set
 ///    on its due day after the time. So a deadline set inside the lead window reminds on its due day, on both devices,
