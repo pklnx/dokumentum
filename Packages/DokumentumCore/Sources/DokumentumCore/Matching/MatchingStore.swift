@@ -63,9 +63,16 @@ enum MatchingStore {
     /// merge's loser and its copy); a copy without a rule next to one with a rule is not fetched here, so the snapshot
     /// keeps that rule, and the text write's re-evaluation on the fill's records drops it.
     static func withoutCopies<T>(_ records: [T], _ instanceID: KeyPath<T, UUID>) -> [T] {
+        let shared = copied(records, instanceID)
+        return records.filter { !shared.contains($0[keyPath: instanceID]) }
+    }
+
+    /// The `instanceID`s that more than one of `records` share: **the one counting rule** for copies, which
+    /// `withoutCopies` and the classification write (`MetadataFill.copies()`, #207) both use.
+    static func copied<T>(_ records: [T], _ instanceID: KeyPath<T, UUID>) -> Set<UUID> {
         var counts: [UUID: Int] = [:]
         for record in records { counts[record[keyPath: instanceID], default: 0] += 1 }
-        return records.filter { counts[$0[keyPath: instanceID]] == 1 }
+        return Set(counts.filter { $0.value > 1 }.keys)
     }
 
     /// The rules of live records among `records`: what the write context fetched, as values.
@@ -154,8 +161,9 @@ struct RuleFill: Equatable, Sendable {
 /// **The fill of a document's correspondent, type and tags in a background write** (plan of #10, §3, §4a): the one
 /// seam the text result write and the bulk run (`MatchingRun`) share, and #11's detection extends.
 ///
-/// - **One fetch** of the live correspondents, types and tags (`RowRecords.fetchMetadata`, keeper order) in the
-///   write's context, only when a step needs it (review N4: a text write without rules fetches nothing).
+/// - **One fetch** of the correspondents, types and tags (`RowRecords.fetchMetadata`, in the order the store returns
+///   them; a step that needs keeper order sorts with `keeperOrder`) in the write's context, only when a step needs it
+///   (review N4: a text write without rules fetches nothing).
 /// - **Rules first** (`applyRules`): the correspondent and the type only when the document has none, matching tags
 ///   added; nothing is removed or replaced, `touch()` is never called, and an outcome that changes nothing writes
 ///   nothing (T4). Only live records are linked.
@@ -180,6 +188,13 @@ struct MetadataFill {
     /// Every tag, correspondent and type of the write's context, tombstones and copies included.
     typealias Records = (tags: [Tag], correspondents: [Correspondent], documentTypes: [DocumentType])
 
+    /// The `instanceID`s per kind that more than one record of the write's context shares (`MatchingStore.copied`).
+    struct Copies {
+        var tags: Set<UUID> = []
+        var correspondents: Set<UUID> = []
+        var documentTypes: Set<UUID> = []
+    }
+
     let context: ModelContext
     /// Every metadata row a step linked, as this context read it.
     private(set) var related: [RowKey: RowState] = [:]
@@ -198,6 +213,17 @@ struct MetadataFill {
         let records = try RowRecords.fetchMetadata(in: context)
         fetchedRecords = records
         return records
+    }
+
+    /// The `instanceID`s with copies among `records()`, counted on every record of the write's context, tombstones
+    /// included, as `live()` counts them (#207): the classification write neither captures nor reads the rule of a
+    /// linked record with copies.
+    mutating func copies() throws -> Copies {
+        let metadata = try records()
+        return Copies(
+            tags: MatchingStore.copied(metadata.tags, \.instanceID),
+            correspondents: MatchingStore.copied(metadata.correspondents, \.instanceID),
+            documentTypes: MatchingStore.copied(metadata.documentTypes, \.instanceID))
     }
 
     /// Links a live correspondent to `document` and adds its row to `related`, so the write's check reads it again.

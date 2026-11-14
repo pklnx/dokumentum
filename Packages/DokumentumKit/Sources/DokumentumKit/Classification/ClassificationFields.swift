@@ -7,7 +7,8 @@ import Foundation
 ///   do not explain. A document whose only tags are rule tags still gets the classifier's tags, added to its own.
 ///   No field records who set a tag, so the classification write evaluates the rules of the document's own tags on
 ///   its text (`hasUserTags`). A tag whose rule is invalid, times out or sits on a tombstone counts as a user tag
-///   (review N2); a tag the user set by hand that its rule also matches counts as a rule tag (the plan's R8).
+///   (review N2), and so does a tag with copies sharing its `instanceID` (#207); a tag the user set by hand that its
+///   rule also matches counts as a rule tag (the plan's R8).
 /// - **Title and date** always hold an automatic value (the file name or "Scan …", and the import time), which a
 ///   value cannot tell from the user's own. They count as empty only while the document **has never been edited**:
 ///   `modifiedAt == createdAt` (the import sets both to the same time, and every edit, inbox change, trash, restore
