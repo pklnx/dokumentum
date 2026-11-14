@@ -1776,6 +1776,88 @@ Part 3 (#123), in `DocumentListView` and `LibraryModel`:
   indexing line, the sidebar) and `SearchSmokeTests` (UISmoke, iPhone and Mac: a word from one text, the scope,
   a chip, ⌘F and a sidebar change on the Mac; audited).
 
+## Spotlight
+
+Step 12 (#13). Part 1 (#223) is the index engine in `DokumentumKit/Spotlight` and `DokumentumCore/Spotlight`, with
+an in-memory index only; there is no `import CoreSpotlight` anywhere yet. Part 2 adds the system adapter
+(`SystemSpotlightIndex`, the only file that will import CoreSpotlight), the setting in the settings and opening a
+result; part 3 the App Intents. Nothing here changes the schema: the setting and the state are per device and never
+synced (T1).
+
+- **What an item holds** (`SpotlightItem`, Kit; Q1): one item per document that is not in the trash, with the
+  `instanceID` as its identifier (the app's handle of a document, T2), the domain `documents`, `UTType.pdf`,
+  `expirationDate = .distantFuture` (the system's default is one month, after which items would drop out silently),
+  the display title ("Untitled document" for an empty one), the description correspondent · type · document date
+  (medium, the configured locale; **never text of the document**), the correspondent, the type and every tag's display
+  path as keywords (as `SearchFields`), the recognised text as `textContent` (its head of at most 200,000 UTF-8 bytes,
+  `SpotlightLimits.textBytes`, cut by `TextBudget.head`; searchable, never shown), the document date, `createdAt`,
+  `modifiedAt` and the stored thumbnail. Deadlines, notes, the PDF and the original file name are not indexed.
+  `SpotlightItem.formatVersion` is bumped by **every** change of this mapping, a new field read or a new cap included.
+- **Copies sharing an `instanceID`** give one item, from the copy `RowRecords.oldestFirst` keeps. Its text and thumbnail
+  are read through that copy's own relationships at each push, never cached per text row, so when the kept copy goes,
+  the next event pushes the other copy's content (the search indexer's known gap does not apply here).
+- **`SpotlightIndexing`** (Kit) is the index in plain values: `isAvailable`, `lastClientState`, `beginBatch`, `index`,
+  `delete`, `deleteAll`, `endBatch(expected:new:)`, with the header's rules (a batch is committed with its client
+  state; `endBatch` fails with `mismatchedClientState` when `expected` is not the stored state; `deleteAll` resets it to
+  `nil`). **`InMemorySpotlightIndex`** (Kit actor) follows them, records every call and has hooks to fail or hold a
+  call (`Checkpoint.pass()` in the async hook), report "unavailable" and drop everything as the system can.
+- **`SpotlightIndexChoice`** (Core, T7, T8): `.inMemory` whenever tests run, whenever any launch argument starts with
+  `-UITest` (`-UITestLocalStore` included, which is on disk) and whenever the store is in memory (`-SearchBenchmark`);
+  `.system` otherwise. The rule has no `#if DEBUG`. It repeats `NotificationCenterChoice`'s rule in a type of its own.
+  So no test, no UI-test launch and no in-memory launch reaches `CSSearchableIndex`.
+- **The setting** (`SpotlightSettings`, Q2): a `Bool` (`spotlight.enabled`) in a `UserDefaults` suite, **on** when
+  nothing is stored. Part 2 picks the suite with the index (`Dokumentum.InMemorySpotlightSettings` for `.inMemory`).
+- **The state** (`SpotlightState`, Kit; `SpotlightStateFile`, Core): `<Application Support>/Dokumentum/Spotlight/State.json`,
+  excluded from backup (the file and its folder), with a generation, the store identity (`ArchiveStore.opened` and the
+  store's URL), the format version, the locale, the last client state written, the batch count, the history position,
+  the pending full pass's position `T`, and `fingerprints` (`instanceID` → SHA-256 over the canonical bytes of title,
+  correspondent, type, tag paths, the three dates, the inbox flag and the format version, `SpotlightFingerprint`). The
+  in-memory index uses `InMemorySpotlightStateStore`.
+- **`SpotlightIndexer`** (Core actor) only reads the store, in fresh contexts. One pass runs at a time and one more
+  waits. Events: the launch (`start`), `ModelContext.didSave` of any context of the container, the
+  `StoreChangeObserver`'s stream (remote changes, CloudKit import ends), `setEnabled(_:)`, `reindexAll()`,
+  `refresh(identifiers:)` (the system's re-index of some items, a stale result opened) and `requestPass()` (iOS scene
+  activation, part 2). A pass:
+  1. **Check.** Nothing when the index is unavailable. With the setting off: `deleteAll`, then the state removed, only
+     while there is a state, so later saves make no call; a failed delete keeps the state, so the next pass (at the
+     latest the next launch) deletes again. Otherwise a **full pass** when there is no state, the fetched client state
+     is not the recorded one (a system drop, a reinstall, a restored backup, a lost state write), the store identity
+     (the archive or the local fallback), the format version or the locale changed, the history position is missing
+     or expired, or `reindexAll()` / `setEnabled(true)` / a mismatch asked for one. A pending full pass is resumed.
+  2. **Diff** (`SpotlightPlanner`, Kit, pure): upserts for new and changed fingerprints and for the documents the
+     history names; deletes for fingerprints with no live document (gone, trashed, now a copy's). The history is read
+     through `StoreSearchHistory.spotlightChanges` (one type with the search's mapping, N1): a `DocumentText` inserted
+     or updated in `extractedText` or `document`, a `DocumentThumbnail` inserted or updated in `document`, a
+     `Document` updated in `text` or `thumbnail`. The metadata comes from the light list query; edits, tag renames,
+     trash and restore change fingerprints, the processing queue's text write only the history.
+  3. **Batches** of up to 100 items or 4 MB of text (`SpotlightBatcher`) and of 500 deletes, read in groups of 25 by
+     key. Each is `beginBatch`, `index`/`delete`, `endBatch(expected:new:)`; `expected` is what `lastClientState()`
+     returned at the pass's start, then each written batch's new state (`generation/count`), never anything from the
+     file. **The state is written only after a batch ended successfully**, with its fingerprints and client state; a
+     failed batch leaves it as it was, and the next event pushes it again. A mismatch makes the next pass full. The
+     history position moves on only once every change it named is in a written batch.
+  4. **Full pass (B1).** The newest history position `T` (before the metadata read), `deleteAll`, then **before batch
+     1** a reset state (new generation, no fingerprints, no history position, `pendingFullPass = T`, client state
+     `nil`); every live document in batches; then `T` as the history position and an incremental pass from it. A
+     failure or a quit at any point leaves fingerprints that list exactly what Spotlight has: the next pass resumes
+     (pushing what has no fingerprint yet) or starts over.
+
+  Turning the setting off bumps an epoch: a running pass stops before its next write (no `endBatch`, no state), and the
+  next pass removes everything. `Log.spotlight` (category `spotlight`) logs each pass's kind, outcome and counts and
+  failures by code only, never a title, a text or an identifier.
+- **Tests** (every one on `InMemorySpotlightIndex`): Kit `SpotlightPlannerTests` (diff, order, batches, the item's
+  attributes, the text cap, the canonical bytes) and `InMemorySpotlightIndexTests`; Core `SpotlightIndexChoiceTests`,
+  `SpotlightIndexerTests` (import, cap, each edit, tag rename, text write, thumbnail, trash/restore/Empty Trash, copies,
+  the next launch, failing batches and deletes, mismatch, the setting, unavailable, refresh),
+  `SpotlightIndexerReindexTests` (every trigger from 250 indexed documents; B1: batch 1 fails, a quit after batch 1, a
+  failed reset write, `expected` after a system drop), `SpotlightIndexerRemoteTests` (a second container's insert, text,
+  thumbnail and trash after the remote change), `SpotlightIndexerSQLTests` (`swift test` only: the metadata read names
+  no large table; a push reads texts and thumbnails by key) and `SpotlightStateFileTests` (the file, the setting, the
+  store identity). Holds use `Checkpoint.pass()` in async hooks only, so the strict-pool step cannot hang on them.
+- **This Mac:** building and launching a Debug app that contains App Shortcuts (part 3) lets the system register its
+  App Intents metadata, as for every app LaunchServices knows; "Add File" and "Find Documents" may then appear in this
+  Mac's Shortcuts and Spotlight. That is no index write, donation or prompt by the app's code (N7).
+
 ## Logging
 
 Every logger comes from `Log` (`DokumentumCore`): categories `store`, `sync`, `repair`, `import`, `processing`,
