@@ -79,9 +79,13 @@ final class LibraryModel {
     /// Where "today" comes from: `AppDay`, or a test's fixed day.
     private let readToday: @MainActor () -> DeadlineDay
     /// The Deadlines count's lead time in days (maintainer decision Q7 on #12): a deadline at most this many days
-    /// ahead counts. **The seam for #12's part 3**, which replaces it with this device's reminder lead time; until then
-    /// `LibraryCounts.defaultDeadlineLeadDays` (3).
+    /// ahead counts. In the app this device's reminder lead time (#12, part 3, `ReminderSettingsModel`), read at each
+    /// count; `LibraryCounts.defaultDeadlineLeadDays` (3) without one (unit tests).
     private let deadlineLeadDays: @MainActor () -> Int
+    /// Called after a user's edit on this device saved a deadline's day (a new deadline, by hand or from a suggestion):
+    /// the app may then ask for permission to remind (#12, part 3, maintainer decision Q4). Never after a read of the
+    /// library, so a sync never asks.
+    private let deadlineSaved: @MainActor () -> Void
     /// The documents of `selection`, in list order.
     private(set) var documents: [LibraryDocument] = []
     private(set) var detail = DetailState.noSelection
@@ -131,12 +135,14 @@ final class LibraryModel {
     ///   - loadNow: reads the source at once; a view passes `false` and calls `loadIfNeeded()` when it appears,
     ///     because SwiftUI may create it again on any re-evaluation and discards that model.
     ///   - today: the local day (`AppDay`); tests fix one.
-    ///   - deadlineLeadDays: the Deadlines count's lead time (#12, Q7), the seam part 3 replaces.
+    ///   - deadlineLeadDays: the Deadlines count's lead time (#12, Q7): this device's reminder lead time in the app.
+    ///   - deadlineSaved: a user's edit saved a deadline's day (#12, part 3).
     init(
         source: any LibrarySource, searcher: (any DocumentSearching)? = nil,
         retrier: (any ProcessingRetrying)? = nil, loadNow: Bool = true,
         today: @escaping @MainActor () -> DeadlineDay = { AppDay.today() },
-        deadlineLeadDays: @escaping @MainActor () -> Int = { LibraryCounts.defaultDeadlineLeadDays }
+        deadlineLeadDays: @escaping @MainActor () -> Int = { LibraryCounts.defaultDeadlineLeadDays },
+        deadlineSaved: @escaping @MainActor () -> Void = {}
     ) {
         self.source = source
         self.searcher = searcher
@@ -144,6 +150,7 @@ final class LibraryModel {
         readToday = today
         self.today = today()
         self.deadlineLeadDays = deadlineLeadDays
+        self.deadlineSaved = deadlineSaved
         if loadNow { reload() }
     }
 
@@ -200,6 +207,22 @@ final class LibraryModel {
         guard day != today else { return }
         today = day
         recount()
+    }
+
+    /// This device's reminder lead time changed (#12, part 3): the Deadlines count follows it (Q7).
+    func leadTimeMayHaveChanged() {
+        recount()
+    }
+
+    /// A tapped reminder (#12, part 3, `ReminderRouter`): reads the library, ends a search that could hide the document,
+    /// and selects Deadlines and the document; a document whose deadline is done meanwhile opens in All Documents, one in
+    /// the trash in the Trash. A document that is gone opens nothing.
+    func openFromReminder(_ instanceID: UUID) {
+        reload()
+        guard let document = snapshot.documents.first(where: { $0.instanceID == instanceID }) else { return }
+        if search != LibrarySearch() { search = LibrarySearch() }
+        selection = document.isTrashed ? .trash : document.openDeadline != nil ? .upcoming : .all
+        selectedDocumentID = instanceID
     }
 
     /// The status of the open document's or a row's deadline on `today`; `nil` without a deadline.
@@ -365,11 +388,21 @@ final class LibraryModel {
         do {
             let outcome = try editor.apply(change, to: instanceID)
             if outcome != .unchanged { reload() }
+            if outcome == .saved, Self.savesADeadline(change) { deadlineSaved() }
             return outcome
         } catch {
             Log.store.error("Could not save an edit: \(Log.code(of: error), privacy: .public)")
             reload()
             return nil
+        }
+    }
+
+    /// Whether `change` saves a deadline's day: a new deadline, by hand ("Add Deadline", the date picker) or from the
+    /// text's suggestion. A label, done or a removal is no new deadline.
+    static func savesADeadline(_ change: DocumentEditor.Change) -> Bool {
+        switch change {
+        case .deadline, .deadlineDay: true
+        default: false
         }
     }
 

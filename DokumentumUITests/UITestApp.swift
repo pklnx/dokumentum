@@ -95,9 +95,15 @@ struct UITestApp {
         return String(format: "%04d-%02d-%02d", result.year ?? 0, result.month ?? 0, result.day ?? 0)
     }
 
+    /// The status of the app's in-memory notification center in every launch (#12, part 3): `-UITestNotifications
+    /// authorized`. Every `-UITest*` launch uses that center, never the system's, so no run shows a permission prompt or
+    /// writes this device's reminders; with the argument the settings show "allowed" and no "Allow Notifications".
+    static let notificationArguments = ["-UITestNotifications", "authorized"]
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
-        var arguments = Self.launchArguments(store) + ["-UITestToday", Self.today] + extraArguments
+        var arguments =
+            Self.launchArguments(store) + ["-UITestToday", Self.today] + Self.notificationArguments + extraArguments
         if let language = Self.language {
             arguments += ["-AppleLanguages", "(\(language))", "-AppleLocale", language]
         }
@@ -233,6 +239,12 @@ struct UITestApp {
                     + "on window PNGs. The bar is translucent, so the values depend on what lies behind the window. "
                     + "The audit fails text over the material whatever its contrast."),
             AcceptedAuditIssue(
+                identifier: "settings.reminders.lead.3", auditType: .action, description: "Action is missing",
+                reason:
+                    "the \"Reminders\" lead-time picker (#12, part 3): SwiftUI's own Picker in a grouped Form, which "
+                    + "AppKit draws as a pop-up button; the app adds no gesture. VoiceOver opening it: not verified, "
+                    + "maintainer's look."),
+            AcceptedAuditIssue(
                 identifier: "import.menu", auditType: .action, description: "Action is missing",
                 reason:
                     "the AppKit toolbar menu button of a SwiftUI Menu; none of the 13 SwiftUI variants tried passes "
@@ -346,6 +358,23 @@ struct UITestApp {
                         + "follow Dynamic Type; a look at AccessibilityXXXL is still open (#200, not verified)."
                 )
             }
+            + [
+                AcceptedAuditIssue(
+                    identifier: "settings.reminders.status.authorized", auditType: .dynamicType,
+                    description: "Dynamic Type font sizes are unsupported",
+                    reason:
+                        "the settings' \"Reminders\" status line (#12, part 3): primary callout medium text laid "
+                        + "out as the availability note (a hidden symbol and the text in a stack); reported as the "
+                        + "row's own text, in a stack with its button and in this form alike. It uses a text style "
+                        + "that follows Dynamic Type; a look at AccessibilityXL is still open: LibrarySmokeTests at "
+                        + "that size stops earlier, at the Scanned receipt row (PR of #217, not verified)."),
+                AcceptedAuditIssue(
+                    identifier: "settings.reminders.status.authorized", auditType: .textClipped,
+                    description: "Text clipped",
+                    reason:
+                        "the same status line, laid out as the availability note, which the audit reports the "
+                        + "same way (#139); it wraps in full on 18-settings-reminders at the default size."),
+            ]
     #endif
 
     /// Runs the system's accessibility audit on what is shown now (plan of #3, T12). An issue on an element with

@@ -20,6 +20,11 @@ struct LibraryRootView: View {
     let syncStatus: SyncStatusSource?
     /// "Today" is read again when the window's scene becomes active (#12, review N4 of #219).
     @Environment(\.scenePhase) private var scenePhase
+    /// The app's reminders (#12, part 3): the Deadlines count's lead time, the permission after a saved deadline, and
+    /// tapped reminders. `nil` in unit tests that build a window alone.
+    let reminders: Reminders?
+    /// This window, for the router of tapped reminders.
+    @State private var windowID = UUID()
 
     /// Reads nothing: SwiftUI creates the view again whenever the app's body is evaluated, and keeps only
     /// the first model. The library is read when the window appears (`loadIfNeeded`).
@@ -27,17 +32,23 @@ struct LibraryRootView: View {
     ///   - searcher: the app's one search index (#7, part 2); every window's model follows its updates.
     ///   - retrier: "Try again" for a failed document (#6, P2).
     ///   - syncStatus: the footer's sync line (#31); without one, the store's own (`SyncStatusSource.forLaunch`).
+    ///   - reminders: the app's reminders (#12, part 3).
     init(
         source: any LibrarySource, launchStore: LaunchStore, importer: any DocumentImporting,
         searcher: (any DocumentSearching)? = nil, retrier: (any ProcessingRetrying)? = nil,
-        syncStatus: SyncStatusSource? = nil
+        syncStatus: SyncStatusSource? = nil, reminders: Reminders? = nil
     ) {
-        let model = LibraryModel(source: source, searcher: searcher, retrier: retrier, loadNow: false)
+        // The Deadlines count follows this device's reminder lead time (Q7); a saved deadline may ask for permission.
+        let model = LibraryModel(
+            source: source, searcher: searcher, retrier: retrier, loadNow: false,
+            deadlineLeadDays: { reminders?.settings.settings.leadDays ?? LibraryCounts.defaultDeadlineLeadDays },
+            deadlineSaved: { reminders?.deadlineSaved() })
         _model = State(initialValue: model)
         _trash = State(initialValue: LibraryTrash(model: model))
         _importController = State(initialValue: ImportController(importer: importer, library: model))
         self.launchStore = launchStore
         self.syncStatus = syncStatus ?? SyncStatusSource.forLaunch(launchStore, monitor: nil)
+        self.reminders = reminders
     }
 
     var body: some View {
@@ -65,6 +76,7 @@ struct LibraryRootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.dayMayHaveChanged() }
         }
+        .modifier(ReminderWindow(reminders: reminders, model: model, windowID: windowID))
         .focusedSceneValue(\.libraryModel, model)
         .environment(trash)
         .focusedSceneValue(\.libraryTrash, trash)
@@ -89,6 +101,46 @@ struct LibraryRootView: View {
         }
     }
 #endif
+
+/// A library window's part in the reminders (#12, part 3): it registers with the router, takes the tapped reminder that
+/// is its own, follows the lead time for the Deadlines count, and gives the router a way to open a window.
+private struct ReminderWindow: ViewModifier {
+    let reminders: Reminders?
+    let model: LibraryModel
+    let windowID: UUID
+    @Environment(\.openWindow) private var openWindow
+    #if os(macOS)
+        /// Whether this window is the active one: a tapped reminder opens in the window that was active last.
+        @Environment(\.appearsActive) private var appearsActive
+    #endif
+
+    func body(content: Content) -> some View {
+        if let reminders {
+            content
+                .onAppear {
+                    reminders.router.openWindow = { [openWindow] in openWindow(id: DokumentumApp.libraryWindowID) }
+                    reminders.router.register(windowID)
+                    takeReminder(reminders)
+                }
+                .onDisappear { reminders.router.unregister(windowID) }
+                .onChange(of: reminders.router.request) { takeReminder(reminders) }
+                .onChange(of: reminders.settings.settings.leadDays) { model.leadTimeMayHaveChanged() }
+                #if os(macOS)
+                    .onChange(of: appearsActive, initial: true) { _, active in
+                        if active { reminders.router.windowBecameActive(windowID) }
+                    }
+                #endif
+        } else {
+            content
+        }
+    }
+
+    private func takeReminder(_ reminders: Reminders) {
+        if let instanceID = reminders.router.take(for: windowID) {
+            model.openFromReminder(instanceID)
+        }
+    }
+}
 
 extension FocusedValues {
     /// The library of the focused window, for the menu commands.

@@ -6,6 +6,8 @@ import SwiftUI
 struct DokumentumApp: App {
     /// Finds the root view in UI tests, independent of the language.
     nonisolated static let rootIdentifier = "dokumentum.root"
+    /// The library window's scene; a tapped reminder opens one on the Mac when none is open (#12, part 3).
+    nonisolated static let libraryWindowID = "library"
 
     /// The archive of this launch: CloudKit, local, or in memory for tests and UI tests (`StoreChoice`).
     /// The library reads it through `StoreLibrarySource`.
@@ -43,6 +45,13 @@ struct DokumentumApp: App {
     /// "Apply Matching Rules to All Documents…" (#10, part 2): one run for the app, shown by the Mac's Settings window
     /// and the iPhone's settings sheet.
     let matchingRun: MatchingRunModel
+    /// Deadline reminders (#12, part 3): this device's settings, the permission, the scheduler that keeps the
+    /// notification center in step, and the router of tapped reminders. The center, the settings suite and the scheduled
+    /// set come from `NotificationCenterChoice`: in memory for every test run, every `-UITest*` launch and every
+    /// in-memory store, so none of them reaches the system's center or shows a prompt.
+    let reminders: Reminders
+    /// The system center's delegate, kept alive for the app's lifetime; `nil` on the in-memory center.
+    private let notificationDelegate: ReminderNotificationDelegate?
     /// The suite of the classification switch for an in-memory store (tests and UI tests): emptied at each such
     /// launch, so a UI test that turns the switch off never changes this device's real setting.
     nonisolated static let inMemorySettingsSuite = "Dokumentum.InMemoryLaunchSettings"
@@ -160,6 +169,22 @@ struct DokumentumApp: App {
             classifier: classifier, settings: ClassificationSettings(defaultsSuite: settingsSuite),
             requestRun: { scheduler?.requestRun() })
         matchingRun = MatchingRunModel(container: container)
+        // Reminders (#12, part 3): the center, suite and scheduled set chosen together; the delegate only for the
+        // system's center, set before the app finishes launching so a tap that launched it is not missed.
+        let reminderEnvironment = ReminderEnvironment.make(
+            NotificationCenterChoice.current(storeIsOnDisk: choice.isOnDisk))
+        ReminderEnvironment.launched = reminderEnvironment
+        let reminders = Reminders(
+            environment: reminderEnvironment, container: container, storeChanges: storeChanges?.changes())
+        if let system = reminderEnvironment.center as? SystemNotificationCenter {
+            let delegate = ReminderNotificationDelegate(router: reminders.router)
+            system.setDelegate(delegate)
+            notificationDelegate = delegate
+        } else {
+            notificationDelegate = nil
+        }
+        reminders.start()
+        self.reminders = reminders
         #if os(iOS)
             // Launch registers the processing task, before the app finishes launching (T13, N4); each continued
             // request registers its own identifier just before it is submitted (#194). Every user import goes
@@ -198,13 +223,13 @@ struct DokumentumApp: App {
         // An explicit id and one stable root type (`LibraryRootView`): the Mac's saved window state
         // names the scene, and a root type it does not know opened no window in an unsigned local build
         // (plan of #3, T5). Whether the explicit id prevents that is checked on the maintainer's Mac.
-        WindowGroup(id: "library") {
+        WindowGroup(id: Self.libraryWindowID) {
             // One source per window: each window's model reads its own change events. Creating them reads
             // nothing: the library is read when the window appears, then after each save.
             LibraryRootView(
                 source: StoreLibrarySource(container: container, storeChanges: storeChanges?.changes()),
                 launchStore: launchStore, importer: importer, searcher: search, retrier: retrier,
-                syncStatus: syncStatus
+                syncStatus: syncStatus, reminders: reminders
             )
             #if os(iOS)
                 .environment(shareQueue)
@@ -212,12 +237,15 @@ struct DokumentumApp: App {
             // The iPhone's settings sheet reads it (`SettingsButton`).
             .environment(suggestionSettings)
             .environment(matchingRun)
+            .environment(reminders)
         }
         // A launch is an activation too; the share queue and the processing queue each run one at a time and
         // queue one more run. The background pauses processing on iOS (`ProcessingLifecycle`).
         .onChange(of: scenePhase) { _, phase in
             // The account may have changed while the app was in the background (#31, T4).
             if phase == .active { syncMonitor?.sceneBecameActive() }
+            // The permission may have changed in the system's settings; a missed reminder is caught up (#12, part 3).
+            if phase == .active { reminders.sceneBecameActive() }
             #if os(iOS)
                 if phase == .active { shareQueue?.requestRun() }
             #endif
@@ -244,7 +272,7 @@ struct DokumentumApp: App {
         #if os(macOS)
             // The Mac's Settings window (⌘,), with the "Suggestions" section (#8, part 3).
             Settings {
-                SettingsView(model: suggestionSettings, matching: matchingRun)
+                SettingsView(model: suggestionSettings, matching: matchingRun, reminders: reminders)
             }
         #endif
     }
