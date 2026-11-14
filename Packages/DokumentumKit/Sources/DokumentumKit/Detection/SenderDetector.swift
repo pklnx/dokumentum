@@ -36,10 +36,16 @@ public enum DetectedSender: Equatable, Sendable {
 /// **Recipient exclusion** (B1.1): a known correspondent whose name occurs in a recipient or recipient-labelled line
 /// is never detected; a structural name equal to or contained in such a line is rejected.
 ///
-/// The zones are tried in the order return-address line, letterhead, footer; the first with a result wins:
-/// 1. a known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
-///    yields to the longer; two distinct names give **none for the document**;
-/// 2. else a structural name: the return-address line's first segment, unless it is a street, a post box or holds
+/// The zones are the return-address line, the letterhead (with the info block) and the footer. They are tried in
+/// this order, and the first step with a result wins (review B2 of #209: a known name read correctly in the
+/// letterhead beats a misread return-address line):
+/// - the **known names** of the return-address line, then of the letterhead;
+/// - then the **structural names** of the return-address line, then of the letterhead;
+/// - then the footer's known names, then its structural names.
+///
+/// 1. A known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
+///    yields to the longer; two distinct names in one zone give **none for the document**;
+/// 2. a structural name: the return-address line's first segment, unless it is a street, a post box or holds
 ///    a postcode, or the next segment is only a postcode (a town: `Springfield, IL 62701`, review B2 of #204); in the
 ///    letterhead (topmost first) and the footer, a segment with a legal form, cut after it, with a leading `©` and
 ///    years dropped, unless the words before the form read as a sentence (`readsAsSentence`) or hold another legal
@@ -129,18 +135,28 @@ public enum SenderDetector {
         zones.append(Zone(kind: .letterhead, lines: letterhead.sorted { $0.box.minY < $1.box.minY }))
         zones.append(Zone(kind: .footer, lines: page.footerLines()))
 
-        for zone in zones {
-            let text = zone.lines.map(\.folded).joined(separator: "\n")
-            var found = candidates.filter { Folded.containsBounded($0.folded, in: text) }
-            found = found.filter { name in
-                !found.contains { $0.folded != name.folded && Folded.containsBounded(name.folded, in: $0.folded) }
-            }
-            if let first = found.first {
-                guard found.allSatisfy({ $0.folded == first.folded }) else { return nil }
-                return .existing(id: first.record.id, name: first.record.name)
-            }
-            for name in zone.structuralNames() where isAcceptable(name, recipientText: recipientText) {
-                return .name(name)
+        // The order (review B2 of #209): known names in the top zones (the return-address line, then the letterhead
+        // with the info block) before any structural name, so a correctly read known name in the letterhead beats a
+        // misread return-address line (`Finanzamt Musterstact`); then the top zones' structural names; then the
+        // footer, known names before its structural names.
+        let top = zones.filter { $0.kind != .footer }
+        var steps = top.map { (zone: $0, known: true) } + top.map { (zone: $0, known: false) }
+        for zone in zones where zone.kind == .footer { steps += [(zone, true), (zone, false)] }
+        for step in steps {
+            if step.known {
+                let text = step.zone.lines.map(\.folded).joined(separator: "\n")
+                var found = candidates.filter { Folded.containsBounded($0.folded, in: text) }
+                found = found.filter { name in
+                    !found.contains { $0.folded != name.folded && Folded.containsBounded(name.folded, in: $0.folded) }
+                }
+                if let first = found.first {
+                    guard found.allSatisfy({ $0.folded == first.folded }) else { return nil }
+                    return .existing(id: first.record.id, name: first.record.name)
+                }
+            } else {
+                for name in step.zone.structuralNames() where isAcceptable(name, recipientText: recipientText) {
+                    return .name(name)
+                }
             }
         }
         return nil

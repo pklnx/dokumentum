@@ -238,6 +238,11 @@ final class StubRecognizer: TextRecognizing {
         StubRecognizer(recognized: { _ in boxedLines(texts) }, checkpoint: checkpoint)
     }
 
+    /// `texts(call)` on the `call`-th page (from 1), boxed as `boxed` boxes them; no line for an empty list.
+    static func boxed(perPage texts: @escaping @Sendable (Int) -> [String]) -> StubRecognizer {
+        StubRecognizer(recognized: { boxedLines(texts($0)) }, checkpoint: nil)
+    }
+
     static func boxedLines(_ texts: [String]) -> [RecognizedLine] {
         texts.enumerated().map { index, text in
             RecognizedLine(

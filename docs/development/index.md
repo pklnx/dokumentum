@@ -724,6 +724,10 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     measured on macOS 27, that index skips the line breaks of `page.string`, so from the second line on it returns
     another character's bounds, and its boxes are glyph ink rather than the font's line box. At most 300 lines; the
     top zone and the footer are kept, the middle is cut (N5).
+  - **Known names first** (`SenderDetector`, review B2 of #209): a known correspondent's name read in the top zones
+    (the return-address line, then the letterhead and the info block) beats any structural name, so a correctly read
+    letterhead links the known record even when OCR misread the small return-address line; a structural name is
+    resolved and, failing that, created only when no known name is in the top zones. The footer comes last.
   - **Rules first, then the classifier, then detection** for correspondent and date: user edit > #10 rules > #8
     classifier > #11 detection (Q3, Apple Intelligence wins). Where it runs depends on the state the text result
     write sets:
@@ -767,8 +771,10 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     name, a date or any text of the document.
   - **Tests:** the Kit detectors on layouts and the `SyntheticLetters` corpus (#204); every corpus letter rendered as
     a text PDF through the real stage (`TestLetter`, `DetectionLetterTests`), five as scans through real Vision
-    (skipped where Vision cannot run). Vision misreads the 7 pt return-address line of two of them on macOS 27.2,
-    so their structural name is a recorded known issue there; their dates and the other three letters match. The
+    (skipped where Vision cannot run). On macOS 27.2 Vision reads the 7 pt return-address line of two of them one
+    letter off, the same in every run (`Stadtbibiothek Musterstadt`, `Finanzamt Musterstact`): the test accepts
+    exactly the right name or that recorded read, nothing else; dates and the other three letters match exactly.
+    With their sender known, both link the known record and create none, through the queue. The
     queue on both paths (`DetectionQueueTests`, `DetectionClassifyTests`), the app (`DetectionImportTests`) and the
     UI smoke (`LaunchSmokeTests` with `-UITestImportLetter` and `-UITestClassifierAvailability deviceNotEligible`,
     the `done` path).

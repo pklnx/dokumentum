@@ -199,6 +199,30 @@ struct DetectionQueueTests {
         #expect(try store.detected(first).correspondentID == store.detected(second).correspondentID)
     }
 
+    /// Review A N2 of #209: two live records of one name (two devices before the repair, the newer stored first):
+    /// detection links the repair's keeper, the older one, so the repair's merge leaves the document where it is
+    /// (counter-proof: reverse the keeper order in `detectSender` and `fillSender`).
+    @Test func ofTwoLiveRecordsOfOneNameTheKeeperIsLinked() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try insertPending(store)
+        func insert(_ createdAt: Date) throws -> UUID {
+            let context = ModelContext(store.container)
+            let record = Correspondent(name: stadtwerkeName, createdAt: createdAt)
+            context.insert(record)
+            try context.save()
+            return record.instanceID
+        }
+        _ = try insert(processingStart.addingTimeInterval(-hour))
+        let keeper = try insert(processingStart.addingTimeInterval(-2 * hour))
+
+        let report = await store.detectingQueue(stage: LetterStage(stadtwerkeLetter), clock: TestClock()).run()
+
+        #expect(report.detectedCorrespondents == 1)
+        #expect(report.createdCorrespondents == 0)
+        #expect(try store.detected(id).correspondentID == keeper)
+    }
+
     /// A tombstone is never linked: a new live record is created instead.
     @Test func aTombstoneIsNeverLinked() async throws {
         let store = try ProcessingStore()

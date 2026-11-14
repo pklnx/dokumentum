@@ -173,6 +173,24 @@ struct PageLayoutReaderTests {
         #expect(layout.lines.map(\.text) == ["Seite 2 mit eigenem Text"])
     }
 
+    /// Review B3 of #209: on a scan, only the first **recognised** page with text gives the layout. A 3-page
+    /// image-only PDF whose pages the stub recognises with lines of their own gives page 1's lines; with nothing on
+    /// page 1, page 2's (counter-proof: drop `layout == nil` in the recognised branch, so the last page wins).
+    @Test(arguments: [true, false])
+    func onlyTheFirstRecognisedPageWithTextGivesTheLayout(pageOneHasText: Bool) async throws {
+        let recognizer = StubRecognizer.boxed(perPage: { page in
+            page == 1 && !pageOneHasText ? [] : ["Seite \(page) oben", "Seite \(page) unten"]
+        })
+        let data = TestPDF.makeImageOnly(pages: [["Eins"], ["Zwei"], ["Drei"]])
+
+        let result = try await DocumentStage(recognizer: recognizer).process(pdfData: data) { _, _ in }
+
+        #expect(recognizer.count == 3)
+        let first = pageOneHasText ? 1 : 2
+        #expect(
+            try #require(result.firstPageLayout).lines.map(\.text) == ["Seite \(first) oben", "Seite \(first) unten"])
+    }
+
     /// A dense page (4 columns of 100 lines in the middle) keeps its letterhead and footer under the cap (N5).
     @Test func theCapKeepsTheTopAndTheFooterOfADensePage() throws {
         var lines = [SyntheticLetter.Line("Muster Versand GmbH", x: 20, top: 15, size: 12)]

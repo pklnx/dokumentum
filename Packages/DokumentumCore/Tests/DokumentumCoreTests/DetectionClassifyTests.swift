@@ -340,6 +340,37 @@ struct DetectionClassifyTests {
         #expect(row.correspondentID != known)
     }
 
+    /// Review A B1 of #209: the hinted record renamed by the user in the classification write's window. Detection's
+    /// link is in that write's check (`fill.related` merged), so the write backs off and the rename stays; the next
+    /// run resolves the name again (counter-proof: drop the merge, and the write saves over the rename).
+    @Test func aHintedCorrespondentRenamedInTheClassificationWindowBacksOff() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let clock = TestClock()
+        let id = try insertPending(store)
+        let known = try store.insertMetadata(.correspondent, "Stadtwerke Musterstadt")
+        let hooks = editOnce(.classification) {
+            try store.renameMetadata(.correspondent, known, to: "Gaswerke Musterstadt")
+        }
+        let queue = store.classifyingQueue(
+            classifier: StubClassifier { _ in Self.typeOnly }, stage: LetterStage(stadtwerkeLetter), clock: clock,
+            hooks: hooks)
+
+        let first = await queue.run()
+
+        #expect(first.backedOff == 1)
+        #expect(first.classified == 0)
+        #expect(try store.correspondentRecords().first { $0.id == known }?.name == "Gaswerke Musterstadt")
+        #expect(try store.detected(id).correspondent == nil)
+
+        clock.advance(by: 60)
+        let second = await queue.run()
+
+        #expect(second.classified == 1)
+        #expect(try store.detected(id).correspondentID != known)
+        #expect(try store.correspondentRecords().first { $0.id == known }?.name == "Gaswerke Musterstadt")
+    }
+
     // MARK: Pruning
 
     /// The entry goes when the document is gone, with the failure counters.

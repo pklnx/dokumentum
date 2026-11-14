@@ -232,6 +232,20 @@ public enum SyntheticLetters {
                 L("Öffnungszeiten: Mo–Fr 8–12 Uhr", x: 25, top: 280, size: 7),
             ] + germanRecipient + germanBody),
         letter(
+            "finanzamt-known-misread-return-line",
+            "review B2 of #209: the authority known, its return-address line misread by OCR (`Musterstact`); the "
+                + "known name in the letterhead beats the return line's structural name",
+            recipient: owner, known: ["Finanzamt Musterstadt"], sender: .known("Finanzamt Musterstadt"),
+            date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstact · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11),
+                L("Steuernummer: 123/456/78901", x: 125, top: 40, size: 9),
+                L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
             "rechnung-zeitraum", "an invoice with `Rechnungsdatum`, a service period, a due date and a column footer",
             recipient: owner, sender: .structural("Muster Versand GmbH"), date: november13,
             [

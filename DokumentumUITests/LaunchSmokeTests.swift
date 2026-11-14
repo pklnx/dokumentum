@@ -15,7 +15,7 @@ final class LaunchSmokeTests: XCTestCase {
     private static let sender = "Stadtwerke Musterstadt GmbH"
 
     @MainActor
-    func testTheAppLaunchesAndShowsItsRootView() {
+    func testTheAppLaunchesAndShowsItsRootView() throws {
         let launched = UITestApp()
         launched.launch(
             .localOnDisk(name: "LaunchSmoke"),
@@ -29,12 +29,12 @@ final class LaunchSmokeTests: XCTestCase {
             XCTAssertTrue(launched.element("sidebar.syncOff").waitForExistence(timeout: 10), "no “Sync off” line")
             launched.attachWindowScreenshot("1-local-store-sync-off", to: self)
         #endif
-        showsTheDetectedSenderAndDate(launched)
+        try showsTheDetectedSenderAndDate(launched)
     }
 
     /// The imported letter's info: the correspondent and the date that detection filled.
     @MainActor
-    private func showsTheDetectedSenderAndDate(_ ui: UITestApp) {
+    private func showsTheDetectedSenderAndDate(_ ui: UITestApp) throws {
         let row = ui.app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "documentList.row.")
         ).firstMatch
@@ -77,7 +77,18 @@ final class LaunchSmokeTests: XCTestCase {
             let day = value.map { Calendar.current.dateComponents([.year, .month, .day], from: $0) }
             XCTAssertEqual(day, DateComponents(year: 2026, month: 11, day: 13), "not the detected date: \(shown)")
         } else {
-            XCTAssertTrue(shown.contains("13") && shown.contains("2026"), "not the detected date: \(shown)")
+            // 13 November 2026 as the app's date picker can write it in this run's locale (review B N1 of #209).
+            var components = DateComponents(year: 2026, month: 11, day: 13, hour: 12)
+            components.calendar = Calendar.current
+            let day = try XCTUnwrap(components.date)
+            let forms =
+                [DateFormatter.Style.short, .medium, .long].map { style in
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = style
+                    formatter.timeStyle = .none
+                    return formatter.string(from: day)
+                } + [day.formatted(date: .numeric, time: .omitted), day.formatted(date: .abbreviated, time: .omitted)]
+            XCTAssertTrue(forms.contains { shown.contains($0) }, "not the detected date: \(shown), forms \(forms)")
         }
         ui.attachWindowScreenshot("2-detected-sender-and-date", to: self)
     }
