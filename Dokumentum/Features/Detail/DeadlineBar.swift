@@ -48,7 +48,9 @@ struct DeadlineBar: View {
         }
         .font(.callout.weight(.medium))
         .foregroundStyle(.primary)
-        .accessibilityElement(children: .ignore)
+        // `.combine`, as the processing line: with `.ignore` the Mac audit found no role on it ("Unknown role"). The label
+        // then reads the long date ("16 November 2026") in place of the line's short one.
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(verbatim: DeadlineText.spoken(deadline, status: status)))
         .accessibilityIdentifier(AccessibilityID.detailDeadline(status))
     }

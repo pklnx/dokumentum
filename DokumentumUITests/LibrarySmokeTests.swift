@@ -161,10 +161,11 @@ final class LibrarySmokeTests: XCTestCase {
 
     /// Deadlines (#12, part 2a): the sidebar row counts 2 (overdue, and due within the default 3 days; maintainer
     /// decision Q7), the list shows the three open deadlines by day, the overdue medical invoice first, and not the done
-    /// car insurance or a document without a deadline. The overdue row says so in words: its VoiceOver sentence holds
-    /// the detail bar's own text, whose identifier names the overdue status (tests read no localized text). The water
-    /// bill's bar ("still downloading" below it) passes the audit, and its "Mark as Done" takes it out of the list and
-    /// the count.
+    /// car insurance or a document without a deadline. The overdue row says so in words: its VoiceOver sentence ends
+    /// with the status word of the detail bar, whose identifier names the overdue status (tests read no localized text).
+    /// The medical invoice's bar passes the audit over its PDF (not over a placeholder, whose description the audit fails
+    /// in light whatever its contrast, #89). The water bill's "Edit…" opens the info panel's "Deadline" section, and its
+    /// "Mark as Done" takes it out of the list and the count.
     @MainActor
     private func assertDeadlines(_ ui: UITestApp, file: StaticString = #filePath, line: UInt = #line) {
         #if os(iOS)
@@ -201,12 +202,23 @@ final class LibrarySmokeTests: XCTestCase {
         let overdue = ui.element("documentDetail.deadline.overdue")
         XCTAssertTrue(
             overdue.waitForExistence(timeout: 20), "the medical invoice is not overdue", file: file, line: line)
-        XCTAssertFalse(overdue.label.isEmpty, "the bar has no VoiceOver label", file: file, line: line)
+        let overdueWord = Self.statusWord(of: overdue)
+        XCTAssertFalse(overdueWord.isEmpty, "the bar has no text: \(overdue)", file: file, line: line)
         XCTAssertTrue(
-            medicalLabel.hasSuffix(overdue.label),
-            "the overdue row does not say so: \(medicalLabel) / \(overdue.label)", file: file, line: line)
+            medicalLabel.hasSuffix(", " + overdueWord),
+            "the overdue row does not say so: \(medicalLabel) / \(overdueWord)", file: file, line: line)
         XCTAssertFalse(
-            waterLabel.contains(overdue.label), "the water bill's row reads as overdue", file: file, line: line)
+            waterLabel.contains(overdueWord), "the water bill's row reads as overdue", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear", file: file,
+            line: line)
+        XCTAssertTrue(
+            ui.element("documentDetail.deadline.markDone").exists, "no “Mark as Done”", file: file, line: line)
+        ui.attachWindowScreenshot("15-deadline-overdue", to: self)
+        #if os(macOS)
+            ui.assertTextContrast("documentDetail.deadline.overdue", in: self, file: file, line: line)
+        #endif
+        ui.auditAccessibility("deadline-overdue", in: self, file: file, line: line)
         #if os(iOS)
             goBack(ui)
         #endif
@@ -215,18 +227,40 @@ final class LibrarySmokeTests: XCTestCase {
         ui.activate(Self.documentRow(Self.waterBill), file: file, line: line)
         let upcoming = ui.element("documentDetail.deadline.upcoming")
         XCTAssertTrue(upcoming.waitForExistence(timeout: 20), "no deadline bar", file: file, line: line)
+        let upcomingWord = Self.statusWord(of: upcoming)
+        XCTAssertFalse(upcomingWord.isEmpty, "the bar has no text: \(upcoming)", file: file, line: line)
         XCTAssertTrue(
-            waterLabel.hasSuffix(upcoming.label), "the row's sentence lacks the deadline: \(waterLabel)", file: file,
-            line: line)
+            waterLabel.hasSuffix(", " + upcomingWord), "the row's sentence lacks the status: \(waterLabel)",
+            file: file, line: line)
         XCTAssertTrue(
             ui.element("documentDetail.stillDownloading").waitForExistence(timeout: 20), "no “Still downloading”",
             file: file, line: line)
         XCTAssertTrue(ui.element("documentDetail.deadline.edit").exists, "no “Edit…”", file: file, line: line)
-        ui.attachWindowScreenshot("15-deadline-bar", to: self)
+        ui.attachWindowScreenshot("16-deadline-bar", to: self)
         #if os(macOS)
             ui.assertTextContrast("documentDetail.deadline.upcoming", in: self, file: file, line: line)
         #endif
-        ui.auditAccessibility("deadlines", in: self, file: file, line: line)
+
+        // "Edit…" opens the info panel at its deadline: the day's picker, the label, "Completed" and "Remove".
+        ui.activate("documentDetail.deadline.edit", file: file, line: line)
+        XCTAssertTrue(
+            ui.element("documentInfo.deadline.date").waitForExistence(timeout: 20), "“Edit…” opened no info panel",
+            file: file, line: line)
+        for identifier in ["documentInfo.deadline.label", "documentInfo.deadline.done", "documentInfo.deadline.remove"]
+        {
+            XCTAssertTrue(ui.element(identifier).exists, "no \(identifier)", file: file, line: line)
+        }
+        XCTAssertFalse(
+            ui.element("documentInfo.deadline.add").exists, "“Add Deadline” with a deadline", file: file, line: line)
+        ui.attachWindowScreenshot("17-deadline-info", to: self)
+        #if os(iOS)
+            ui.activate("documentInfo.done", file: file, line: line)
+        #else
+            ui.app.typeKey("i", modifierFlags: .command)
+        #endif
+        XCTAssertTrue(
+            ui.element("documentInfo.deadline.date").waitForNonExistence(timeout: 10), "the info panel stayed open",
+            file: file, line: line)
 
         // "Mark as Done": out of the list, and the count goes to 1.
         ui.activate("documentDetail.deadline.markDone", file: file, line: line)
@@ -246,6 +280,14 @@ final class LibrarySmokeTests: XCTestCase {
         XCTAssertTrue(
             Self.waitForCount(1, of: ui.element("sidebar.deadlines")), "the Deadlines count did not go to 1",
             file: file, line: line)
+    }
+
+    /// The last part of a deadline bar's text, its status ("Overdue", "Überfällig"): the label on the iPhone, the value
+    /// on the Mac (a static text), with the parts joined by " · " as shown or by ", " as spoken.
+    @MainActor
+    private static func statusWord(of element: XCUIElement) -> String {
+        let text = element.label.isEmpty ? (element.value as? String ?? "") : element.label
+        return text.components(separatedBy: " · ").last?.components(separatedBy: ", ").last ?? ""
     }
 
     /// Waits until a sidebar row's VoiceOver value ("2 overdue or due soon", "3 documents") starts with `count`.
