@@ -716,7 +716,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
 ## Matching rules
 
 #10, part 1b (plan of #10, Revision 1; re-review N1–N4). A tag, correspondent or document type can carry a rule that
-assigns it from a document's text, as in paperless-ngx. Part 2 (#200) adds the rule sheet and the Settings action.
+assigns it from a document's text, as in paperless-ngx. Part 2 (#200) adds the rule sheet and the Settings action
+("The rule sheet and 'Apply now'" below).
 
 **Model.** The rule is two fields on the record it assigns (`matchModeRaw`, the frozen enum `MatchMode`, `""` for no
 rule; `matchPattern`, as typed; schema V2, "Data model and sync"). There is no rule entity, so sync has nothing new
@@ -794,8 +795,8 @@ Copies are counted among all records of an `instanceID`, also those without a ru
 `instanceID`, only when rules exist) as in the fill, so the import path and the bulk run agree (review A of #205, N5).
 Copies are rare (a copied record, or a merge's loser and its copy, which the repair leaves alone, see "Copies sharing
 an `instanceID`" above), but such a rule silently never applies: the bulk run's report counts it (`copiedRules`,
-logged as `rules.copied`), the editor refuses the record (`noMetadata`), and **#200's rule sheet should show that
-state** ("This rule is not applied: the record exists twice") instead of a plain error.
+logged as `rules.copied`), the editor refuses the record (`noMetadata`), and **#200's rule sheet shows that
+state** ("This rule is not applied: “…” exists twice in the archive", `MatchingRuleEditor.state`) instead of an editor.
 
 **Precedence** (T5, P1): a user's edit > rules > detection (#11) > classifier (#8). Correspondent, type and date: each
 later step fills only what is still empty when it writes. Tags: the classifier adds its tags unless the document has a
@@ -831,7 +832,57 @@ bulk run over the whole archive; it belongs to that case on #31's two-device pro
 **Editing a rule** (`MatchingRuleEditor`, the model side of part 2's sheet; `StoreLibrarySource.matchingRule` reads
 one). It writes only the fields the user changed (a draft can be older than the store), only on a live record, keeps a
 newer build's mode (`unknown`) unless the user picks one, refuses what `MatchingRuleValidation.check` refuses, saves
-once and rolls back on failure.
+once and rolls back on failure. `MatchingRuleEditor.state(of:_:)` tells the sheet a record's rule from a record with
+copies (`copies`) and from a gone one (`gone`); `rule(of:)` gives `nil` for both.
+
+**The rule sheet and "Apply now"** (#200, part 2; plan §8, §9; maintainer's P3, P4; plan review N8, N9; re-review N5).
+Code in `Dokumentum/Features/Matching/` and `Features/Settings/MatchingSettingsSection.swift`.
+- **"Edit Matching…"** is in the context menu of every tag, correspondent and type row of the sidebar (a right click on
+  the Mac, a long press on the iPhone; `matching.edit`) and a named accessibility action of the row. It opens
+  `MatchingRuleSheet` over the library: the record's name as the title, the picker **Match** (radio buttons on the Mac:
+  the audit reports a SwiftUI pop-up picker as "Action is missing", measured on this sheet; a menu on the iPhone) with
+  the five modes (None, Any word, All words, Exact phrase, Regular expression; a newer build's mode is a sixth option,
+  "Set by a newer version of Dokumentum", while it is the stored one), the **Pattern** field (disabled for None and a
+  newer mode), a line under the field for a problem, and one explanation per mode (the regular expression's says it
+  ignores case only, B2); Cancel and Save. German calls matching "Automatische Zuordnung" and the picker "Zuordnung"
+  (maintainer, review of #210), so the mode "None" has a key of its own (`None (matching mode)`, "Keine"); the info
+  panel's "None" stays "Keiner".
+- **The pattern field** (`MatchingPatternField`) is the platform's own text field, because SwiftUI has no modifier for
+  smart quotes and dashes: on the iPhone a `UITextField` with autocorrection, auto-capitalisation, spell checking,
+  smart quotes, smart dashes and smart insert off, monospaced body text that follows Dynamic Type (`patternFont`: Large's
+  body size scaled once; a base at the current size was scaled twice, review of #210, B1); on the Mac an
+  `NSTextField` whose field editor gets its quote and dash substitution, text replacement and spelling correction
+  turned off when it starts editing (the window's shared field editor follows the system's "Use smart quotes and
+  dashes" otherwise). `("--` stays `("--` (`EditingSmokeTests`). XCUITest's `typeText` bypasses smart punctuation on the simulator and on
+  the Mac (re-review N5: with the settings removed the UI test still passed, #200), so `MatchingPatternFieldTests` pins
+  them: the `UITextField`'s traits, and the Mac field editor's flags after the field became first responder in a
+  window whose field editor had every substitution on.
+- **The draft** (`MatchingRuleDraft`): `MatchingRuleValidation.check` on each change; for a regular expression that
+  passes it, `probeConcurrently` after 300 ms of quiet, off the main actor, only for the newest pattern. Save is
+  disabled while a problem shows and until the probe answered. Save writes only the fields that differ from the ones
+  the sheet opened with, through `MatchingRuleEditor` in the main context; a failed save shows "The rule could not be
+  saved." until the next change. A record with copies, or one gone meanwhile, shows its state and no Save.
+- **"Apply Matching Rules to All Documents…"** is the settings' second section, "Matching" (the Mac's Settings window
+  and the iPhone's settings sheet; `settings.matching.apply`). An alert asks first, with P3's text: empty
+  correspondents and types are filled, matching tags added, also ones removed by hand, nothing replaced, also not what
+  Apple Intelligence or detection filled, several matches leave the field empty, the trash is not touched
+  (`settings.matching.confirm`). Then a progress line with Cancel (`settings.matching.progress`,
+  `settings.matching.cancel`) and the result (`settings.matching.result`), built from `MatchingRun.Report`: documents
+  changed, stopped or failed, ambiguous and skipped documents, rules not valid or too slow by name, and rules whose
+  record has copies. The app holds one `MatchingRunModel` (`DokumentumApp.matchingRun`), so the Settings window and the
+  sheet show the same run; the library reads the result through its save notification.
+- **Identifiers:** `matching.edit`, `matching.mode`, `matching.mode.<none|any|all|exact|regex|unknown>`,
+  `matching.pattern`, `matching.explanation`, `matching.error`, `matching.save`, `matching.cancel`,
+  `matching.copies`, `matching.gone`, and the `settings.matching.*` above. The texts under the field, the explanation
+  and the result are primary text in callout medium, as the settings' notes (#139).
+- **Tests:** `MatchingRuleDraftTests` (only changed fields, each problem's line, the debounced probe with
+  `ManualDebounce`, copies and gone, a newer mode, a failed save), `MatchingRunModelTests` (asks first, progress,
+  Cancel, the real run on the sample library, the result's sentences), `MatchingPatternFieldTests`, and
+  `EditingSmokeTests.testEditingAndMatchingRules` (plan review N9: the existing editing test, renamed and extended,
+  so the suite keeps its count): an invalid regular expression shows the line and disables Save with the field as
+  typed, "Any word" "Autohaus" on Musterbank AG is saved and there again, and "Apply" changes one document ("Golf
+  inspection") and raises Musterbank AG's count by one, read relative to the count before; the audit runs on the sheet
+  and on the settings with the result.
 
 **Tests.** Kit (also on Linux): `MatchingRulesTests` (every mode with a hit and a miss, normalisation, transcribed
 forms, whole words, NFC, ambiguity, permutations), `MatchingPatternTests`, `RegexMatcherTests` (invalid patterns, the
@@ -886,7 +937,8 @@ the state (`documentDetail.processing.pending|running|classify|failed`, `documen
 
 **Settings** (#8, part 3; maintainer decisions P3–P6, plan review N8). The Mac's Settings window (⌘,, the `Settings`
 scene) and, on the iPhone, a sheet from the sidebar's toolbar (gear, `settings.open`, "Done" `settings.done`) show
-`SettingsView` with one section, "Suggestions": the switch (`settings.suggestions.switch`), under it a note on the
+`SettingsView` with two sections, "Suggestions" and "Matching" (#10, part 2, see "Matching rules"). "Suggestions":
+the switch (`settings.suggestions.switch`), under it a note on the
 model's availability (`settings.suggestions.availability`: getting ready, or "Not available:" with the reason: the
 device is not eligible, Apple Intelligence is off with where to turn it on, or another reason), and below it what
 suggestions do, the privacy statement (`settings.suggestions.privacy`) and the per-device consequence (N8): on the
@@ -979,8 +1031,8 @@ attachment of the run. On the Mac four issues are accepted, on the iPhone eleven
 settings sheet's "Done" (`settings.done`, the same system toolbar button as the cleanup sheet's Cancel and Save, for
 Dynamic Type and contrast; `LibrarySmokeTests` measures its contrast, #139) and "Text clipped" on the settings'
 availability note (`settings.suggestions.availability`: it wraps in full at AccessibilityXXXL, checked on
-screenshots; the audit reports the same on the app's wrapping texts without an identifier, #139)
-(`UITestApp.acceptedAuditIssues`). Each matches the
+screenshots; the audit reports the same on the app's wrapping texts without an identifier, #139), and eight more
+with the matching rules (#200, listed below) (`UITestApp.acceptedAuditIssues`). Each matches the
 exact identifier, audit type and description; any other issue on the same element still fails. An accepted
 issue is listed in the attachment as `ACCEPTED (<reason>)`, and one the audit did not report in that run as
 `ACCEPTED, not reported`, without failing, because the audit is not fully stable.
@@ -1012,6 +1064,19 @@ On the iPhone (#136):
   system buttons; navigation bar buttons cap their text size and offer the large content viewer instead.
 - `cleanup.corner.*` (four), contrast, "Contrast nearly passed": the corner handles, an accent dot with a white
   ring over the photo and no text; what lies behind them depends on the photo.
+
+On the iPhone, with the matching rules (#200; `EditingSmokeTests` audits the rule sheet and the settings after a run):
+- `matching.cancel` and `matching.save`, contrast "Contrast failed" and Dynamic Type "partially unsupported": the rule
+  sheet's system toolbar buttons, as the cleanup sheet's. Measured on the element's screenshot in every run: 19.70:1
+  in light (#000000 on #f8f7fc), both.
+- `matching.error`, "Text clipped": the line under the pattern field, laid out as the availability note.
+- `settings.matching.result` and `settings.matching.apply`, Dynamic Type "partially unsupported": the result line was
+  reported as a verbatim text, as localized texts and in a stack alike, and in one run the system's own Form button
+  above it instead. Both use text styles that follow Dynamic Type.
+- `settings.suggestions.privacy`, "Text clipped": reported first once the "Matching" section made the settings form
+  longer than the screen, while the statement shows in full on the run's screenshot.
+- None of these was looked at in AccessibilityXXXL: `EditingSmokeTests` at that size stops earlier, at revealing
+  Musterbank AG's sidebar row (`revealSidebarRow`), before the matching steps (#200, not verified).
 
 **Evidence screenshots.** Only of the app's window: `UITestApp.attachWindowScreenshot` takes
 `app.windows.firstMatch.screenshot()`. Never `XCUIScreen.main` and never `screencapture`: on the Mac they show

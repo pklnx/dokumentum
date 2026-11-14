@@ -18,10 +18,14 @@ protocol LibrarySource: Sendable {
     func loadThumbnail(instanceID: UUID) async -> CGImage?
     /// Writes edits to the documents (plan of #3, part 3); `nil` for a source that cannot be edited.
     @MainActor var editor: DocumentEditor? { get }
+    /// Reads and saves the matching rules of tags, correspondents and types (#10, part 2); `nil` for a source that
+    /// cannot be edited.
+    @MainActor var ruleEditor: MatchingRuleEditor? { get }
 }
 
 extension LibrarySource {
     @MainActor var editor: DocumentEditor? { nil }
+    @MainActor var ruleEditor: MatchingRuleEditor? { nil }
     func loadThumbnail(instanceID: UUID) async -> CGImage? { nil }
 }
 
@@ -36,5 +40,10 @@ extension StoreLibrarySource: LibrarySource {
             }
         #endif
         return DocumentEditor(context: container.mainContext)
+    }
+
+    /// In the main context, which the library reads, as `editor`.
+    @MainActor var ruleEditor: MatchingRuleEditor? {
+        MatchingRuleEditor(context: container.mainContext)
     }
 }

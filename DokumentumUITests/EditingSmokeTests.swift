@@ -3,21 +3,31 @@ import XCTest
 /// Editing in the info panel (plan of #3, part 3) on the sample documents (`-UITestSeed`): the title and the
 /// correspondent change, and the list shows the new values after leaving the Inbox and coming back. On the Mac
 /// the delete key in the title field only edits the text (a regression of the predecessor,
-/// `MacSmokeTests.testDeleteKeyInTheTitleFieldOnlyEditsText`). A second launch shows the line under the title
-/// field when its save fails (part 5); it stays in this test, so the smoke suite keeps its count (plan §4).
+/// `MacSmokeTests.testDeleteKeyInTheTitleFieldOnlyEditsText`). Then a matching rule is edited from the sidebar and
+/// applied from the settings (#10, part 2; plan review N9: in this test, not a suite of its own). A second launch
+/// shows the line under the title field when its save fails (part 5); it stays in this test, so the smoke suite keeps
+/// its count (plan §4).
 final class EditingSmokeTests: XCTestCase {
     // The identifiers and fixed IDs of the app (`AccessibilityID`, `FixtureCatalog`); a UI test cannot see the
     // app's code. The titles and names are sample data, the same in every language.
     private static let electricityBill = "documentList.row.5EED0000-0000-4000-8000-000000000001"
     private static let newTitle = "Electricity bill edited"
     private static let newCorrespondent = "Musterbank AG"
+    /// Musterbank AG's sidebar row (`FixtureCatalog.musterbank`).
+    private static let musterbankRow = "sidebar.correspondent.5EED0002-0000-4000-8000-000000000002"
+    /// Typed into the pattern field as a regular expression: not valid, and the field must keep it as typed (N8).
+    /// `typeText` bypasses smart punctuation on both platforms (re-review N5, measured on #200: with the field's
+    /// settings removed this test still passes), so `MatchingPatternFieldTests` pins the settings themselves.
+    private static let invalidPattern = "(\"--"
+    /// The rule: "Golf inspection", the one sample without a correspondent, has "Autohaus" in its text.
+    private static let rulePattern = "Autohaus"
 
     override func setUp() {
         continueAfterFailure = false
     }
 
     @MainActor
-    func testEditTitleAndCorrespondent() {
+    func testEditingAndMatchingRules() {
         let ui = UITestApp()
         ui.launch()
         defer { ui.app.terminate() }
@@ -102,7 +112,209 @@ final class EditingSmokeTests: XCTestCase {
         XCTAssertFalse(row.label.contains("Stadtwerke Musterstadt"), "the row still shows the old correspondent")
         ui.attachWindowScreenshot("3-row-updated", to: self)
 
+        checkMatchingRules(ui)
         checkATitleThatCannotBeSavedSaysSo(ui)
+    }
+
+    /// The matching rules (#10, part 2; plan of #10, Tests 2): "Edit Matching…" on Musterbank AG; a regular expression
+    /// that is not valid shows the line under the field and disables Save, and the field keeps what was typed (N8: no
+    /// smart quotes or dashes); "Any word" with "Autohaus" is saved and there when the sheet opens again; "Apply
+    /// Matching Rules to All Documents…" in the settings, confirmed, changes one document, and Musterbank AG's count
+    /// is one higher. Counts are relative to the value read first. The sheet and the settings with the result pass the
+    /// accessibility audit.
+    @MainActor
+    private func checkMatchingRules(_ ui: UITestApp) {
+        #if os(iOS)
+            goBack(ui)
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "no sidebar after going back")
+        #else
+            // The info panel closed: the audit of the sheet covers the window behind it, and the panel's correspondent
+            // picker is reported there ("Action is missing", measured on this test's first run), as no other audit
+            // sees it open.
+            if ui.element("documentInfo.title").exists {
+                ui.activate("documentDetail.showInfo")
+                XCTAssertTrue(
+                    ui.element("documentInfo.title").waitForNonExistence(timeout: 10), "the info panel stayed open")
+            }
+        #endif
+        ui.revealSidebarRow(Self.musterbankRow, missingTowards: .bottom)
+        let before = documentCount(Self.musterbankRow, ui)
+        XCTAssertNotNil(before, "no count on Musterbank AG's row")
+
+        // A regular expression that is not valid: the line, Save disabled, the field as typed.
+        openRuleSheet(ui)
+        chooseMode("regex", ui)
+        let pattern = ui.element("matching.pattern")
+        XCTAssertTrue(pattern.waitForExistence(timeout: 10), "no pattern field")
+        focus(pattern)
+        pattern.typeText(Self.invalidPattern)
+        let error = ui.element("matching.error")
+        XCTAssertTrue(error.waitForExistence(timeout: 10), "no line under the field for an invalid expression")
+        XCTAssertFalse(ui.element("matching.save").isEnabled, "Save is enabled with an invalid expression")
+        XCTAssertEqual(pattern.value as? String, Self.invalidPattern, "the field changed what was typed")
+        ui.attachWindowScreenshot("5-matching-invalid", to: self)
+        #if os(iOS)
+            // The system toolbar button in its glass capsule: accepted in the audit, so measured here (#136).
+            ui.assertTextContrast("matching.cancel", in: self)
+        #endif
+        ui.auditAccessibility("matching-sheet", in: self)
+
+        // Any word, "Autohaus": saved.
+        chooseMode("any", ui)
+        replaceText(of: pattern, with: Self.rulePattern)
+        XCTAssertTrue(error.waitForNonExistence(timeout: 10), "the line stayed for a valid rule")
+        let save = ui.element("matching.save")
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "Save stayed disabled")
+        ui.attachWindowScreenshot("6-matching-rule", to: self)
+        #if os(iOS)
+            ui.assertTextContrast("matching.save", in: self)
+        #endif
+        ui.activate("matching.save")
+        XCTAssertTrue(pattern.waitForNonExistence(timeout: 10), "the sheet stayed open after Save")
+
+        // Opened again: the rule is there.
+        openRuleSheet(ui)
+        let reopened = ui.element("matching.pattern")
+        XCTAssertTrue(reopened.waitForExistence(timeout: 10), "no pattern field")
+        XCTAssertEqual(reopened.value as? String, Self.rulePattern, "the pattern was not saved")
+        XCTAssertTrue(reopened.isEnabled, "the mode was not saved: the field is disabled for no rule")
+        ui.activate("matching.cancel")
+        XCTAssertTrue(reopened.waitForNonExistence(timeout: 10), "the sheet stayed open after Cancel")
+
+        // Applied to all documents from the settings.
+        openSettings(ui)
+        let apply = ui.element("settings.matching.apply")
+        XCTAssertTrue(apply.waitForExistence(timeout: 10), "no Apply in the settings")
+        #if os(iOS)
+            // Scrolled only when it is out of view (a large text size): a scrolled form cuts the texts at its top,
+            // which the audit reports as clipped.
+            for _ in 0..<4 where !apply.isHittable {
+                ui.element("settings").swipeUp(velocity: .slow)
+            }
+        #endif
+        ui.activate("settings.matching.apply")
+        ui.activate("settings.matching.confirm")
+        let result = ui.element("settings.matching.result")
+        XCTAssertTrue(result.waitForExistence(timeout: 60), "no result after applying the rules")
+        let resultText = (result.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? result.label
+        XCTAssertTrue(resultText.hasPrefix("1 "), "the result is not one document changed: \(resultText)")
+        attachSettingsScreenshot("7-matching-applied", ui)
+        ui.auditAccessibility("matching-settings", in: self)
+        #if os(iOS)
+            ui.activate("settings.done")
+            XCTAssertTrue(ui.element("sidebar").waitForExistence(timeout: 10), "the settings stayed open")
+        #else
+            ui.app.typeKey("w", modifierFlags: .command)
+            XCTAssertTrue(result.waitForNonExistence(timeout: 10), "the Settings window stayed open")
+        #endif
+
+        if let before {
+            ui.revealSidebarRow(Self.musterbankRow, missingTowards: .bottom)
+            let row = ui.element(Self.musterbankRow)
+            let counted = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value BEGINSWITH %@", "\(before + 1) "), object: row)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [counted], timeout: 20), .completed,
+                "Musterbank AG's count is not \(before + 1): \(String(describing: row.value))")
+        }
+        ui.attachWindowScreenshot("8-matching-count", to: self)
+    }
+
+    /// The number a sidebar row's VoiceOver value starts with ("5 documents", "5 Dokumente").
+    @MainActor
+    private func documentCount(_ identifier: String, _ ui: UITestApp) -> Int? {
+        let row = ui.element(identifier)
+        guard row.waitForExistence(timeout: 10), let value = row.value as? String else { return nil }
+        return Int(value.prefix { $0.isNumber })
+    }
+
+    /// "Edit Matching…" from Musterbank AG's context menu: a right click on the Mac, a long press on the iPhone.
+    @MainActor
+    private func openRuleSheet(_ ui: UITestApp) {
+        ui.revealSidebarRow(Self.musterbankRow, missingTowards: .bottom)
+        let row = ui.element(Self.musterbankRow)
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "no Musterbank AG row")
+        #if os(macOS)
+            row.rightClick()
+        #else
+            row.press(forDuration: 1.2)
+        #endif
+        ui.activate("matching.edit")
+        XCTAssertTrue(ui.element("matching.mode").waitForExistence(timeout: 10), "the rule sheet did not open")
+    }
+
+    /// Picks a mode in the sheet's picker by the option's identifier (`matching.mode.<mode>`): on the Mac a radio
+    /// button, on the iPhone an item of the picker's menu.
+    @MainActor
+    private func chooseMode(_ mode: String, _ ui: UITestApp) {
+        #if os(iOS)
+            ui.activate("matching.mode")
+        #endif
+        let option = ui.element("matching.mode.\(mode)")
+        guard option.waitForExistence(timeout: 10) else {
+            let tree = XCTAttachment(string: ui.app.debugDescription)
+            tree.name = "tree-no-mode-\(mode)"
+            tree.lifetime = .keepAlways
+            add(tree)
+            XCTFail("no option matching.mode.\(mode)")
+            return
+        }
+        #if os(macOS)
+            option.click()
+        #else
+            option.tap()
+        #endif
+    }
+
+    @MainActor
+    private func focus(_ field: XCUIElement) {
+        #if os(macOS)
+            field.click()
+        #else
+            field.tap()
+        #endif
+    }
+
+    /// Replaces a text field's whole text.
+    @MainActor
+    private func replaceText(of field: XCUIElement, with text: String) {
+        focus(field)
+        #if os(macOS)
+            field.typeKey("a", modifierFlags: .command)
+            field.typeText(text)
+        #else
+            let length = (field.value as? String)?.count ?? 0
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: length + 5) + text)
+        #endif
+    }
+
+    /// The settings: the iPhone's sheet from the sidebar's toolbar, the Mac's Settings window (⌘,). On the Mac a
+    /// document is opened first: the audit covers the library window behind the Settings window too, and its "No
+    /// document selected" is a known false positive in light (#89).
+    @MainActor
+    private func openSettings(_ ui: UITestApp) {
+        #if os(iOS)
+            ui.activate("settings.open")
+        #else
+            ui.activate(Self.electricityBill)
+            XCTAssertTrue(ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear")
+            ui.app.typeKey(",", modifierFlags: .command)
+        #endif
+        XCTAssertTrue(ui.element("settings").waitForExistence(timeout: 20), "the settings did not open")
+    }
+
+    /// The settings' own pixels: on the Mac the Settings window is not the library's, so the view's screenshot.
+    @MainActor
+    private func attachSettingsScreenshot(_ name: String, _ ui: UITestApp) {
+        #if os(macOS)
+            let attachment = XCTAttachment(screenshot: ui.element("settings").screenshot())
+            attachment.name = UITestApp.attachmentName(name)
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        #else
+            ui.attachWindowScreenshot(name, to: self)
+        #endif
     }
 
     /// A title whose save fails (`-UITestFailingSaves YES`: every save of the editor fails and is rolled back) says

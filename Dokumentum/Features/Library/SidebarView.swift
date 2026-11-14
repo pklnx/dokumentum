@@ -25,7 +25,12 @@ struct SidebarView: View {
                     ForEach(sortedByName(model.snapshot.correspondents), id: \.instanceID) { correspondent in
                         row(
                             .correspondent(correspondent.instanceID), title: Text(verbatim: correspondent.name),
-                            symbol: "person")
+                            symbol: "person"
+                        )
+                        .modifier(
+                            MatchingRuleActions(
+                                model: model, kind: .correspondent, instanceID: correspondent.instanceID,
+                                name: correspondent.name))
                     }
                 }
             }
@@ -33,12 +38,19 @@ struct SidebarView: View {
                 Section("Document Types") {
                     ForEach(sortedByName(model.snapshot.documentTypes), id: \.instanceID) { type in
                         row(.documentType(type.instanceID), title: Text(verbatim: type.name), symbol: "doc.text")
+                            .modifier(
+                                MatchingRuleActions(
+                                    model: model, kind: .documentType, instanceID: type.instanceID, name: type.name))
                     }
                 }
             }
             Section {
                 row(.trash, title: Text("Trash"), symbol: "trash")
             }
+        }
+        // The rule sheet of a tag, correspondent or type (#10, part 2).
+        .sheet(item: $model.matchingRuleDraft) { draft in
+            MatchingRuleSheet(draft: draft)
         }
         // On the list itself, before the footer: an identifier after it would also replace the footer's
         // own (measured on macOS, #44).
@@ -127,5 +139,40 @@ struct SidebarRowLabel: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? title)
         .accessibilityValue(Text("\(count) documents"))
+    }
+}
+
+/// A tag's, correspondent's or type's sidebar row offers "Edit Matching…" (#10, part 2): in its context menu (a right
+/// click on the Mac, a long press on the iPhone) and as a named accessibility action. Nothing for a source that saves
+/// no rules.
+struct MatchingRuleActions: ViewModifier {
+    let model: LibraryModel
+    let kind: MetadataKind
+    let instanceID: UUID
+    let name: String
+
+    func body(content: Content) -> some View {
+        if model.canEditMatching {
+            content
+                .contextMenu {
+                    Button {
+                        edit()
+                    } label: {
+                        Label {
+                            Text(MatchingRuleText.edit)
+                        } icon: {
+                            Image(systemName: "text.magnifyingglass")
+                        }
+                    }
+                    .accessibilityIdentifier(AccessibilityID.matchingEdit)
+                }
+                .accessibilityAction(named: Text(MatchingRuleText.edit)) { edit() }
+        } else {
+            content
+        }
+    }
+
+    private func edit() {
+        model.editMatching(kind, instanceID, name: name)
     }
 }

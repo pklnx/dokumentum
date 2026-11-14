@@ -131,6 +131,39 @@ enum AccessibilityID {
     static let settingsSuggestionsAvailability = "settings.suggestions.availability"
     static let settingsSuggestionsPrivacy = "settings.suggestions.privacy"
 
+    /// The settings' "Matching" section (#10, part 2): "Apply Matching Rules to All Documents…", its confirmation's
+    /// Apply and Cancel, the progress line with its Cancel, and the last run's result.
+    static let settingsMatchingApply = "settings.matching.apply"
+    static let settingsMatchingConfirm = "settings.matching.confirm"
+    static let settingsMatchingConfirmCancel = "settings.matching.confirmCancel"
+    static let settingsMatchingProgress = "settings.matching.progress"
+    static let settingsMatchingCancel = "settings.matching.cancel"
+    static let settingsMatchingResult = "settings.matching.result"
+
+    /// The rule sheet (#10, part 2): the sidebar rows' "Edit Matching…", the sheet, its mode picker and each mode,
+    /// the pattern field, the explanation, the line under the field, Save and Cancel, and the states of a record with
+    /// copies and of a gone one.
+    static let matchingEdit = "matching.edit"
+    static let matchingSheet = "matching.sheet"
+    static let matchingMode = "matching.mode"
+    static func matchingMode(_ mode: MatchMode) -> String {
+        switch mode {
+        case .none: "matching.mode.none"
+        case .any: "matching.mode.any"
+        case .all: "matching.mode.all"
+        case .exact: "matching.mode.exact"
+        case .regex: "matching.mode.regex"
+        case .unknown: "matching.mode.unknown"
+        }
+    }
+    static let matchingPattern = "matching.pattern"
+    static let matchingExplanation = "matching.explanation"
+    static let matchingError = "matching.error"
+    static let matchingSave = "matching.save"
+    static let matchingCancel = "matching.cancel"
+    static let matchingCopies = "matching.copies"
+    static let matchingGone = "matching.gone"
+
     /// The iPhone sidebar's Debug menu and its "Add Sample Documents" (Debug builds).
     static let debugMenu = "debug.menu"
     static let debugAddSampleDocuments = "debug.addSampleDocuments"

@@ -369,6 +369,21 @@ final class LibraryModel {
             }
     }
 
+    // MARK: Matching rules
+
+    /// The rule sheet's draft while the sheet is shown (#10, part 2).
+    var matchingRuleDraft: MatchingRuleDraft?
+
+    /// Whether the sidebar offers "Edit Matching…": the source saves rules.
+    var canEditMatching: Bool { source.ruleEditor != nil }
+
+    /// Opens the rule sheet for the tag, correspondent or type with `instanceID`.
+    func editMatching(_ kind: MetadataKind, _ instanceID: UUID, name: String) {
+        guard let editor = source.ruleEditor else { return }
+        matchingRuleDraft = MatchingRuleDraft(
+            target: MatchingRuleTarget(kind: kind, instanceID: instanceID, name: name), editor: editor)
+    }
+
     // MARK: Processing
 
     /// Whether "Try again" can be offered: the library has a retrier.

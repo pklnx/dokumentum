@@ -40,6 +40,9 @@ struct DokumentumApp: App {
     /// The "Suggestions" settings (#8, part 3): this device's switch and the classifier's availability, for the Mac's
     /// Settings window and the iPhone's settings sheet.
     let suggestionSettings: SuggestionSettings
+    /// "Apply Matching Rules to All Documents…" (#10, part 2): one run for the app, shown by the Mac's Settings window
+    /// and the iPhone's settings sheet.
+    let matchingRun: MatchingRunModel
     /// The suite of the classification switch for an in-memory store (tests and UI tests): emptied at each such
     /// launch, so a UI test that turns the switch off never changes this device's real setting.
     nonisolated static let inMemorySettingsSuite = "Dokumentum.InMemoryLaunchSettings"
@@ -156,6 +159,7 @@ struct DokumentumApp: App {
         suggestionSettings = SuggestionSettings(
             classifier: classifier, settings: ClassificationSettings(defaultsSuite: settingsSuite),
             requestRun: { scheduler?.requestRun() })
+        matchingRun = MatchingRunModel(container: container)
         #if os(iOS)
             // Launch registers the processing task, before the app finishes launching (T13, N4); each continued
             // request registers its own identifier just before it is submitted (#194). Every user import goes
@@ -207,6 +211,7 @@ struct DokumentumApp: App {
             #endif
             // The iPhone's settings sheet reads it (`SettingsButton`).
             .environment(suggestionSettings)
+            .environment(matchingRun)
         }
         // A launch is an activation too; the share queue and the processing queue each run one at a time and
         // queue one more run. The background pauses processing on iOS (`ProcessingLifecycle`).
@@ -239,7 +244,7 @@ struct DokumentumApp: App {
         #if os(macOS)
             // The Mac's Settings window (⌘,), with the "Suggestions" section (#8, part 3).
             Settings {
-                SettingsView(model: suggestionSettings)
+                SettingsView(model: suggestionSettings, matching: matchingRun)
             }
         #endif
     }
