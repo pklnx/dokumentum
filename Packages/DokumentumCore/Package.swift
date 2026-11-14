@@ -18,7 +18,10 @@ let package = Package(
         .target(name: "DokumentumCore", dependencies: ["DokumentumKit"]),
         .target(
             name: "DokumentumCoreTestSupport",
-            dependencies: ["DokumentumCore", .product(name: "DokumentumTestSupport", package: "DokumentumKit")]
+            dependencies: [
+                "DokumentumCore", .product(name: "DokumentumKit", package: "DokumentumKit"),
+                .product(name: "DokumentumTestSupport", package: "DokumentumKit"),
+            ]
         ),
         .testTarget(
             name: "DokumentumCoreTests",

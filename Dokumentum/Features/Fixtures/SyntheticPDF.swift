@@ -1,6 +1,7 @@
 #if DEBUG
     import CoreGraphics
     import CoreText
+    import DokumentumKit
     import Foundation
 
     /// Generated PDFs with real text pages, for sample documents in Debug builds and UI tests. Nothing is
@@ -36,6 +37,38 @@
                 }
                 context.endPDFPage()
             }
+            context.closePDF()
+            return data as Data
+        }
+
+        /// A `SyntheticLetters` entry (#11) as a one-page text PDF at its millimetres on its page size: every line in
+        /// Helvetica at its font size, its top at the letter's `top`. The app's counterpart of the packages'
+        /// `TestLetter`, which Debug app code cannot import.
+        static func makeLetter(_ letter: SyntheticLetter) -> Data {
+            let pointsPerMillimetre = 72 / 25.4
+            let data = NSMutableData()
+            var mediaBox = CGRect(
+                x: 0, y: 0, width: letter.pageWidth * pointsPerMillimetre,
+                height: letter.pageHeight * pointsPerMillimetre)
+            guard let consumer = CGDataConsumer(data: data as CFMutableData),
+                let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil)
+            else { return Data() }
+            context.beginPDFPage(nil)
+            for line in letter.lines {
+                let font = CTFontCreateWithName("Helvetica" as CFString, line.size, nil)
+                let attributed = NSAttributedString(
+                    string: line.text,
+                    attributes: [
+                        NSAttributedString.Key(kCTFontAttributeName as String): font,
+                        NSAttributedString.Key(kCTForegroundColorAttributeName as String):
+                            CGColor(red: 0, green: 0, blue: 0, alpha: 1),
+                    ])
+                context.textPosition = CGPoint(
+                    x: line.x * pointsPerMillimetre,
+                    y: mediaBox.height - line.top * pointsPerMillimetre - CTFontGetAscent(font))
+                CTLineDraw(CTLineCreateWithAttributedString(attributed), context)
+            }
+            context.endPDFPage()
             context.closePDF()
             return data as Data
         }

@@ -36,8 +36,15 @@ public enum DetectedSender: Equatable, Sendable {
 /// **Recipient exclusion** (B1.1): a known correspondent whose name occurs in a recipient or recipient-labelled line
 /// is never detected; a structural name equal to or contained in such a line is rejected.
 ///
-/// The zones are tried in the order return-address line, letterhead, footer; the first with a result wins:
-/// 1. a known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
+/// The zones are tried in the order return-address line, letterhead (with the info block), footer; in each, its known
+/// names and then its structural names; the first with a result wins. One exception (reviews B2 and B4 of #209): the
+/// return-address line's structural name yields to a known name in the letterhead that is **near-equal** to it
+/// (`NameSimilarity`), so a misread 7 pt return line links the known sender its letterhead names correctly, while a
+/// known third party beside a correctly read return line (`Gläubiger: Stadtwerke …`) never wins. The exception needs
+/// the known name in the letterhead (never a record the page does not name), exactly one such name (two give the
+/// structural name), and a return-line name that the letterhead does not print itself (then it was read correctly).
+///
+/// 1. A known correspondent whose name occurs in the zone (folded, whole words); a name inside another found name
 ///    yields to the longer; two distinct names give **none for the document**;
 /// 2. else a structural name: the return-address line's first segment, unless it is a street, a post box or holds
 ///    a postcode, or the next segment is only a postcode (a town: `Springfield, IL 62701`, review B2 of #204); in the
@@ -129,6 +136,12 @@ public enum SenderDetector {
         zones.append(Zone(kind: .letterhead, lines: letterhead.sorted { $0.box.minY < $1.box.minY }))
         zones.append(Zone(kind: .footer, lines: page.footerLines()))
 
+        // The order: each zone's known names, then its structural names; the zones return-address line, letterhead
+        // (with the info block), footer. One exception (reviews B2, B4 of #209): the return-address line's structural
+        // name yields to a known name in the letterhead that is near-equal to it (`NameSimilarity`), the case of a
+        // misread 7 pt line (`Finanzamt Musterstact` under a letterhead `Finanzamt Musterstadt`). A known third party
+        // named beside a correctly read return line (`Gläubiger: Stadtwerke …`) is not near-equal and never wins.
+        let letterheadText = zones.first { $0.kind == .letterhead }?.lines.map(\.folded).joined(separator: "\n") ?? ""
         for zone in zones {
             let text = zone.lines.map(\.folded).joined(separator: "\n")
             var found = candidates.filter { Folded.containsBounded($0.folded, in: text) }
@@ -140,6 +153,19 @@ public enum SenderDetector {
                 return .existing(id: first.record.id, name: first.record.name)
             }
             for name in zone.structuralNames() where isAcceptable(name, recipientText: recipientText) {
+                // The exception never applies to a name the letterhead itself prints: it was read correctly
+                // (review B N6 of #209, `Elektro Meier` beside a known `Elektro Meyer`).
+                if zone.kind == .returnAddress,
+                    !Folded.containsBounded(SuggestionRules.fold(name), in: letterheadText)
+                {
+                    let near = candidates.filter {
+                        NameSimilarity.isNearEqual($0.record.name, name)
+                            && Folded.containsBounded($0.folded, in: letterheadText)
+                    }
+                    if let first = near.first, near.allSatisfy({ $0.folded == first.folded }) {
+                        return .existing(id: first.record.id, name: first.record.name)
+                    }
+                }
                 return .name(name)
             }
         }

@@ -162,6 +162,20 @@ public enum SyntheticLetters {
         L("IBAN DE12 3456 7890 1234 5678 90", x: 148.2, top: 282.2, size: 7),
     ]
 
+    /// A collection agency's letter (review B4 of #209): its letterhead and a correctly read return-address line,
+    /// the owner's recipient block, and `extra`, which names the creditor, known. The sender is the agency.
+    static func inkasso(_ id: String, _ summary: String, _ extra: L) -> SyntheticLetter {
+        letter(
+            id, summary, recipient: owner, known: ["Stadtwerke Musterstadt GmbH"],
+            sender: .structural("Inkasso Beispiel GmbH"), date: november13,
+            [
+                L("Inkasso Beispiel GmbH", x: 25, top: 10, size: 16),
+                L("Inkasso Beispiel GmbH · Postfach 1 23 · 12345 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 52, size: 9), extra,
+                L("Forderung aus Energielieferung", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody)
+    }
+
     /// A shop's letterhead and footer around the one-line addresses of S3a–S3c.
     static func shop(_ address: [L]) -> [L] {
         [L("Muster Shop", x: 20, top: 12, size: 14)] + address + [
@@ -230,6 +244,93 @@ public enum SyntheticLetters {
                 L("Datum 13.11.2026", x: 125, top: 45, size: 9),
                 L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
                 L("Öffnungszeiten: Mo–Fr 8–12 Uhr", x: 25, top: 280, size: 7),
+            ] + germanRecipient + germanBody),
+        letter(
+            "finanzamt-known-misread-return-line",
+            "review B2 of #209: the authority known, its return-address line misread by OCR (`Musterstact`); the "
+                + "known name in the letterhead beats the return line's structural name",
+            recipient: owner, known: ["Finanzamt Musterstadt"], sender: .known("Finanzamt Musterstadt"),
+            date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstact · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11),
+                L("Steuernummer: 123/456/78901", x: 125, top: 40, size: 9),
+                L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        inkasso(
+            "inkasso-creditor-info-block", "review B4 of #209: `Gläubiger: <known creditor>` in the info block",
+            L("Gläubiger: Stadtwerke Musterstadt GmbH", x: 125, top: 40, size: 9)),
+        inkasso(
+            "inkasso-on-behalf-info-block", "review B4 of #209: `im Auftrag der <known creditor>` in the info block",
+            L("im Auftrag der Stadtwerke Musterstadt GmbH", x: 125, top: 45, size: 9)),
+        inkasso(
+            "inkasso-partner-letterhead",
+            "review B4 of #209: `Ihr Inkassopartner der <known creditor>` in the letterhead",
+            L("Ihr Inkassopartner der Stadtwerke Musterstadt GmbH", x: 25, top: 20, size: 9)),
+        letter(
+            "footer-known-parent-return-line",
+            "review N4 of #209: a correct return-address line, and a known parent company in a footer column without "
+                + "a bank or register cue: the return line wins",
+            recipient: owner, known: ["Muster Holding AG"], sender: .structural("Stadtwerke Musterstadt GmbH"),
+            date: november13,
+            [
+                L("Stadtwerke Musterstadt", x: 125, top: 12, size: 16),
+                L("Stadtwerke Musterstadt GmbH · Postfach 12 34 · 80287 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum: 13.11.2026", x: 125, top: 45, size: 9),
+                L("Jahresabrechnung Strom 2026", x: 25, top: 95, size: 12),
+                L("Ein Unternehmen der Muster Holding AG", x: 20, top: 280, size: 7),
+            ] + germanRecipient + germanBody),
+        letter(
+            "near-known-not-on-the-page",
+            "review B6/A DN3 of #209: a correct return line `Stadtwerke Freiberg GmbH`; a near-equal `Stadtwerke "
+                + "Freiburg GmbH` is known but not on the page: the return line's own name",
+            recipient: owner, known: ["Stadtwerke Freiburg GmbH"], sender: .structural("Stadtwerke Freiberg GmbH"),
+            date: november13,
+            [
+                L("SWF Energie", x: 125, top: 12, size: 16),
+                L("Stadtwerke Freiberg GmbH · Postfach 12 34 · 09599 Freiberg", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum: 13.11.2026", x: 125, top: 45, size: 9),
+                L("Jahresabrechnung Strom 2026", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
+            "two-near-known-in-the-letterhead",
+            "review B6 of #209: a misread return line `Finanzamt Musterstact`, and two known names near-equal to it in "
+                + "the letterhead: ambiguous, so the return line's name, no link",
+            recipient: owner, known: ["Finanzamt Musterstadt", "Finanzamt Musterstedt"],
+            sender: .structural("Finanzamt Musterstact"), date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstact · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Außenstelle Finanzamt Musterstedt", x: 130, top: 55, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
+            "truncated-misread-return-line",
+            "review B7 of #209: the return line read `Finanzamt Musterstad` (a truncated misread, as the iOS simulator "
+                + "reads `Musterstad!`), the letterhead `Finanzamt Musterstadt`, known: the known record",
+            recipient: owner, known: ["Finanzamt Musterstadt"], sender: .known("Finanzamt Musterstadt"),
+            date: november13,
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstad · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 130, top: 45, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+            ] + germanRecipient + germanBody),
+        letter(
+            "correct-return-line-in-the-letterhead",
+            "review B N6 of #209: `Elektro Meier GmbH` in the return line and the letterhead, a known `Elektro Meyer "
+                + "GmbH` in the info block: Meier",
+            recipient: owner, known: ["Elektro Meyer GmbH"], sender: .structural("Elektro Meier GmbH"),
+            date: november13,
+            [
+                L("Elektro Meier GmbH", x: 25, top: 10, size: 16),
+                L("Elektro Meier GmbH · Hauptstraße 1 · 12345 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11), L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Ihr Auftrag bei Elektro Meyer GmbH", x: 130, top: 55, size: 9),
+                L("Rechnung Elektroinstallation", x: 25, top: 95, size: 12),
             ] + germanRecipient + germanBody),
         letter(
             "rechnung-zeitraum", "an invoice with `Rechnungsdatum`, a service period, a due date and a column footer",

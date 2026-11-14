@@ -105,6 +105,7 @@ struct ImportSupport: ViewModifier {
             #if DEBUG
                 .fileDialogDefaultDirectory(UITestImportSynthetic.folder(for: launchStore))
                 .task { await UITestImportSynthetic.runOnce(controller, launchStore: launchStore) }
+                .task { await UITestImportLetter.runOnce(controller, launchStore: launchStore) }
             #endif
     }
 

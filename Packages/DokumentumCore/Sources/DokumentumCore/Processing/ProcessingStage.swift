@@ -15,12 +15,19 @@ public struct ProcessingResult: Equatable, Sendable {
     /// The thumbnail to insert when the document has none (`Thumbnail`): set by the queue, only for a document the
     /// re-queue pass recorded for the backfill (#6, part 4, N3); `nil` otherwise.
     public var thumbnail: Data?
+    /// Where the lines of the first page with text are (#11, part 2; `PageLayoutReader`), for sender detection in
+    /// the result write; `nil` when no page has text, or from a test's stage that gives none.
+    public var firstPageLayout: PageLayout?
 
-    public init(pageCount: Int, text: ExtractedText? = nil, layeredPDF: Data? = nil, thumbnail: Data? = nil) {
+    public init(
+        pageCount: Int, text: ExtractedText? = nil, layeredPDF: Data? = nil, thumbnail: Data? = nil,
+        firstPageLayout: PageLayout? = nil
+    ) {
         self.pageCount = pageCount
         self.text = text
         self.layeredPDF = layeredPDF
         self.thumbnail = thumbnail
+        self.firstPageLayout = firstPageLayout
     }
 }
 
@@ -48,6 +55,9 @@ public protocol ProcessingStage: Sendable {
 /// when every page was a text page, else `.vision`, also when nothing was found. When pages were recognised, the
 /// stage then builds the invisible text layer (`TextLayer`, part 3): a PDF that passes its rules and its guard is
 /// returned as `layeredPDF`; otherwise the stored bytes stay as they are, and the reason is logged.
+///
+/// The **layout of the first page with text** (#11, part 2) comes with the result (`PageLayoutReader`): PDFKit's
+/// lines split at column gaps for a text page, Vision's lines for a recognised one. Only that one page is read.
 ///
 /// Before each page the stage checks for cancellation, after it reports progress (page k of n; during the layer's
 /// redraw and guard, n of n per page). One page image is alive at a time (an autorelease pool per render), and the
@@ -81,19 +91,26 @@ public struct DocumentStage: ProcessingStage {
         var pages: [String] = []
         var recognised = false
         var recognisedLines: [Int: [RecognizedLine]] = [:]
+        var layout: PageLayout?
         for index in 0..<total {
             try Task.checkCancellation()
             guard let page = document.page(at: index) else { throw Failure.unreadablePDF }
             if let text = PageText.embeddedText(of: page) {
                 pages.append(text)
+                // The first page with text only (#11): a 20-page PDF costs what a one-page PDF costs.
+                if layout == nil { layout = PageLayoutReader.layout(ofTextPage: page) }
             } else {
                 // The image goes when the page is recognised: one page image at a time.
                 let image = autoreleasepool { PageText.render(page) }
                 guard let image else { throw Failure.renderFailed }
                 let lines = try await recognizer.recognizeText(in: image)
-                pages.append(lines.map(\.text).joined(separator: "\n"))
+                let text = lines.map(\.text).joined(separator: "\n")
+                pages.append(text)
                 recognisedLines[index] = lines
                 recognised = true
+                if layout == nil, !text.allSatisfy(\.isWhitespace) {
+                    layout = PageLayoutReader.layout(recognized: lines, on: page)
+                }
             }
             progress(index + 1, total)
         }
@@ -117,6 +134,6 @@ public struct DocumentStage: ProcessingStage {
         }
         return ProcessingResult(
             pageCount: total, text: ExtractedText(pages: pages, source: recognised ? .vision : .pdfText),
-            layeredPDF: layered)
+            layeredPDF: layered, firstPageLayout: layout)
     }
 }

@@ -858,8 +858,9 @@ struct ClassificationStepTests {
 
         let row = try store.classified(id)
         #expect(row.title == "Abrechnung")
-        #expect(row.correspondent == nil)
-        #expect(row.documentDate == processingStart)
+        #expect(row.correspondent == nil, "no stash: the document never had a text write on this device (#11)")
+        // Not the invented 1900: the date the text says, which detection fills after the classifier (#11, Q3).
+        #expect(row.documentDate == billDate)
         #expect(try store.correspondents().isEmpty)
     }
 
