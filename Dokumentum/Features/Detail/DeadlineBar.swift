@@ -62,17 +62,35 @@ struct DeadlineBar: View {
         .accessibilityIdentifier(AccessibilityID.detailDeadline(status))
     }
 
+    /// Side by side while both fit at their full width, one under the other otherwise ("Als erledigt markieren" and
+    /// "Bearbeiten …" at larger text sizes on the iPhone: the audit reported "Text clipped" on the second one in a row
+    /// that could not give way, #219 fix round 1).
     @ViewBuilder
     private func buttons(_ document: LibraryDocument) -> some View {
         if model.canEdit {
-            HStack(spacing: 8) {
-                button("Mark as Done", identifier: AccessibilityID.detailDeadlineMarkDone) {
-                    model.edit(.deadlineDone(true), of: document.instanceID)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    markDoneButton(document)
+                    editButton
                 }
-                button("Edit…", identifier: AccessibilityID.detailDeadlineEdit) {
-                    model.isInfoPresented = true
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) {
+                    markDoneButton(document)
+                    editButton
                 }
             }
+        }
+    }
+
+    private func markDoneButton(_ document: LibraryDocument) -> some View {
+        button("Mark as Done", identifier: AccessibilityID.detailDeadlineMarkDone) {
+            model.edit(.deadlineDone(true), of: document.instanceID)
+        }
+    }
+
+    private var editButton: some View {
+        button("Edit…", identifier: AccessibilityID.detailDeadlineEdit) {
+            model.isInfoPresented = true
         }
     }
 
