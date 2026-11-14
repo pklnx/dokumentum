@@ -1,10 +1,11 @@
-import DokumentumCore
 import DokumentumCoreTestSupport
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Testing
+
+@testable import DokumentumCore
 
 /// Full re-indexing (#13, part 1; plan §3 steps 1 and 4, T4, B1): every trigger from a fully indexed state of 250
 /// documents (three batches), and what a failure or a quit in the middle of a full pass leaves: never a document left

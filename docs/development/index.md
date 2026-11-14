@@ -1939,10 +1939,14 @@ synced (T1).
   are read through that copy's own relationships at each push, never cached per text row, so when the kept copy goes,
   the next event pushes the other copy's content (the search indexer's known gap does not apply here).
 - **`SpotlightIndexing`** (Kit) is the index in plain values: `isAvailable`, `lastClientState`, `beginBatch`, `index`,
-  `delete`, `deleteAll`, `endBatch(expected:new:)`, with the header's rules (a batch is committed with its client
-  state; `endBatch` fails with `mismatchedClientState` when `expected` is not the stored state; `deleteAll` resets it to
-  `nil`). **`InMemorySpotlightIndex`** (Kit actor) follows them, records every call and has hooks to fail or hold a
-  call (`Checkpoint.pass()` in the async hook), report "unavailable" and drop everything as the system can.
+  `delete`, `deleteAll`, `endBatch(expected:new:)` and `abandonBatch()`, with the header's rules (a batch is committed
+  with its client state; `endBatch` fails with `mismatchedClientState` when `expected` is not the stored state;
+  `deleteAll` resets it to `nil`; `beginBatch` must not be called again before the open batch has ended, so every
+  successful `beginBatch` is followed by `endBatch` or `abandonBatch()`). **`InMemorySpotlightIndex`** (Kit actor)
+  follows them: a `beginBatch` on an open batch throws `batchAlreadyOpen` and counts in `batchViolations` (the tests
+  assert none), and `abandonBatch()` drops the staged batch. It records every call and has hooks to fail or hold a
+  call (`Checkpoint.pass()` in the async hook), report "unavailable" and drop everything as the system can. How part
+  2's `SystemSpotlightIndex` abandons a batch is checked in M1.
 - **`SpotlightIndexChoice`** (Core, T7, T8): `.inMemory` whenever tests run, whenever any launch argument starts with
   `-UITest` (`-UITestLocalStore` included, which is on disk) and whenever the store is in memory (`-SearchBenchmark`);
   `.system` otherwise. The rule has no `#if DEBUG`. It repeats `NotificationCenterChoice`'s rule in a type of its own.
@@ -1970,13 +1974,15 @@ synced (T1).
      history names; deletes for fingerprints with no live document (gone, trashed, now a copy's). The history is read
      through `StoreSearchHistory.spotlightChanges` (one type with the search's mapping, N1): a `DocumentText` inserted
      or updated in `extractedText` or `document`, a `DocumentThumbnail` inserted or updated in `document`, a
-     `Document` updated in `text` or `thumbnail`. The metadata comes from the light list query; edits, tag renames,
+     `Document` updated in `text` or `thumbnail` (a text row deleted on its own nullifies `Document.text`, recorded as
+     such an update, so the item loses its text). The metadata comes from the light list query; edits, tag renames,
      trash and restore change fingerprints, the processing queue's text write only the history.
   3. **Batches** of up to 100 items or 4 MB of text (`SpotlightBatcher`) and of 500 deletes, read in groups of 25 by
      key. Each is `beginBatch`, `index`/`delete`, `endBatch(expected:new:)`; `expected` is what `lastClientState()`
      returned at the pass's start, then each written batch's new state (`generation/count`), never anything from the
      file. **The state is written only after a batch ended successfully**, with its fingerprints and client state; a
-     failed batch leaves it as it was, and the next event pushes it again. A mismatch makes the next pass full. The
+     failed batch leaves it as it was, and the next event pushes it again. A batch that was begun and is then left (a
+     failed `index` or `delete`, a stop) is abandoned, never left open. A mismatch makes the next pass full. The
      history position moves on only once every change it named is in a written batch.
   4. **Full pass (B1).** The newest history position `T` (before the metadata read), `deleteAll`, then **before batch
      1** a reset state (new generation, no fingerprints, no history position, `pendingFullPass = T`, client state
@@ -1984,13 +1990,13 @@ synced (T1).
      failure or a quit at any point leaves fingerprints that list exactly what Spotlight has: the next pass resumes
      (pushing what has no fingerprint yet) or starts over.
 
-  Turning the setting off bumps an epoch: a running pass stops before its next write (no `endBatch`, no state), and the
-  next pass removes everything. `Log.spotlight` (category `spotlight`) logs each pass's kind, outcome and counts and
+  Turning the setting off bumps an epoch: a running pass stops before its next write (an open batch is abandoned, not
+  ended; no state is written), and the next pass removes everything. `Log.spotlight` (category `spotlight`) logs each pass's kind, outcome and counts and
   failures by code only, never a title, a text or an identifier.
 - **Tests** (every one on `InMemorySpotlightIndex`): Kit `SpotlightPlannerTests` (diff, order, batches, the item's
   attributes, the text cap, the canonical bytes) and `InMemorySpotlightIndexTests`; Core `SpotlightIndexChoiceTests`,
   `SpotlightIndexerTests` (import, cap, each edit, tag rename, text write, thumbnail, trash/restore/Empty Trash, copies,
-  the next launch, failing batches and deletes, mismatch, the setting, unavailable, refresh),
+  the next launch, failing batches and deletes, mismatch, the setting (also off and on while a pass is held inside `index`), a text row deleted on its own, unavailable, refresh),
   `SpotlightIndexerReindexTests` (every trigger from 250 indexed documents; B1: batch 1 fails, a quit after batch 1, a
   failed reset write, `expected` after a system drop), `SpotlightIndexerRemoteTests` (a second container's insert, text,
   thumbnail and trash after the remote change), `SpotlightIndexerSQLTests` (`swift test` only: the metadata read names

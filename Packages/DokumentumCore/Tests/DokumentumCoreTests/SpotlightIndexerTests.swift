@@ -1,10 +1,11 @@
-import DokumentumCore
 import DokumentumCoreTestSupport
 import DokumentumKit
 import DokumentumTestSupport
 import Foundation
 import SwiftData
 import Testing
+
+@testable import DokumentumCore
 
 /// The indexer keeps the in-memory index in step with the store (#13, part 1; plan §3, D1–D3): one test per event of
 /// the plan's table, the copies, launches, failures, the setting and an unavailable index. Every test uses
@@ -298,6 +299,7 @@ struct SpotlightIndexerTests {
         #expect(again.outcome == .done)
         #expect(again.full == nil)
         #expect(Set(await harness.pushed()) == [ids[0], ids[1]])
+        #expect(await harness.index.batchViolations == 0)
         #expect(try #require(await harness.items()[ids[0]]).title == "Umbenannt")
         #expect(try #require(await harness.items()[ids[1]]).textContent == "später erkannt")
     }
@@ -389,8 +391,8 @@ struct SpotlightIndexerTests {
         #expect(harness.setting.isEnabled)
     }
 
-    /// Off while a pass is held inside its `index` call: the pass ends without ending the batch or writing the state,
-    /// then `deleteAll` is called and the state removed.
+    /// Off while a pass is held inside its `index` call: the pass abandons its open batch (no `endBatch`, nothing
+    /// committed) and writes no state, then `deleteAll` is called and the state removed.
     @Test func turningOffWhileAPassIsHeldStopsItWithoutWriting() async throws {
         let held = Checkpoint()
         defer { held.release() }
@@ -420,9 +422,65 @@ struct SpotlightIndexerTests {
         #expect(harness.state.saves == saves, "the held pass wrote nothing")
         let calls = await harness.index.calls
         #expect(!calls.contains { $0.operation == .endBatch })
-        #expect(calls.last == .deleteAll)
+        #expect(
+            calls.suffix(2) == [.abandonBatch, .deleteAll], "the begun batch is abandoned, then everything removed")
+        #expect(await harness.index.batchViolations == 0)
         #expect(await harness.items().isEmpty)
         #expect(harness.state.state == nil)
+    }
+
+    /// The reviewer's probe `r226OffAndOnWhileHeldInIndex` (#226 review, B1): off and on again while a pass is held
+    /// inside `index`, with its batch begun and not ended. The held pass abandons its batch, so the next passes can
+    /// begin theirs (the in-memory index enforces the header's rule), and everything ends up indexed.
+    @Test func offAndOnWhileAPassIsHeldInIndexIndexesEverything() async throws {
+        let held = Checkpoint()
+        defer { held.release() }
+        let armed = Armed()
+        let once = Armed()
+        let harness = try SpotlightHarness(
+            index: InMemorySpotlightIndex(hook: { call in
+                if call.operation == .index, armed.isOn, !once.isOn {
+                    once.turnOn()
+                    await held.pass()
+                }
+            }))
+        try SpotlightStore.insert(count: 2, in: harness.container)
+        let passes = PassSignal()
+        let indexer = harness.indexer(hooks: passes.hooks)
+        defer { indexer.stop() }
+        indexer.start()
+        await passes.ended.wait()
+        armed.turnOn()
+        let ids = try SpotlightStore.insert(count: 1, in: harness.container)
+        await held.reached()
+        await indexer.setEnabled(false)
+        await indexer.setEnabled(true)
+        held.release()
+        await passes.ended.wait(for: 3)
+        let last = await indexer.reports.last
+        #expect(last?.outcome == .done)
+        #expect(await harness.items().count == 3)
+        #expect(await harness.items()[ids[0]] != nil)
+        #expect(await harness.index.batchViolations == 0)
+    }
+
+    /// The reviewer's probe `r226TextRowDeletedAlone` (#226 review, N1): a `DocumentText` deleted on its own nullifies
+    /// `Document.text`, which the history records as a `Document` update in `text`; the item is pushed again with no
+    /// text.
+    @Test func aTextRowDeletedAloneEmptiesTheItemsText() async throws {
+        let harness = try SpotlightHarness()
+        let id = try SpotlightStore.insert(.init(title: "A", text: "alter Inhalt"), in: harness.container)
+        let indexer = harness.indexer()
+        await indexer.runPass()
+        #expect(try #require(await harness.items()[id]).textContent == "alter Inhalt")
+        try SpotlightStore.edit(id, in: harness.container) { document, context in
+            if let text = document.text { context.delete(text) }
+        }
+        await harness.index.clearCalls()
+        let report = await indexer.runPass()
+        #expect(report.outcome == .done)
+        #expect(await harness.pushed() == [id], "the deleted text row named its document")
+        #expect(try #require(await harness.items()[id]).textContent == "")
     }
 
     /// A launch with the setting off after a failed delete deletes again.

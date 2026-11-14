@@ -3,15 +3,17 @@ import Foundation
 /// A Spotlight index in memory (#13, plan §5): what every test, every `-UITest*` launch and every in-memory store uses,
 /// so none of them reaches the system's index. It follows `SpotlightIndexing`'s rules and records every call.
 ///
-/// A batch's `index` and `delete` are staged and applied together with the client state at `endBatch`; a mismatch, a
-/// new `beginBatch` or `deleteAll` drops the staged batch. Outside a batch, `index` and `delete` apply at once.
+/// A batch's `index` and `delete` are staged and applied together with the client state at `endBatch`; a mismatch or
+/// `abandonBatch()` drops the staged batch. Outside a batch, `index` and `delete` apply at once. **`beginBatch()` while a
+/// batch is open is the header's undefined case**: it is counted in `batchViolations` and throws
+/// `SpotlightIndexError.batchAlreadyOpen`, and the open batch stays as it is, so a caller that leaves a batch open fails.
 ///
 /// **Hooks** for tests: `hook` runs before every call except `isAvailable()`, after the call is recorded. It can hold
 /// the call (`await checkpoint.pass()`) or fail it (`throw`). `dropAll()` drops everything as the system can, and
 /// `setAvailable(false)` reports a device without indexing.
 public actor InMemorySpotlightIndex: SpotlightIndexing {
     public enum Operation: String, Sendable, Hashable {
-        case lastClientState, beginBatch, index, delete, deleteAll, endBatch
+        case lastClientState, beginBatch, index, delete, deleteAll, endBatch, abandonBatch
     }
 
     /// One recorded call.
@@ -22,6 +24,7 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
         case delete([String])
         case deleteAll
         case endBatch(expected: Data?, new: Data)
+        case abandonBatch
 
         public var operation: Operation {
             switch self {
@@ -31,6 +34,7 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
             case .delete: .delete
             case .deleteAll: .deleteAll
             case .endBatch: .endBatch
+            case .abandonBatch: .abandonBatch
             }
         }
     }
@@ -48,6 +52,8 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
     public private(set) var items: [String: SpotlightItem] = [:]
     public private(set) var clientState: Data?
     public private(set) var calls: [Call] = []
+    /// How often `beginBatch()` was called while a batch was open (never, for a correct caller).
+    public private(set) var batchViolations = 0
     private var available: Bool
     private var hook: Hook?
     private var batch: Batch?
@@ -67,7 +73,6 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
     public func dropAll() {
         items = [:]
         clientState = nil
-        batch = nil
     }
 
     /// Forgets the recorded calls.
@@ -103,6 +108,10 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
 
     public func beginBatch() async throws {
         try await record(.beginBatch)
+        guard batch == nil else {
+            batchViolations += 1
+            throw SpotlightIndexError.batchAlreadyOpen
+        }
         batch = Batch()
     }
 
@@ -136,18 +145,25 @@ public actor InMemorySpotlightIndex: SpotlightIndexing {
         try await record(.deleteAll)
         items = [:]
         clientState = nil
-        batch = nil
     }
 
     public func endBatch(expected: Data?, new: Data) async throws {
+        // The batch ends with this call, also when it fails.
+        let staged = batch
+        batch = nil
         try await record(.endBatch(expected: expected, new: new))
-        guard let batch else { throw SpotlightIndexError.noBatch }
-        self.batch = nil
+        guard let batch = staged else { throw SpotlightIndexError.noBatch }
         guard expected == clientState else { throw SpotlightIndexError.mismatchedClientState }
         for (identifier, isDelete) in batch.order {
             items[identifier] = isDelete ? nil : batch.upserts[identifier]
         }
         clientState = new
+    }
+
+    public func abandonBatch() async {
+        batch = nil
+        calls.append(.abandonBatch)
+        if let hook { try? await hook(.abandonBatch) }
     }
 
     private func record(_ call: Call) async throws {

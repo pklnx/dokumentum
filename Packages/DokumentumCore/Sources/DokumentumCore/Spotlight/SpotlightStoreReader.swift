@@ -26,7 +26,11 @@ enum SpotlightStoreReader {
             documents: summaries, metadata: try StoreLibrarySource.metadata(in: context))
         let tree = TagTree(snapshot.tags)
         var kept: [UUID: (row: LibraryDocument, modifiedAt: Date)] = [:]
-        // `LibraryMapping.snapshot` maps the summaries one to one, in order.
+        // `LibraryMapping.snapshot` maps the summaries one to one, in order. The oldest copy is chosen before the trash
+        // filter below (#222's review B, N7). Copies with equal `createdAt` keep the first in this order (`.all`, then
+        // `.trash`, each in list order), while `contents(of:)` keeps the first `RowRecords.fetchDocuments` returns, so for
+        // such a tie the metadata and the text could come from different copies: the tie rule `SearchStoreReader.metadata`
+        // has too (#226 review, N4). Copies exist only until step 16's dedupe.
         for (row, summary) in zip(snapshot.documents, summaries) {
             if let existing = kept[row.instanceID], existing.row.createdAt <= row.createdAt { continue }
             kept[row.instanceID] = (row, summary.modifiedAt)

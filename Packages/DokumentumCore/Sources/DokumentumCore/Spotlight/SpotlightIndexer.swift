@@ -21,8 +21,9 @@ import Synchronization
 ///    `endBatch(expected:new:)`. `expected` is what `lastClientState()` returned at the pass's start (`nil` after a
 ///    `deleteAll`), then each written batch's new state, never anything from the file (B1). **The state is written only
 ///    after a batch ended successfully**, with that batch's fingerprints and client state; a failed batch leaves it as
-///    it was, so the next event pushes it again. A mismatch makes the next pass a full one. The history position moves
-///    on only once every change it named is in a written batch.
+///    it was, so the next event pushes it again. A batch that is begun and then left (a failed `index` or `delete`, a
+///    stop) is abandoned (`abandonBatch()`), never left open for the next `beginBatch`. A mismatch makes the next pass
+///    a full one. The history position moves on only once every change it named is in a written batch.
 /// 4. **Full pass (B1):** the newest history position `T` before the metadata read; `deleteAll`; **before batch 1** a
 ///    reset state (a new generation, no fingerprints, no history, `pendingFullPass = T`, client state `nil`); every live
 ///    document in batches; then `history = T` and an incremental pass from `T`. A failure or a quit at any point leaves
@@ -210,9 +211,11 @@ public actor SpotlightIndexer {
 
     // MARK: A pass
 
-    /// One pass, as every event runs it. Tests call it directly when they need no event.
+    /// One pass, as every event runs it. Tests call it directly (`@testable`) when they need no event.
+    /// Internal (#226 review, N2): only `start`'s loop runs passes in the app, one at a time, so two passes never
+    /// interleave at their `await`s with stale copies of the state.
     @discardableResult
-    public func runPass() async -> PassReport {
+    func runPass() async -> PassReport {
         var report = PassReport()
         await pass(epoch: epoch, report: &report)
         reports.append(report)
@@ -441,15 +444,33 @@ public actor SpotlightIndexer {
     ) async -> Bool {
         guard !isStopped(epoch, report: &report) else { return false }
         let new = state.nextClientState
+        let what = deletes.isEmpty ? "push a batch" : "delete a batch"
         do {
             try await index.beginBatch()
+        } catch {
+            fail(what, error, &report)
+            return false
+        }
+        // From here on the batch is open: every way out before `endBatch` abandons it, so the next `beginBatch` never
+        // meets an open batch (the header's rule) and no later `endBatch` can commit what this one staged.
+        do {
             if !deletes.isEmpty { try await index.delete(identifiers: deletes.map(\.uuidString)) }
             if !items.isEmpty { try await index.index(items) }
-            guard !isStopped(epoch, report: &report) else { return false }
+        } catch {
+            await index.abandonBatch()
+            fail(what, error, &report)
+            return false
+        }
+        guard !isStopped(epoch, report: &report) else {
+            await index.abandonBatch()
+            return false
+        }
+        do {
             try await index.endBatch(expected: expected, new: new)
         } catch {
+            // A failed `endBatch` has ended the batch.
             if error as? SpotlightIndexError == .mismatchedClientState { fullRequested = true }
-            fail(deletes.isEmpty ? "push a batch" : "delete a batch", error, &report)
+            fail(what, error, &report)
             return false
         }
         expected = new

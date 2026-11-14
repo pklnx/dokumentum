@@ -41,6 +41,33 @@ struct InMemorySpotlightIndexTests {
         #expect(await index.clientState == nil)
     }
 
+    /// The header: `beginBatch` must not be called again before `endBatch` has returned. A second `beginBatch` on an
+    /// open batch throws and is counted, and the open batch is not dropped; `abandonBatch()` drops it, and an `endBatch`
+    /// that fails has ended it too.
+    @Test func aBatchIsEndedOrAbandonedBeforeTheNextBegins() async throws {
+        let index = InMemorySpotlightIndex()
+        try await index.beginBatch()
+        try await index.index([Self.item("a")])
+        await #expect(throws: SpotlightIndexError.batchAlreadyOpen) { try await index.beginBatch() }
+        #expect(await index.batchViolations == 1)
+        try await index.endBatch(expected: nil, new: Data("1".utf8))
+        #expect(await index.items["a"] != nil, "the open batch was kept, not dropped")
+
+        try await index.beginBatch()
+        try await index.index([Self.item("b")])
+        await index.abandonBatch()
+        #expect(await index.items["b"] == nil)
+        #expect(await index.clientState == Data("1".utf8))
+        try await index.beginBatch()
+        await #expect(throws: SpotlightIndexError.mismatchedClientState) {
+            try await index.endBatch(expected: nil, new: Data("2".utf8))
+        }
+        try await index.beginBatch()
+        try await index.endBatch(expected: Data("1".utf8), new: Data("2".utf8))
+        #expect(await index.batchViolations == 1)
+        #expect(await index.calls.contains(.abandonBatch))
+    }
+
     @Test func deleteAllRemovesEverythingAndResetsTheClientState() async throws {
         let index = InMemorySpotlightIndex()
         try await index.beginBatch()
