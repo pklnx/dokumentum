@@ -271,7 +271,8 @@ struct SpotlightIndexerTests {
     }
 
     /// A failing `beginBatch`, `index` or `endBatch` leaves the state as it was (fingerprints, client state and
-    /// history position), and the next event pushes the same item.
+    /// history position), and the next event pushes the same items: an edit (a new fingerprint) and a text written by
+    /// the processing queue (only the history names it).
     @Test(arguments: [InMemorySpotlightIndex.Operation.beginBatch, .index, .endBatch])
     func aFailingBatchLeavesTheStateAndIsPushedAgain(operation: InMemorySpotlightIndex.Operation) async throws {
         let failing = HookSwitch()
@@ -281,12 +282,14 @@ struct SpotlightIndexerTests {
         await indexer.runPass()
         let before = try #require(harness.state.state)
 
+        try SpotlightStore.edit(ids[0], in: harness.container) { document, _ in document.title = "Umbenannt" }
         try SpotlightStore.setText("später erkannt", of: ids[1], in: harness.container)
         failing.fail([operation])
         let failed = await indexer.runPass()
         #expect(failed.outcome == .failed)
         #expect(failing.failed == 1)
         #expect(harness.state.state == before)
+        #expect(try #require(await harness.items()[ids[0]]).title == "Akte 0")
         #expect(try #require(await harness.items()[ids[1]]).textContent == "Inhalt 1")
 
         failing.clear()
@@ -294,7 +297,8 @@ struct SpotlightIndexerTests {
         let again = await indexer.runPass()
         #expect(again.outcome == .done)
         #expect(again.full == nil)
-        #expect(await harness.pushed() == [ids[1]])
+        #expect(Set(await harness.pushed()) == [ids[0], ids[1]])
+        #expect(try #require(await harness.items()[ids[0]]).title == "Umbenannt")
         #expect(try #require(await harness.items()[ids[1]]).textContent == "später erkannt")
     }
 

@@ -1,8 +1,8 @@
 import Foundation
 
 /// A Spotlight index as the engine uses it (#13, plan §5), in plain values: `InMemorySpotlightIndex` for every test,
-/// every `-UITest*` launch and every in-memory store, part 2's `SystemSpotlightIndex` (the only `import CoreSpotlight`)
-/// otherwise (`SpotlightIndexChoice`).
+/// every `-UITest*` launch and every in-memory store, and otherwise part 2's `SystemSpotlightIndex`, the only file that
+/// will import CoreSpotlight (`SpotlightIndexChoice`).
 ///
 /// The rules follow `CSSearchableIndex`'s header:
 /// - `index` and `delete` between `beginBatch()` and `endBatch(expected:new:)` are one batch, committed with its client
