@@ -349,8 +349,10 @@ setting once per process, at its first store: `SQLLog.enable()` comes before any
 helpers call it). So every test's store logs its SQL, and late in a run the process's log holds about 130 000
 entries. A read of the log returns all of them, whatever start position, date or thread it asks for, and takes
 5–6 s; a `SQLLog.Recording` therefore runs in an `os_activity` of its own and reads only that activity's entries,
-which the log filters itself (about 1 s a read). It still keeps only its own thread's statements (#221,
-`SQLLogTests`).
+which the log filters itself (about 1 s a read). It still keeps only its own thread's statements: work it
+dispatches to a queue carries the activity, and the thread check keeps that out. One recording per thread at a
+time: a second `Recording()` while one runs on the same thread throws, and so does the first one's `statements()`
+(#221, `SQLLogTests`).
 
 **The trash.** `DocumentTrash` (DokumentumCore) is the only code outside DEBUG tools that deletes a `Document`
 (#3, part 4). Moving to the trash and restoring set or clear `deletedAt` and `touch()` the document; nothing else

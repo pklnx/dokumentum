@@ -47,7 +47,15 @@ public enum SQLLog {
     /// strict-pool step, 40 reads held the pool for 231 s of a 242 s test run (measured on this Mac). So the
     /// recording runs in an `os_activity` of its own, and the read asks the log for that activity's entries only:
     /// the log filters by activity itself, and a read takes about 1 s whatever the log's size. The activity
-    /// only narrows the read; the recording still keeps only the statements of its own thread, in order.
+    /// only narrows the read; the recording still keeps only the statements of its own thread, in order: work it
+    /// dispatches to another queue carries the activity too, and the thread check keeps that out.
+    ///
+    /// **One recording per thread at a time.** An inner recording's entries carry its own activity, so an outer one
+    /// on the same thread would miss them without notice. `init()` therefore throws `nested` while another
+    /// recording of its thread has not ended, and ends that one, whose `statements()` then throws `nested` too.
+    /// A recording that is never ended (its test threw before `statements()`) leaves its activity scope on the
+    /// thread until the next recording there: harmless, since only a recording reads that activity, but that next
+    /// recording throws `nested` once, and the thread is clean again after it.
     public struct Recording {
         private let store: OSLogStore
         private let marker: String
@@ -59,6 +67,10 @@ public enum SQLLog {
             enable()
             store = try OSLogStore(scope: .currentProcessIdentifier)
             thread = SQLLog.currentThread()
+            if let active = RecordingActivity.active {
+                active.end(superseded: true)
+                throw RecordingError.nested
+            }
             activity = RecordingActivity()
             // Logged inside the activity: a read that does not find it cannot read the log at all.
             let marker = "SQLLog recording \(UUID().uuidString)"
@@ -70,6 +82,7 @@ public enum SQLLog {
         /// `CoreData: sql: ` prefix, in order. Call it once, on the thread that started the recording.
         public func statements() throws -> [String] {
             guard SQLLog.currentThread() == thread else { throw RecordingError.otherThread }
+            if activity.isSuperseded { throw RecordingError.nested }
             activity.end()
             var started = false
             var statements: [String] = []
@@ -97,6 +110,7 @@ public enum SQLLog {
         // Only touched on the recording's thread (`Recording.statements()` checks it).
         private var scope = os_activity_scope_state_s()
         private var ended = false
+        private(set) var isSuperseded = false
         private let activity: os_activity_t
         let identifier: os_activity_id_t
 
@@ -116,24 +130,36 @@ public enum SQLLog {
             var parent: os_activity_id_t = 0
             identifier = os_activity_get_identifier(activity, &parent)
             os_activity_scope_enter(activity, &scope)
+            Self.active = self
         }
 
-        /// Leaves the activity; later calls do nothing.
-        func end() {
+        /// The recording of the current thread that has not ended, if any.
+        static var active: RecordingActivity? {
+            get { Thread.current.threadDictionary[activeKey] as? RecordingActivity }
+            set { Thread.current.threadDictionary[activeKey] = newValue }
+        }
+        private static let activeKey = "SQLLog.RecordingActivity.active"
+
+        /// Leaves the activity; later calls do nothing. `superseded`: a newer recording on the thread ended it.
+        func end(superseded: Bool = false) {
             guard !ended else { return }
             ended = true
+            isSuperseded = superseded
             os_activity_scope_leave(&scope)
+            if Self.active === self { Self.active = nil }
         }
     }
 
     /// The activity's name: a static string, since the activity keeps the pointer.
     static let activityName: StaticString = "SQLLog recording"
 
-    enum RecordingError: Error {
+    public enum RecordingError: Error {
         /// The recording's own start entry is not in the log: the log cannot be read in this process.
         case markerNotFound
         /// `statements()` was called on another thread than the one that started the recording.
         case otherThread
+        /// Two recordings overlapped on one thread (`Recording`, "One recording per thread at a time").
+        case nested
     }
 
     /// The marker's logger. Test support only: the app's loggers are in `Log` (`check-logging.py` checks app code).
