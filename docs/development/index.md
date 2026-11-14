@@ -238,14 +238,18 @@ certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>`
 
 **The strict-pool step (#174).** The rule above is checked, not only written down: the `app-macos` job runs the
 `DokumentumCore` package tests a second time, after the Default plan, with `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`
-(`swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`). In that mode the
+(`swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)' --skip 'VisionRecognitionTests' --skip 'DetectionLetterTests/aScannedLetter'`). In that mode the
 cooperative pool has one thread, so a test that blocks a pool thread hangs at once on any machine, instead of
 freezing at random on a small runner. The step has its own time bound of 10 minutes (it takes about 4 with the
 build), so a hang fails the job in 10 minutes and not after the job's 30. The two tests of `FoundationModelsRealModelTests` that call the model
-are skipped there (its model-free mapping test still runs): they fail fast in this debug mode by design (the framework's `.noRoom`). The step is part of the
+are skipped there (its model-free mapping test still runs): they fail fast in this debug mode by design (the framework's `.noRoom`).
+The real-Vision tests (`VisionRecognitionTests`, `DetectionLetterTests/aScannedLetter…`) are skipped there too (#220):
+on the runner, Vision's model compilation held the one thread for 272–372 s before the test skipped itself
+(`e5rtError`), which brought the step to its 10-minute bound. They run in the Default plan. The step is part of the
 required job `app-macos`, so the check names are unchanged, and it runs only when the Default plan runs (not for
 docs-only pull requests). To try it locally: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --package-path
-Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`.
+Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'
+--skip 'VisionRecognitionTests' --skip 'DetectionLetterTests/aScannedLetter'`.
 Counter-proof: a throwaway test that detaches a task and
 then blocks its own pool thread on a semaphore the task signals passes in the Default plan and hangs the step (see
 the pull request that added it).
@@ -1300,9 +1304,12 @@ nothing, a gone or trashed document is refused, `touch()`, one save, rolled back
   is the text's suggestion, `LibraryModel.removeDeadline`).
 - `.dismissDeadlineSuggestion(day)` (part 2b): writes only `deadlineDismissedDay`, by the rule below; "Dismiss" on the
   suggestion.
-- **`deadlineDismissedDay` is only ever raised** (re-review N3): every write stores `max(stored, new)`
-  (`DocumentEditor.raises`); a stored value that does not read as a day counts as none, and an equal day keeps the
-  stored string as it is. A dismissal of a day at or before the stored one writes nothing and does not save.
+- **`deadlineDismissedDay` is only ever raised by this device's writes** (re-review N3): every write stores
+  `max(stored, new)` (`DocumentEditor.raises`); a stored value that does not read as a day counts as none, and an equal
+  day keeps the stored string as it is. A dismissal of a day at or before the stored one writes nothing and does not
+  save. **The limit (#220, review N5):** a CloudKit import does not go through the editor. Two devices that dismiss
+  different days while apart may end with the earlier one (the last writer wins per field), so the later candidate is
+  offered once more; one more Dismiss settles it. A merge rule for the import would be a follow-up.
 
 `DocumentEditorDeadlineTests` (Core) pins these, with SQL proof under `swift test` that a label edit and a done toggle
 update only their own column, and that a label edit with a stale view of the day writes only the label. The mapping (`DocumentListQuery` → `DocumentSummary` → `LibraryMapping` →
@@ -1321,7 +1328,11 @@ user > rules > Apple Intelligence > detection is untouched, and **Apple Intellig
   `cancel by`), expiry (`gültig bis`, `Ablauf`, `Ablaufdatum`, `expires`, `expiry date`, `expiration date`, `valid
   until`) and deadline (`Frist`, `…frist`, `spätestens`, `bis spätestens`, `Abgabe bis`, `einzureichen bis`,
   `Rückmeldung bis`, `deadline`, `respond by`, `reply by`, `no later than`; a bare `bis` only without another cue). A
-  specific kind wins over `deadline`, and among specific ones the cue closest to the date. Never either date of a
+  specific kind wins over `deadline`, and among specific ones the cue closest to the date. Fix round 1 of #220: a bare
+  `bis` counts only right before the date (N2); a date whose own text names it as another date (an issue-date label such
+  as `Rechnungsdatum` or `ausgestellt am`, or an issue-date cue that is no due cue, such as `Vertragsbeginn:` or `Termin
+  am`) is never due, whatever cue stands earlier on its line (N1); `Due to …` is no cue, and the previous-line cue
+  applies only to a date alone on its line, not to a place line (N3). Never either date of a
   range (`gültig vom 01.01. bis 31.12.2026` is a pinned miss), never a date inside a number or code, never a date
   without a cue (`Rechnungsdatum`, `Datum`, a birth date). The window is `createdAt` − 60 to + 1,095 days
   (`dueWindowBefore`, `dueWindowAfter`); a two-digit year is `20yy` unless that is after the window's last year, then
@@ -1334,7 +1345,8 @@ user > rules > Apple Intelligence > detection is untouched, and **Apple Intellig
 - **Where it runs: in the detail, on demand** (T7), never in the text write. `LibrarySource.loadDeadlineSuggestion`:
   `StoreLibrarySource` reads the one document and its `DocumentText` by key in a context of its own, off the main actor
   (`DocumentTextLoader`, Core), for a processed (`done`) document outside the trash; `FixtureLibrarySource` uses the
-  sample's text. Nothing is stored, so both devices compute the same suggestion from the synced text, and documents
+  sample's text. A read whose task was cancelled (the detail started a newer one) stops after the fetch and does not run
+  the detector, so a burst of library reads does not stack detector runs (#220, review N6). Nothing is stored, so both devices compute the same suggestion from the synced text, and documents
   processed before this build get one too. The detail reads it again with each read of the library
   (`LibraryModel.deadlineSuggestionKey`: the document, the library's `revision`, the day).
 - **The offer** (`DueDateDetector.offers`, `LibraryModel.deadlineSuggestion`): only while the document has no deadline

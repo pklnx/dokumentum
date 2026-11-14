@@ -96,6 +96,55 @@ struct DueDateDetectorTests {
         #expect(detect("Zahlbar bis 27.11.2026") == [due("2026-11-27", .payment)], "the specific cue wins")
     }
 
+    // MARK: Fix round 1 of #220 (review N1–N3, with the reviewer's probe lines)
+
+    /// N1: a date its own label names as something else is never due, whatever cue stands earlier on its line.
+    @Test(arguments: [
+        "Zahlbar bis 14 Tage nach Rechnungsdatum 14.11.2026",
+        "Zahlbar sofort, spätestens 7 Tage nach Rechnungsdatum 14.11.2026",
+        "Payment due upon receipt. Invoice date: November 20, 2026",
+        "Die Vollmacht gilt bis auf Weiteres, ausgestellt am 20.11.2026",
+        "Kündigungsfrist: 3 Monate zum Monatsende. Vertragsbeginn: 01.12.2026",
+        "Zahlbar bis spätestens nach dem Termin am 20.11.2026",
+    ])
+    func aDateItsOwnLabelNamesIsNeverDue(text: String) {
+        #expect(detect(text).isEmpty, "\(text)")
+    }
+
+    /// N1 keeps the due dates beside such a label.
+    @Test func aDueDateBesideAnotherLabelStillCounts() {
+        #expect(detect("Rechnungsdatum: 14.11.2026  Fällig am: 28.11.2026") == [due("2026-11-28", .payment)])
+        #expect(
+            detect("Ihr Kind, geboren am 01.11.2026, ist bis 30.11.2026 anzumelden.")
+                == [due("2026-11-30", .deadline)])
+    }
+
+    /// N2: a bare `bis` counts only right before the date.
+    @Test(arguments: [
+        "Bis auf Weiteres gelten die Preise ab 01.01.2027.", "Geöffnet von 8 bis 16 Uhr, Abholung 20.11.2026",
+        "Sprechzeiten Montag bis Freitag, Ihr Termin am 20.11.2026",
+    ])
+    func aBareBisElsewhereOnTheLineIsNoCue(text: String) {
+        #expect(detect(text).isEmpty, "\(text)")
+    }
+
+    @Test func aBareBisRightBeforeTheDateCounts() {
+        #expect(
+            detect("Zahlbar bis 28.11.2026 bzw. bis 05.12.2026 mit Mahngebühr")
+                == [due("2026-11-28", .payment), due("2026-12-05", .deadline)])
+        #expect(detect("Betrag bis zum 27.11.2026") == [due("2026-11-27", .deadline)])
+    }
+
+    /// N3: `Due to …` is no cue, and a place line under a cue line is no due date (as for the issue date).
+    @Test func dueToAndAPlaceLineAreNoCues() {
+        #expect(detect("Due to the move we write on November 28, 2026.").isEmpty)
+        #expect(detect("Due to maintenance, our office is closed until November 28, 2026.").isEmpty)
+        #expect(detect("Sie erreichen uns Montag bis\nFreitag. Hamburg, 20.11.2026").isEmpty)
+        #expect(detect("Bitte zahlen Sie bis\nHamburg, 20.11.2026").isEmpty)
+        #expect(detect("Bitte zahlen Sie bis\n20.11.2026") == [due("2026-11-20", .deadline)])
+        #expect(detect("Payment due\nNovember 28, 2026") == [due("2026-11-28", .payment)])
+    }
+
     // MARK: Never due
 
     @Test(arguments: [

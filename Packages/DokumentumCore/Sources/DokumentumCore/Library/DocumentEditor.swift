@@ -17,9 +17,11 @@ import SwiftData
 /// - **Deadlines** (#12, part 2a; plan §6): a new day is a new deadline, so it also sets `deadlineSetAt` and clears
 ///   `deadlineDoneAt` in the same save; a label edit or a done toggle writes only its own field and never rewrites
 ///   `deadlineDay` (review N8), so a suffix a later build appended to the day survives it. `deadlineDismissedDay` is
-///   only ever raised: every write stores `max(stored, new)` (re-review N3), so two devices dismissing at once, or a
-///   removal that dismisses, never bring back a day that was dismissed; `.dismissDeadlineSuggestion` (part 2b) writes
-///   it by the same rule.
+///   only ever raised by this device's own writes: every write stores `max(stored, new)` (re-review N3), so a later
+///   local dismissal of an earlier day, or a removal that dismisses, never lowers it; `.dismissDeadlineSuggestion` (part
+///   2b) writes it by the same rule. A CloudKit import does not go through this rule: two devices that dismiss different
+///   days while apart may end with the earlier one (the last writer wins), which costs at most one more Dismiss (#220,
+///   review N5).
 /// - **A failed save is rolled back.** Otherwise the change would stay pending in the main context, the library
 ///   would show it as saved, and the next edit's save (or an autosave) would write it after all.
 @MainActor

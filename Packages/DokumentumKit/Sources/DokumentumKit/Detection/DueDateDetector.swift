@@ -36,10 +36,18 @@ public struct DueDateCandidate: Hashable, Sendable {
 /// **Which dates count:**
 /// - a date with a cue (`germanCues`, `englishCues`, a word ending in `germanSuffixCues`, all for every document)
 ///   between the previous date of its line (or the line's start) and itself;
-/// - a date that ends its line when the previous line ends with a cue (optionally followed by `:` and one preposition:
-///   `Fällig am` / `27.11.2026`, `Zahlbar bis zum` / `27.11.2026`), unless its own line labels it (`Rechnungsdatum`)
-///   or the previous line ends with a date and a range connector (a range split over two lines);
-/// - a bare `bis` / `bis zum` / `bis zur` counts as `deadline` when no other cue is there.
+/// - a date that stands alone at the end of its line (no word before it there: not `Rechnungsdatum 27.11.2026`, not a
+///   place line `Hamburg, 27.11.2026`) when the previous line ends with a cue (optionally followed by `:` and one
+///   preposition: `Fällig am` / `27.11.2026`, `Zahlbar bis zum` / `27.11.2026`), unless the previous line ends with a
+///   date and a range connector (a range split over two lines);
+/// - a bare `bis` / `bis zum` / `bis zur` counts as `deadline` only directly before the date and when no other cue is
+///   there (`Betrag bis 27.11.2026`; not `Montag bis Freitag, … 20.11.2026`, not `bis auf Weiteres … 01.01.2027`; fix
+///   round 1 of #220, N2).
+///
+/// **A date its own label names as something else is never due**, whatever cue stands earlier on its line (fix round 1
+/// of #220, N1): the text right before it ends with an issue-date label (`IssueDateDetector.labels`: `Rechnungsdatum`,
+/// `ausgestellt am`, `Invoice date`) or with an issue-date cue that is no due cue (`Vertragsbeginn:`, `geboren am`,
+/// `Termin am`). So `Zahlbar bis 14 Tage nach Rechnungsdatum 14.11.2026` gives nothing. `Due to` is no cue (N3).
 ///
 /// Never either date of a range (`01.10.2026 – 31.10.2026`, `01.10.–31.10.2026`, `vom 01.01. bis 31.12.2026`: a pinned
 /// miss for validity periods), and never a date without a cue (`Rechnungsdatum`, `Datum`, a birth date).
@@ -81,6 +89,8 @@ public enum DueDateDetector {
     public static let germanSuffixCues = ["frist"]
     /// A bare `bis` names a deadline only when no other cue is before the date.
     public static let bareCues = ["bis", "bis zum", "bis zur"]
+    /// Phrases that hold a cue but name no due date: `Due to maintenance, …` (fix round 1 of #220, N3).
+    public static let notCues = ["due to"]
 
     /// One folded cue.
     struct Cue {
@@ -92,6 +102,7 @@ public enum DueDateDetector {
         ((germanCues[kind] ?? []) + (englishCues[kind] ?? [])).map { Cue(text: SuggestionRules.fold($0), kind: kind) }
     }
     static let foldedBareCues = bareCues.map(SuggestionRules.fold)
+    static let foldedNotCues = notCues.map(SuggestionRules.fold)
 
     /// The due dates in a document's text: its first five pages with text are read.
     public static func candidates(
@@ -152,11 +163,12 @@ public enum DueDateDetector {
             for (position, item) in found.enumerated() where item.isComplete {
                 if IssueDateDetector.isRange(found, at: position, in: characters) { continue }
                 let segmentStart = position > 0 ? found[position - 1].end : 0
-                let segment = String(characters[segmentStart..<item.start])
+                let segment = masked(String(characters[segmentStart..<item.start]))
+                if isLabelledAsAnotherDate(segment) { continue }
                 let after = String(characters[item.end...]).trimmingCharacters(in: .whitespaces)
                 let endsLine = after.isEmpty || after == "."
                 var kind = kind(in: segment)
-                if kind == nil, endsLine, !IssueDateDetector.endsWithLabel(segment, strict: true) {
+                if kind == nil, endsLine, !segment.contains(where: \.isLetter) {
                     kind = previousCue
                 }
                 guard let kind, let date = item.date, window.contains(date), let day = DeadlineDay(date) else {
@@ -168,13 +180,13 @@ public enum DueDateDetector {
             let trailingIsConnector =
                 !found.isEmpty
                 && IssueDateDetector.rangeConnectors.contains(trailing.trimmingCharacters(in: .whitespaces))
-            previousCue = trailingIsConnector ? nil : kind(atEndOf: trailing)
+            previousCue = trailingIsConnector ? nil : kind(atEndOf: masked(trailing))
         }
         return result
     }
 
     /// The kind the cues in `segment` (folded) give a date right after it: a specific kind before `deadline`, then the
-    /// cue closest to the date; a bare `bis` only without any other cue.
+    /// cue closest to the date; a bare `bis` only without any other cue, and only right before the date (N2).
     static func kind(in segment: String) -> DueDateKind? {
         var closest: (end: Int, kind: DueDateKind)?
         var general = false
@@ -190,7 +202,28 @@ public enum DueDateDetector {
         if general || germanSuffixCues.contains(where: { IssueDateDetector.endsAWord($0, in: segment) }) {
             return .deadline
         }
-        return foldedBareCues.contains { Folded.containsBounded($0, in: segment) } ? .deadline : nil
+        let end = Substring(segment).trimmingSuffix(\.isWhitespace)
+        return foldedBareCues.contains { IssueDateDetector.endsWithWord(end, $0) } ? .deadline : nil
+    }
+
+    /// Whether the text right before a date (folded) labels it as another date (N1): it ends with an issue-date label,
+    /// or with an issue-date cue (optionally `:` and one preposition) that is no due cue.
+    static func isLabelledAsAnotherDate(_ segment: String) -> Bool {
+        IssueDateDetector.endsWithLabel(segment, strict: true)
+            || (IssueDateDetector.endsWithCue(segment) && kind(atEndOf: segment) == nil)
+    }
+
+    /// `folded` with every phrase of `notCues` blanked out (the same length, so cue positions stay).
+    static func masked(_ folded: String) -> String {
+        var result = folded
+        for phrase in foldedNotCues {
+            while let end = lastBoundedEnd(of: phrase, in: result) {
+                let upper = result.index(result.startIndex, offsetBy: end)
+                let lower = result.index(upper, offsetBy: -phrase.count)
+                result.replaceSubrange(lower..<upper, with: String(repeating: " ", count: phrase.count))
+            }
+        }
+        return result
     }
 
     /// The kind of a cue that ends `folded` (a line's text after its last date), optionally followed by `:` and one

@@ -125,6 +125,21 @@ struct DocumentTextLoaderTests {
         #expect(document.deadlineDay.isEmpty && document.deadlineDismissedDay.isEmpty)
     }
 
+    /// A read whose task is cancelled gives none (#220, review N6): the detail started a newer read, and the detector is
+    /// not run for a result nobody takes. The same read in a task that is not cancelled gives the suggestion.
+    @Test func aCancelledReadDoesNotRunTheDetector() async throws {
+        let container = try TestSupport.makeContainer()
+        let id = try insert(Self.taxNotice, into: container)
+        let loader = DocumentTextLoader(container: container)
+        let cancelled = Task { () -> DueDateCandidate? in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await loader.deadlineSuggestion(instanceID: id, today: Self.today)
+        }
+        #expect(await cancelled.value == nil)
+        let running = Task { await loader.deadlineSuggestion(instanceID: id, today: Self.today) }
+        #expect(await running.value?.day == (try Self.day("2026-11-27")))
+    }
+
     // MARK: SQL
 
     /// What the loader reads: the one document by `instanceID` and its text row by key, never the file, the thumbnail

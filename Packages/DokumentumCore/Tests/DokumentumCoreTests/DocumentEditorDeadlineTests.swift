@@ -344,8 +344,9 @@ struct DocumentEditorDeadlineTests {
         #expect(try unreadable.stored().dismissed == "2026-11-27")
     }
 
-    /// Two devices dismiss at once (re-review N3): the earlier dismissal arrives after the later one and lowers nothing.
-    @Test func aLateEarlierDismissalFromAnotherContextLowersNothing() throws {
+    /// A later local write of an earlier day lowers nothing (re-review N3): the editor reads the stored day, also one
+    /// another context saved, before it writes. A CloudKit import is not covered by the rule (#220, review N5).
+    @Test func aLaterLocalWriteOfAnEarlierDayLowersNothing() throws {
         let library = try makeLibrary()
         defer { NotificationCenter.default.removeObserver(library.observer) }
         let instanceID = library.document.instanceID
