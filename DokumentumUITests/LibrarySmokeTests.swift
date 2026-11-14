@@ -352,8 +352,12 @@ final class LibrarySmokeTests: XCTestCase {
             ui.activate("settings.open", file: file, line: line)
         #else
             // The audit covers the library window behind the Settings window too: a PDF there, not "No document
-            // selected", whose text the audit fails in light whatever its contrast (a known false positive, #89).
-            ui.activate(Self.documentRow(Self.electricityBill), file: file, line: line)
+            // selected", whose text the audit fails in light whatever its contrast (a known false positive, #89). The
+            // car insurance (in All Documents): its deadline is done, so the detail has no bar at its top. With the
+            // "Reminders" section (#12, part 3) the taller Settings window covers that place, and the audit failed the
+            // electricity bill's due-date suggestion under it ("Contrast failed").
+            ui.activate("sidebar.all", file: file, line: line)
+            ui.activate(Self.documentRow(Self.carInsurance), file: file, line: line)
             XCTAssertTrue(
                 ui.element("documentDetail.pdf").waitForExistence(timeout: 20), "the PDF did not appear", file: file,
                 line: line)

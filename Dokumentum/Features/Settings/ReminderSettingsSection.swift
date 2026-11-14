@@ -67,33 +67,39 @@ struct ReminderSettingsSection: View {
             })
     }
 
-    /// The permission's status, with what the user can do about it.
+    /// The permission's status, with what the user can do about it: a row of its own for the line, and one for the
+    /// button. The line is built as the "Suggestions" availability note, which passes the iPhone audit: a decorative
+    /// symbol and the text in a stack that carries the font, the identifier on the text alone. As the row's own text,
+    /// and in a stack with the button, the audit reported "Dynamic Type font sizes are unsupported" on the row.
+    @ViewBuilder
     private var statusLine: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: ReminderSettingsText.statusSymbol(status))
+                .accessibilityHidden(true)
             Text(ReminderSettingsText.status(status))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier(AccessibilityID.settingsRemindersStatus(status))
-            switch status {
-            case .notDetermined:
-                Button {
-                    reminders.allowTapped()
-                } label: {
-                    Text(ReminderSettingsText.allow)
-                }
-                .accessibilityIdentifier(AccessibilityID.settingsRemindersAllow)
-            case .denied:
-                Button {
-                    if let url = Self.systemNotificationSettings { openURL(url) }
-                } label: {
-                    Text(ReminderSettingsText.openSystemSettings)
-                }
-                .accessibilityIdentifier(AccessibilityID.settingsRemindersOpenSettings)
-            case .authorized, .provisional, .ephemeral:
-                EmptyView()
-            }
         }
         .font(.callout.weight(.medium))
         .foregroundStyle(.primary)
+        switch status {
+        case .notDetermined:
+            Button {
+                reminders.allowTapped()
+            } label: {
+                Text(ReminderSettingsText.allow)
+            }
+            .accessibilityIdentifier(AccessibilityID.settingsRemindersAllow)
+        case .denied:
+            Button {
+                if let url = Self.systemNotificationSettings { openURL(url) }
+            } label: {
+                Text(ReminderSettingsText.openSystemSettings)
+            }
+            .accessibilityIdentifier(AccessibilityID.settingsRemindersOpenSettings)
+        case .authorized, .provisional, .ephemeral:
+            EmptyView()
+        }
     }
 
     /// What a reminder shows (Q5) and that the settings are per device.

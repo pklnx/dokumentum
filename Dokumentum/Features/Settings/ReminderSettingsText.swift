@@ -115,6 +115,15 @@ enum ReminderSettingsText {
         #endif
     }
 
+    /// The status line's symbol.
+    static func statusSymbol(_ status: ReminderAuthorizationStatus) -> String {
+        switch status {
+        case .authorized, .provisional, .ephemeral: "bell"
+        case .notDetermined: "bell.badge"
+        case .denied: "bell.slash"
+        }
+    }
+
     /// The identifier part of a status: `authorized`, `notDetermined` or `denied` (provisional and ephemeral read as
     /// allowed).
     static func statusIdentifier(_ status: ReminderAuthorizationStatus) -> String {
