@@ -143,7 +143,11 @@ struct DocumentTextLoaderTests {
         #expect(found?.day == DeadlineDay(year: 2026, month: 11, day: 27))
         let documentReads = statements.filter { $0.contains("FROM ZDOCUMENT t0") }
         #expect(documentReads.count == 1, "\(statements)")
-        #expect(documentReads.allSatisfy { $0.contains("ZINSTANCEID") }, "not by instanceID: \(documentReads)")
+        // The condition, not the column list, names `instanceID`: a fetch of every document fails here.
+        let conditions = documentReads.map { read in
+            read.range(of: " WHERE ").map { String(read[$0.upperBound...]) } ?? ""
+        }
+        #expect(conditions.allSatisfy { $0.contains("ZINSTANCEID") }, "not by instanceID: \(documentReads)")
         let textReads = statements.filter { SQLLog.statement($0, names: "ZDOCUMENTTEXT") }
         #expect(textReads.count == 1, "\(textReads)")
         #expect(textReads.allSatisfy { $0.contains("WHERE  t0.Z_PK IN  (?)") }, "not by key: \(textReads)")
