@@ -9,8 +9,8 @@ import Testing
 
 /// Editing a document's deadline (#12, part 2a; plan §6): a new day is a new deadline (`deadlineSetAt` now,
 /// `deadlineDoneAt` cleared); a label edit and a done toggle write only their own field and never the stored day
-/// (review N8); removing it empties the four deadline fields and may dismiss a day, and `deadlineDismissedDay` is only
-/// ever raised (`max(stored, new)`, re-review N3). The editor's usual rules hold: the same value writes nothing,
+/// (review N8); removing it empties the four deadline fields and may dismiss a day; dismissing a suggestion (#12, part
+/// 2b) writes only the dismissed day; and `deadlineDismissedDay` is only ever raised (`max(stored, new)`, re-review N3). The editor's usual rules hold: the same value writes nothing,
 /// `touch()`, one save, a trashed or gone document is refused, a failed save is rolled back.
 @MainActor
 struct DocumentEditorDeadlineTests {
@@ -291,6 +291,74 @@ struct DocumentEditorDeadlineTests {
         #expect(try unreadable.stored().dismissed == "2026-11-27")
     }
 
+    // MARK: Dismissing a suggestion (#12, part 2b)
+
+    /// Dismiss writes only `deadlineDismissedDay`, with one save and `touch()`; the deadline fields stay as they are.
+    @Test func dismissingASuggestionWritesOnlyTheDismissedDay() throws {
+        let library = try makeLibrary()
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        var expected = Fields(library.document)
+        #expect(
+            try library.editor.apply(
+                .dismissDeadlineSuggestion(try Self.day("2026-11-27")), to: library.document.instanceID)
+                == .saved)
+        (expected.dismissed, expected.modifiedAt) = ("2026-11-27", Self.edited)
+        #expect(try library.stored() == expected)
+        #expect(library.saves.count == 1)
+        #expect(!library.context.hasChanges)
+        #expect(library.document.dismissedSuggestionDay == (try Self.day("2026-11-27")))
+    }
+
+    /// The `max` rule (re-review N3): a later day raises the dismissed day; an earlier or the same day writes nothing
+    /// and does not save, so two devices dismissing at once, or a dismissal racing N9's removal, never lower it. A
+    /// stored value with a later build's suffix stays byte for byte; one that is not a day counts as none.
+    @Test func dismissingOnlyEverRaisesTheDismissedDay() throws {
+        let library = try makeLibrary(dismissed: "2026-12-15")
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        let instanceID = library.document.instanceID
+        for earlier in ["2026-11-27", "2026-12-14", "2026-12-15"] {
+            #expect(
+                try library.editor.apply(.dismissDeadlineSuggestion(try Self.day(earlier)), to: instanceID)
+                    == .unchanged, "\(earlier)")
+        }
+        #expect(try library.stored().dismissed == "2026-12-15")
+        #expect(library.saves.count == 0)
+        #expect(
+            try library.editor.apply(.dismissDeadlineSuggestion(try Self.day("2027-01-04")), to: instanceID) == .saved)
+        #expect(try library.stored().dismissed == "2027-01-04")
+        #expect(library.saves.count == 1)
+
+        let suffixed = try makeLibrary(container: library.container, dismissed: "2026-12-15T09:30")
+        defer { NotificationCenter.default.removeObserver(suffixed.observer) }
+        #expect(
+            try suffixed.editor.apply(
+                .dismissDeadlineSuggestion(try Self.day("2026-12-15")), to: suffixed.document.instanceID)
+                == .unchanged)
+        #expect(try suffixed.stored().dismissed == "2026-12-15T09:30")
+
+        let unreadable = try makeLibrary(container: library.container, dismissed: "garbage")
+        defer { NotificationCenter.default.removeObserver(unreadable.observer) }
+        #expect(
+            try unreadable.editor.apply(
+                .dismissDeadlineSuggestion(try Self.day("2026-11-27")), to: unreadable.document.instanceID) == .saved)
+        #expect(try unreadable.stored().dismissed == "2026-11-27")
+    }
+
+    /// A later local write of an earlier day lowers nothing (re-review N3): the editor reads the stored day, also one
+    /// another context saved, before it writes. A CloudKit import is not covered by the rule (#220, review N5).
+    @Test func aLaterLocalWriteOfAnEarlierDayLowersNothing() throws {
+        let library = try makeLibrary()
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        let instanceID = library.document.instanceID
+        // The other device's later dismissal, saved through a second context of the same store.
+        let other = DocumentEditor(context: ModelContext(library.container), now: { Self.edited })
+        #expect(try other.apply(.dismissDeadlineSuggestion(try Self.day("2026-12-15")), to: instanceID) == .saved)
+        // This device's editor, dismissing the earlier day afterwards, reads the stored later one first.
+        let fresh = DocumentEditor(context: ModelContext(library.container), now: { Self.edited })
+        #expect(try fresh.apply(.dismissDeadlineSuggestion(try Self.day("2026-11-27")), to: instanceID) == .unchanged)
+        #expect(try library.stored().dismissed == "2026-12-15")
+    }
+
     @Test func theMaxRuleComparesDays() throws {
         let day = try Self.day("2026-12-01")
         #expect(DocumentEditor.raises("", to: day))
@@ -314,7 +382,7 @@ struct DocumentEditorDeadlineTests {
             .deadline(try Self.day("2026-12-04"), label: "Pay"), .deadline(try Self.day("2026-11-27"), label: "Neu"),
             .deadlineDone(true), .clearDeadline(dismissing: nil),
             .clearDeadline(dismissing: try Self.day("2027-01-01")), .deadlineDay(try Self.day("2026-12-04")),
-            .deadlineLabel("Neu"),
+            .deadlineLabel("Neu"), .dismissDeadlineSuggestion(try Self.day("2027-01-01")),
         ]
         for change in changes {
             #expect(try library.editor.apply(change, to: library.document.instanceID) == .trashed, "\(change)")
@@ -340,6 +408,9 @@ struct DocumentEditorDeadlineTests {
         #expect(throws: SaveFailed.self) {
             try failing.apply(.clearDeadline(dismissing: try Self.day("2027-01-01")), to: instanceID)
         }
+        #expect(throws: SaveFailed.self) {
+            try failing.apply(.dismissDeadlineSuggestion(try Self.day("2027-01-01")), to: instanceID)
+        }
         #expect(!library.context.hasChanges)
         #expect(Fields(library.document) == before)
         #expect(try library.stored() == before)
@@ -347,8 +418,8 @@ struct DocumentEditorDeadlineTests {
 
     // MARK: SQL
 
-    /// The SQL of a label edit and of a done toggle: one `UPDATE ZDOCUMENT` each, of its own column, `modifiedAt` and
-    /// Core Data's optimistic-locking counter; never `ZDEADLINEDAY` (review N8). Runs under `swift test` on macOS only
+    /// The SQL of a label edit, a done toggle and a dismissal (#12, part 2b): one `UPDATE ZDOCUMENT` each, of its own
+    /// column, `modifiedAt` and Core Data's optimistic-locking counter; never `ZDEADLINEDAY` (review N8). Runs under `swift test` on macOS only
     /// (`SQLLog`).
     @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
     func labelAndDoneEditsUpdateOnlyTheirColumns() throws {
@@ -368,6 +439,10 @@ struct DocumentEditorDeadlineTests {
             (.deadline(try Self.day("2026-11-27"), label: "Zahlen"), ["ZDEADLINELABEL", "ZMODIFIEDAT", "Z_OPT"]),
             (.deadlineDone(true), ["ZDEADLINEDONEAT", "ZMODIFIEDAT", "Z_OPT"]),
             (.deadlineLabel("Pay"), ["ZDEADLINELABEL", "ZMODIFIEDAT", "Z_OPT"]),
+            (
+                .dismissDeadlineSuggestion(try Self.day("2026-12-01")),
+                ["ZDEADLINEDISMISSEDDAY", "ZMODIFIEDAT", "Z_OPT"]
+            ),
         ]
         for (change, columns) in cases {
             let recording = try SQLLog.Recording()

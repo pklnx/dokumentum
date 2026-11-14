@@ -3,7 +3,8 @@ import DokumentumKit
 import SwiftUI
 
 /// The detail column: the open document's PDF, or why there is none (PQ12), its processing state when it is not
-/// processed yet (`ProcessingStatusBar`, #6 P2), its open deadline (`DeadlineBar`, #12 part 2a), and its info panel.
+/// processed yet (`ProcessingStatusBar`, #6 P2), its open deadline or the due date found in its text (`DeadlineBar`,
+/// #12 parts 2a and 2b), and its info panel.
 struct DocumentDetailView: View {
     @Bindable var model: LibraryModel
 
@@ -18,6 +19,10 @@ struct DocumentDetailView: View {
             #endif
             .task(id: model.selectedDocumentID) {
                 await model.loadDetail(for: model.selectedDocumentID)
+            }
+            // The due-date suggestion in the text (#12, part 2b), read again with every read of the library.
+            .task(id: model.deadlineSuggestionKey) {
+                await model.loadDeadlineSuggestion()
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

@@ -83,6 +83,18 @@ struct UITestApp {
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }()
 
+    /// The day `days` after `today` as `yyyy-MM-dd`: what the app's day arithmetic on `-UITestToday` gives (#12, part
+    /// 2b), computed at noon so no daylight saving change can move it.
+    static func day(daysAfterToday days: Int) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let parts = today.split(separator: "-").compactMap { Int($0) }
+        let noon = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
+        let moved = noon.flatMap { calendar.date(byAdding: .day, value: days, to: $0) } ?? Date()
+        let result = calendar.dateComponents([.year, .month, .day], from: moved)
+        return String(format: "%04d-%02d-%02d", result.year ?? 0, result.month ?? 0, result.day ?? 0)
+    }
+
     /// - Parameter extraArguments: more `-key value` pairs, such as `-UITestImportSynthetic YES`.
     func launch(_ store: Store = .samples, extraArguments: [String] = []) {
         var arguments = Self.launchArguments(store) + ["-UITestToday", Self.today] + extraArguments

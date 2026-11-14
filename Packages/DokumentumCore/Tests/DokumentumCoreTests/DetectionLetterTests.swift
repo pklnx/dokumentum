@@ -9,7 +9,7 @@ import Testing
 
 /// Rendered letters through the real `DocumentStage` (#11, part 2; plan Tests part 2): every `SyntheticLetters`
 /// entry rendered as a text PDF (`TestLetter`) gives its expected sender and date from the stage's text and
-/// `firstPageLayout`, evaluated with its recipient among the known correspondents (B1.5). The letters drawn with
+/// `firstPageLayout`, and its due dates (#12, part 2b) from the text, evaluated with its recipient among the known correspondents (B1.5). The letters drawn with
 /// real PDF text are text pages, so the stub recogniser is never asked. The recipient is never the sender, neither as
 /// a known record nor as a structural name.
 ///
@@ -87,6 +87,9 @@ struct DetectionLetterTests {
         #expect(recognizer.count == 0, "a text page")
         #expect(result.text?.source == .pdfText)
         try Self.expectDetected(letter, in: result)
+        // The due dates from the stored text, as the detail reads them (#12, part 2b).
+        let text = try #require(result.text).joined
+        #expect(DueDateDetector.candidates(in: text, createdAt: letter.createdAt) == letter.due, "\(id): \(text)")
     }
 
     // MARK: Real Vision

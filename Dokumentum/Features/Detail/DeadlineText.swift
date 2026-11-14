@@ -39,6 +39,60 @@ enum DeadlineText {
         parts(deadline, status: status, long: true).joined(separator: ", ")
     }
 
+    // MARK: The suggestion (#12, part 2b)
+
+    /// The name of a due date's kind: the label "Add Deadline" gives a suggested deadline ("Payment").
+    static func kindName(_ kind: DueDateKind) -> String {
+        switch kind {
+        case .payment:
+            String(
+                localized: "Payment",
+                comment: "A deadline's label when it is added from a payment date found in the text (“zahlbar bis”).")
+        case .cancellation:
+            String(
+                localized: "Cancellation",
+                comment:
+                    "A deadline's label when it is added from a cancellation date found in the text (“kündbar bis”).")
+        case .expiry:
+            String(
+                localized: "Expiry",
+                comment: "A deadline's label when it is added from an expiry date found in the text (“gültig bis”).")
+        case .deadline:
+            String(
+                localized: "Deadline",
+                comment:
+                    "Info panel: the section of the document's deadline; also the label of a deadline added from a date found in the text with “Frist” or “spätestens”."
+            )
+        }
+    }
+
+    /// "Found in the text: Payment due 28 Nov 2026" (`long`: "… 28 November 2026", for VoiceOver).
+    static func suggestion(_ candidate: DueDateCandidate, long: Bool = false) -> String {
+        let date = date(of: candidate.day).formatted(date: long ? .long : .abbreviated, time: .omitted)
+        let found: String =
+            switch candidate.kind {
+            case .payment:
+                String(
+                    localized: "Payment due \(date)",
+                    comment: "The due-date suggestion: a payment date found in the text. %@ is the date.")
+            case .cancellation:
+                String(
+                    localized: "Cancel by \(date)",
+                    comment: "The due-date suggestion: the last day to cancel, found in the text. %@ is the date.")
+            case .expiry:
+                String(
+                    localized: "Expires \(date)",
+                    comment: "The due-date suggestion: an expiry date found in the text. %@ is the date.")
+            case .deadline:
+                String(
+                    localized: "Deadline \(date)",
+                    comment: "The due-date suggestion: a deadline found in the text. %@ is the date.")
+            }
+        return String(
+            localized: "Found in the text: \(found)",
+            comment: "The detail's due-date suggestion, e.g. “Found in the text: Payment due 28 Nov 2026”.")
+    }
+
     /// A warning triangle for an overdue deadline, a calendar for every other.
     static func symbol(_ status: DeadlineStatus) -> String {
         status.isOverdue ? "exclamationmark.triangle.fill" : "calendar"

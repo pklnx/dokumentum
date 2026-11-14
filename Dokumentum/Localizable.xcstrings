@@ -473,7 +473,7 @@
       }
     },
     "Add Deadline" : {
-      "comment" : "Info panel: gives the document a deadline, 7 days from today.",
+      "comment" : "Info panel and the detail's due-date suggestion: gives the document a deadline (the suggested day, else 7 days from today).",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -676,6 +676,28 @@
         }
       }
     },
+    "Cancel by %@" : {
+      "comment" : "The due-date suggestion: the last day to cancel, found in the text. %@ is the date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kündbar bis %@"
+          }
+        }
+      }
+    },
+    "Cancellation" : {
+      "comment" : "A deadline's label when it is added from a cancellation date found in the text (“kündbar bis”).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kündigung"
+          }
+        }
+      }
+    },
     "Checking iCloud…" : {
       "comment" : "Sidebar footer (sync status): CloudKit has not answered yet after the launch.",
       "localizations" : {
@@ -787,12 +809,23 @@
       }
     },
     "Deadline" : {
-      "comment" : "Info panel: the section of the document's deadline.",
+      "comment" : "Info panel: the section of the document's deadline; also the label of a deadline added from a date found in the text with “Frist” or “spätestens”.",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frist"
+          }
+        }
+      }
+    },
+    "Deadline %@" : {
+      "comment" : "The due-date suggestion: a deadline found in the text. %@ is the date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frist bis %@"
           }
         }
       }
@@ -815,6 +848,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Erkannte Kanten"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "comment" : "Button in the detail's due-date suggestion: hides this suggestion and earlier ones, on every device.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ignorieren"
           }
         }
       }
@@ -1069,6 +1113,28 @@
         }
       }
     },
+    "Expires %@" : {
+      "comment" : "The due-date suggestion: an expiry date found in the text. %@ is the date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gültig bis %@"
+          }
+        }
+      }
+    },
+    "Expiry" : {
+      "comment" : "A deadline's label when it is added from an expiry date found in the text (“gültig bis”).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ablauf"
+          }
+        }
+      }
+    },
     "Files…" : {
       "comment" : "Item of the list toolbar's import menu: opens the files picker.",
       "localizations" : {
@@ -1104,6 +1170,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suchen …"
+          }
+        }
+      }
+    },
+    "Found in the text: %@" : {
+      "comment" : "The detail's due-date suggestion, e.g. “Found in the text: Payment due 28 Nov 2026”.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Text gefunden: %@"
           }
         }
       }
@@ -1829,6 +1906,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Muster"
+          }
+        }
+      }
+    },
+    "Payment" : {
+      "comment" : "A deadline's label when it is added from a payment date found in the text (“zahlbar bis”).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zahlung"
+          }
+        }
+      }
+    },
+    "Payment due %@" : {
+      "comment" : "The due-date suggestion: a payment date found in the text. %@ is the date.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zahlung fällig am %@"
           }
         }
       }

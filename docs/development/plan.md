@@ -214,7 +214,10 @@ before the classification, and "Apply Matching Rules" applies them to every
 document on request; from step 10 detection (#11) fills an empty
 correspondent and issue date from the first page's sender block and text:
 in the text's write when no classification follows, otherwise after the
-classifier, in the classification's write (Apple Intelligence wins). A processing queue with one job
+classifier, in the classification's write (Apple Intelligence wins). From
+step 11 a due date in the text (#12, part 2b) is not part of the pipeline: the
+detail reads the open document's stored text on demand and only suggests it,
+and nothing automatic writes a deadline. A processing queue with one job
 at a time across the Vision and the model stage (the plan of #8, T6: the
 system runs model requests one after the other anyway). Classification runs
 once per document (state `classify`, then `done`).
@@ -346,7 +349,8 @@ the evidence screenshots): [`index.md`, "Library UI"](./index.md#library-ui).
 
 Step 11 so far: the schema (V3, #12 part 1), the overview and editing (part 2a: the Deadlines list with its count, the
 Go menu's ⌘4, the detail's deadline bar and the info panel's "Deadline" section), as built in
-[`index.md`, "Deadlines"](./index.md#deadlines). Part 2b suggests a due date from the text, part 3 reminds.
+[`index.md`, "Deadlines"](./index.md#deadlines), and the due-date suggestion from the text (part 2b: `DueDateDetector`,
+read on demand in the detail, with "Add Deadline" and "Dismiss"). Part 3 reminds.
 
 ### Milestone 4: System integration
 | # | Step | Content | Size |

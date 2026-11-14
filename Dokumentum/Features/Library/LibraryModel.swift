@@ -433,6 +433,94 @@ final class LibraryModel {
         }
     }
 
+    // MARK: Deadline suggestion (#12, part 2b)
+
+    /// The suggestion the open document's text gives, with the document it was read for
+    /// (`LibrarySource.loadDeadlineSuggestion`): also while the document has a deadline, so "Remove Deadline" can
+    /// compare with it (review N9). `nil` until the first read.
+    private(set) var loadedSuggestion: LoadedDeadlineSuggestion?
+    /// Counts `loadDeadlineSuggestion` calls: only the newest one's result is kept.
+    private var suggestionGeneration = 0
+
+    /// The text's suggestion for one document; `candidate` is `nil` when the text gives none.
+    struct LoadedDeadlineSuggestion: Equatable {
+        let instanceID: UUID
+        let candidate: DueDateCandidate?
+    }
+
+    /// What makes the detail read the suggestion again (`DocumentDetailView`): another document, another day, or any
+    /// read of the library (`revision`: an edit such as a dismissal, a sync, a text the queue wrote).
+    struct DeadlineSuggestionKey: Hashable {
+        let instanceID: UUID?
+        let revision: Int
+        let today: DeadlineDay
+    }
+
+    var deadlineSuggestionKey: DeadlineSuggestionKey {
+        DeadlineSuggestionKey(instanceID: selectedDocumentID, revision: revision, today: today)
+    }
+
+    /// Reads the open document's suggestion, off the main actor. A result that arrives after the selection moved on,
+    /// or after a newer read started, is dropped, as in `loadDetail`.
+    func loadDeadlineSuggestion() async {
+        suggestionGeneration += 1
+        let generation = suggestionGeneration
+        guard let instanceID = selectedDocumentID else {
+            loadedSuggestion = nil
+            return
+        }
+        let candidate = await source.loadDeadlineSuggestion(instanceID: instanceID, today: today)
+        guard !Task.isCancelled, generation == suggestionGeneration, selectedDocumentID == instanceID else { return }
+        loadedSuggestion = LoadedDeadlineSuggestion(instanceID: instanceID, candidate: candidate)
+    }
+
+    /// The suggestion the detail's bar offers (maintainer decision Q2): the open document's, while it has no deadline,
+    /// is processed and not in the trash, and its day is today or later and after the dismissed day
+    /// (`DueDateDetector.offers`, checked against the library's current values, so a dismissal or a deadline hides it at
+    /// once).
+    var deadlineSuggestion: DueDateCandidate? {
+        guard let document = selectedDocument, let loaded = loadedSuggestion, loaded.instanceID == document.instanceID,
+            let candidate = loaded.candidate, DueDateDetector.offers(candidate, for: document, today: today)
+        else { return nil }
+        return candidate
+    }
+
+    /// "Add Deadline" on the suggestion: its day as the deadline, with the kind's name as the label ("Payment").
+    @discardableResult
+    func addSuggestedDeadline(_ candidate: DueDateCandidate, to instanceID: UUID) -> DocumentEditor.Outcome? {
+        edit(.deadline(candidate.day, label: DeadlineText.kindName(candidate.kind)), of: instanceID)
+    }
+
+    /// "Dismiss" on the suggestion: suggestions are dismissed up to its day (synced; the `max` rule), and the text is read
+    /// again, so a later candidate is offered next (review B3).
+    @discardableResult
+    func dismissDeadlineSuggestion(_ candidate: DueDateCandidate, of instanceID: UUID) async -> DocumentEditor.Outcome?
+    {
+        let outcome = edit(.dismissDeadlineSuggestion(candidate.day), of: instanceID)
+        await loadDeadlineSuggestion()
+        return outcome
+    }
+
+    /// The info panel's "Remove Deadline" (review N9): when the removed day is the one the text suggests, the same save
+    /// dismisses it, so removing a deadline right after adding the suggestion does not offer that day again. Another
+    /// day is removed without a dismissal, and the suggestion comes back.
+    @discardableResult
+    func removeDeadline(of instanceID: UUID) -> DocumentEditor.Outcome? {
+        let day = snapshot.documents.first { $0.instanceID == instanceID }?.deadline?.day
+        let suggested = loadedSuggestion.flatMap { $0.instanceID == instanceID ? $0.candidate?.day : nil }
+        return edit(.clearDeadline(dismissing: day != nil && day == suggested ? day : nil), of: instanceID)
+    }
+
+    /// "Add Deadline" in the info panel: the suggestion when one is offered (its day and kind), else 7 days after today
+    /// with no label.
+    @discardableResult
+    func addDeadline(to instanceID: UUID) -> DocumentEditor.Outcome? {
+        if selectedDocumentID == instanceID, let suggestion = deadlineSuggestion {
+            return addSuggestedDeadline(suggestion, to: instanceID)
+        }
+        return edit(.deadline(today.adding(days: 7) ?? today, label: ""), of: instanceID)
+    }
+
     /// The user typed in the title field again: the "could not be saved" line goes away.
     func titleEditStarted() {
         titleSaveFailure = nil

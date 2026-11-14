@@ -13,7 +13,9 @@
     /// **Deadlines are relative to "today"** (#12, plan review B2), the day `AppDay` gives (`-UITestToday` in UI tests),
     /// so their status is the same whatever day a test runs: the medical invoice is overdue by 2 days, the water bill
     /// due in 2 days, the account statement in 10 and the car insurance in 30, done. With the default lead time of 3
-    /// days the Deadlines count is 2, and the list shows three. Every other date stays on the fixed anchor.
+    /// days the Deadlines count is 2, and the list shows three. The electricity bill has no deadline, and its text says
+    /// "Zahlbar bis <today + 14>" (#12, part 2b), so the detail suggests that day. Every other date stays on the fixed
+    /// anchor.
     enum FixtureCatalog {
         /// What a sample document's file is.
         enum File: Sendable, Equatable {
@@ -91,10 +93,23 @@
             return Sample(document: document, file: file)
         }
 
-        private static func letterPages(_ sender: String, _ subject: String, pages: Int = 1) -> [[String]] {
+        /// `lines`: more lines on the first page, after the subject.
+        private static func letterPages(_ sender: String, _ subject: String, pages: Int = 1, lines: [String] = [])
+            -> [[String]]
+        {
             (1...pages).map { page in
-                [sender, subject, "Sample document, generated for Dokumentum.", "Page \(page) of \(pages)"]
+                [sender, subject] + (page == 1 ? lines : [])
+                    + ["Sample document, generated for Dokumentum.", "Page \(page) of \(pages)"]
             }
+        }
+
+        /// How many days after today the electricity bill's text says it is payable (#12, part 2b).
+        static let electricityBillDueDays = 14
+
+        /// "Zahlbar bis 28.11.2026": the electricity bill's due line for `today`, a German numeric date.
+        static func electricityBillDueLine(today: DeadlineDay) -> String {
+            let day = today.adding(days: electricityBillDueDays) ?? today
+            return String(format: "Zahlbar bis %02d.%02d.%04d", day.day, day.month, day.year)
         }
 
         static let longTitle =
@@ -109,7 +124,9 @@
                 sample(
                     1, "Electricity bill October", daysBefore: 2, inbox: true, correspondent: stadtwerke,
                     type: invoice, tags: [tax],
-                    file: .pdf(pages: letterPages(stadtwerke.name, "Electricity bill October")),
+                    file: .pdf(
+                        pages: letterPages(
+                            stadtwerke.name, "Electricity bill October", lines: [electricityBillDueLine(today: today)])),
                     today: today),
                 sample(
                     2, "Medical invoice", daysBefore: 5, inbox: true, correspondent: doctor, type: invoice,
@@ -163,6 +180,21 @@
         var today: DeadlineDay?
 
         @MainActor func snapshot() -> LibrarySnapshot { FixtureCatalog.snapshot(today: today ?? AppDay.today()) }
+
+        /// The sample's text as `FixtureSeeder` stores it, through the detector (#12, part 2b): processed samples
+        /// outside the trash only, as `DocumentTextLoader` reads the store.
+        func loadDeadlineSuggestion(instanceID: UUID, today day: DeadlineDay) async -> DueDateCandidate? {
+            guard
+                let sample = FixtureCatalog.samples(today: today ?? AppDay.today()).first(where: {
+                    $0.document.instanceID == instanceID
+                }),
+                sample.document.processingState == .done, !sample.document.isTrashed
+            else { return nil }
+            let candidates = DueDateDetector.candidates(
+                in: FixtureSeeder.text(of: sample), createdAt: sample.document.createdAt)
+            return DueDateDetector.suggestion(
+                among: candidates, today: day, dismissedThrough: sample.document.dismissedSuggestionDay)
+        }
 
         @concurrent
         func loadPDF(instanceID: UUID) async -> PDFLoadState {

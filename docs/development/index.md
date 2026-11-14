@@ -238,14 +238,18 @@ certain hang: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --filter <test>`
 
 **The strict-pool step (#174).** The rule above is checked, not only written down: the `app-macos` job runs the
 `DokumentumCore` package tests a second time, after the Default plan, with `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`
-(`swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`). In that mode the
+(`swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)' --skip 'VisionRecognitionTests' --skip 'DetectionLetterTests/aScannedLetter'`). In that mode the
 cooperative pool has one thread, so a test that blocks a pool thread hangs at once on any machine, instead of
 freezing at random on a small runner. The step has its own time bound of 10 minutes (it takes about 4 with the
 build), so a hang fails the job in 10 minutes and not after the job's 30. The two tests of `FoundationModelsRealModelTests` that call the model
-are skipped there (its model-free mapping test still runs): they fail fast in this debug mode by design (the framework's `.noRoom`). The step is part of the
+are skipped there (its model-free mapping test still runs): they fail fast in this debug mode by design (the framework's `.noRoom`).
+The real-Vision tests (`VisionRecognitionTests`, `DetectionLetterTests/aScannedLetter…`) are skipped there too (#220):
+on the runner, Vision's model compilation held the one thread for 272–372 s before the test skipped itself
+(`e5rtError`), which brought the step to its 10-minute bound. They run in the Default plan. The step is part of the
 required job `app-macos`, so the check names are unchanged, and it runs only when the Default plan runs (not for
 docs-only pull requests). To try it locally: `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 swift test --package-path
-Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'`.
+Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'
+--skip 'VisionRecognitionTests' --skip 'DetectionLetterTests/aScannedLetter'`.
 Counter-proof: a throwaway test that detaches a task and
 then blocks its own pool thread on a semaphore the task signals passes in the Default plan and hangs the step (see
 the pull request that added it).
@@ -1089,7 +1093,8 @@ statement with the long title and "Scanned receipt" (failed; the receipt is not 
 line. `LibrarySmokeTests` audits the failed line over the annual statement's PDF, not over a placeholder, whose
 description is a known false positive of the audit in light. Four samples have a deadline relative to "today"
 (`AppDay`, see "Deadlines"): the medical invoice overdue by 2 days, the water bill due in 2, the account statement in
-10, and the car insurance in 30, done; every other sample date stays on the fixed anchor.
+10, and the car insurance in 30, done. The electricity bill's text says "Zahlbar bis <today + 14>", the due-date
+suggestion of #12 part 2b. Every other sample date stays on the fixed anchor.
 - `-UITestSeed YES`: an in-memory store with the samples. UI tests, screenshots and a look at the app use it;
   nothing is saved. `-UITestToday yyyy-MM-dd` (Debug builds): fixes "today" (`AppDay`); `UITestApp` passes the
   runner's local day in every launch. `-UITestEmptyStore YES`: an empty in-memory store. `-UITestLocalStore <name>`: a new local
@@ -1234,8 +1239,8 @@ rm -rf "$R"   # keep only the window PNGs; delete any video the export wrote
 ## Deadlines
 
 #12, part 2a (plan of #12, Revision 2, §6 and §8; maintainer decisions Q1 and Q7): one deadline per document, with an
-optional label, its overview and its editing. Due-date suggestions from the text are part 2b (#216), reminders part 3
-(#217). The fields and the read rule: "Data model and sync" above.
+optional label, its overview and its editing; #12, part 2b (#216): the due-date suggestion from the text ("Due-date
+suggestions" below). Reminders are part 3 (#217). The fields and the read rule: "Data model and sync" above.
 
 **"Today" is a day** (plan review B2). `AppDay.today()` (`Dokumentum/App/AppDay.swift`) is the local day as a Kit
 `DeadlineDay`, in the device's current time zone; in Debug builds `-UITestToday yyyy-MM-dd` fixes it (`UITestToday`,
@@ -1273,10 +1278,11 @@ info panel). Nothing for a done deadline, none, or a document in the trash, whos
 them (`ViewThatFits`), under it otherwise (the iPhone, large text sizes). The two buttons stand side by side up to the
 default text size and one under the other from xLarge on, and their labels wrap: side by side with "Als erledigt
 markieren" the iPhone audit reported "Text clipped", and a row held at full width (`fixedSize`) "Dynamic Type font sizes
-are partially unsupported" (#219 fix round 1). Part 2b adds the suggestion to this bar.
+are partially unsupported" (#219 fix round 1). Without a deadline the same bar shows the due-date suggestion (below).
 
 **The info panel's "Deadline" section** (after the correspondent and type): without a deadline "Add Deadline"
-(`documentInfo.deadline.add`, 7 days after today; part 2b pre-fills the suggestion's day); with one a date-only picker
+(`documentInfo.deadline.add`: the offered suggestion's day and kind, else 7 days after today with no label,
+`LibraryModel.addDeadline`); with one a date-only picker
 "Due Date" limited to the years 1000–9999 (so the stored day is always ten characters, review N8), the label field
 (saved on Return, on focus loss, on a selection change and when the panel closes, only if changed, as the title:
 `TitleDraft`, through `LibraryModel.commitDeadlineLabel`), the "Completed" switch and "Remove Deadline". The picker
@@ -1284,7 +1290,7 @@ sends a day-only edit and the label field a label-only edit (review N1 of #219),
 panel's snapshot that a sync may have changed meanwhile. Identifiers `documentInfo.deadline.date|label|done|remove`.
 A picker date is read as its day in the current time zone; a day is shown as noon of it (`DeadlineText`).
 
-**Editing** (`DocumentEditor`, Core; plan §6). Five changes, each with the editor's usual rules (the same value writes
+**Editing** (`DocumentEditor`, Core; plan §6). Six changes, each with the editor's usual rules (the same value writes
 nothing, a gone or trashed document is refused, `touch()`, one save, rolled back on failure):
 - `.deadline(day, label:)`: a day other than the one the document reads is a new deadline: it writes the day, the label,
   `deadlineSetAt` = now and clears `deadlineDoneAt` in one save. The day it already reads writes only a changed label
@@ -1294,16 +1300,80 @@ nothing, a gone or trashed document is refused, `touch()`, one save, rolled back
   `deadlineSetAt` or `deadlineDoneAt`, however stale the caller's view; `.noDeadline` without a deadline.
 - `.deadlineDone(Bool)`: writes only `deadlineDoneAt` (now, or `nil`); `.noDeadline` for a document without one.
 - `.clearDeadline(dismissing:)`: empties `deadlineDay`, `deadlineLabel`, `deadlineSetAt` and `deadlineDoneAt`. With a
-  day it also dismisses suggestions up to it in the same save (N9; part 2b passes the offered suggestion, part 2a's
-  "Remove Deadline" passes none).
-- **`deadlineDismissedDay` is only ever raised** (re-review N3): every write stores `max(stored, new)`
-  (`DocumentEditor.raises`); a stored value that does not read as a day counts as none, and an equal day keeps the
-  stored string as it is. Part 2b's dismissal goes through the same rule.
+  day it also dismisses suggestions up to it in the same save (N9: "Remove Deadline" passes the removed day when it
+  is the text's suggestion, `LibraryModel.removeDeadline`).
+- `.dismissDeadlineSuggestion(day)` (part 2b): writes only `deadlineDismissedDay`, by the rule below; "Dismiss" on the
+  suggestion.
+- **`deadlineDismissedDay` is only ever raised by this device's writes** (re-review N3): every write stores
+  `max(stored, new)` (`DocumentEditor.raises`); a stored value that does not read as a day counts as none, and an equal
+  day keeps the stored string as it is. A dismissal of a day at or before the stored one writes nothing and does not
+  save. **The limit (#220, review N5):** a CloudKit import does not go through the editor. Two devices that dismiss
+  different days while apart may end with the earlier one (the last writer wins per field), so the later candidate is
+  offered once more; one more Dismiss settles it. A merge rule for the import would be a follow-up.
 
 `DocumentEditorDeadlineTests` (Core) pins these, with SQL proof under `swift test` that a label edit and a done toggle
 update only their own column, and that a label edit with a stale view of the day writes only the label. The mapping (`DocumentListQuery` → `DocumentSummary` → `LibraryMapping` →
 `LibraryDocument`) carries `deadline` and `dismissedSuggestionDay`; they are columns of the document row, so the list
 read still names no text, file or thumbnail table (`DocumentListQuerySQLTests`).
+
+**Due-date suggestions** (#12, part 2b; plan §5 and T7; maintainer decision Q2). A due date in the text is only ever
+suggested: nothing automatic (processing, repair, rules, the classifier, detection) writes a deadline, so #11's order
+user > rules > Apple Intelligence > detection is untouched, and **Apple Intelligence proposes no deadlines** (T8).
+- **The detector** (`DueDateDetector`, Kit; its rules are in its doc comment). Text only: the first five pages with
+  text (`DetectionLimits.dueDatePages`), `IssueDateDetector`'s folding and date forms (`DateScanner`, `Window`, shared
+  module-internal helpers; the issue date's behaviour is unchanged). A date counts with a cue between the previous date
+  of its line and itself, or when it ends its line under a line that ends with a cue. The cues, all for every document:
+  payment (`zahlbar bis|am|spätestens`, `fällig am|bis|zum`, `Fälligkeit`, `Fälligkeitsdatum`, `Zahlungsziel`, `due`,
+  `due date`, `due by`, `payment due`, `payable by`, `pay by`), cancellation (`Kündigung bis|zum`, `kündbar bis|zum`,
+  `cancel by`), expiry (`gültig bis`, `Ablauf`, `Ablaufdatum`, `expires`, `expiry date`, `expiration date`, `valid
+  until`) and deadline (`Frist`, `…frist`, `spätestens`, `bis spätestens`, `Abgabe bis`, `einzureichen bis`,
+  `Rückmeldung bis`, `deadline`, `respond by`, `reply by`, `no later than`; a bare `bis` only without another cue). A
+  specific kind wins over `deadline`, and among specific ones the cue closest to the date. Fix round 1 of #220: a bare
+  `bis` counts only right before the date (N2); a date whose own text names it as another date (an issue-date label such
+  as `Rechnungsdatum` or `ausgestellt am`, or an issue-date cue that is no due cue, such as `Vertragsbeginn:` or `Termin
+  am`) is never due, whatever cue stands earlier on its line (N1); `Due to …` is no cue, and the previous-line cue
+  applies only to a date alone on its line, not to a place line (N3). Never either date of a
+  range (`gültig vom 01.01. bis 31.12.2026` is a pinned miss), never a date inside a number or code, never a date
+  without a cue (`Rechnungsdatum`, `Datum`, a birth date). The window is `createdAt` − 60 to + 1,095 days
+  (`dueWindowBefore`, `dueWindowAfter`); a two-digit year is `20yy` unless that is after the window's last year, then
+  `19yy` (review N4: `31.12.28` in a 2026 letter is 2028). The result is one candidate per day, in day order, each
+  with its kind. Out of scope (follow-ups): relative deadlines ("innerhalb von 14 Tagen") and appointments (`Termin`);
+  known detector limits are collected in #206.
+- **The rule** (review B3, `DueDateDetector.suggestion`): the earliest candidate that is today or later and **after**
+  `deadlineDismissedDay` ("dismissed up to this day"). So the tax notice's two candidates are offered one after the
+  other, and two dismissals leave none; a later day (a new scan) is offered again, an earlier one never.
+- **Where it runs: in the detail, on demand** (T7), never in the text write. `LibrarySource.loadDeadlineSuggestion`:
+  `StoreLibrarySource` reads the one document and its `DocumentText` by key in a context of its own, off the main actor
+  (`DocumentTextLoader`, Core), for a processed (`done`) document outside the trash; `FixtureLibrarySource` uses the
+  sample's text. A read whose task was cancelled (the detail started a newer one) stops after the fetch and does not run
+  the detector, so a burst of library reads does not stack detector runs (#220, review N6). Nothing is stored, so both devices compute the same suggestion from the synced text, and documents
+  processed before this build get one too. The detail reads it again with each read of the library
+  (`LibraryModel.deadlineSuggestionKey`: the document, the library's `revision`, the day).
+- **The offer** (`DueDateDetector.offers`, `LibraryModel.deadlineSuggestion`): only while the document has no deadline
+  (open or done), is processed and not in the trash, checked against the library's current values, so a dismissal or a
+  new deadline hides it at once. The loader also reads it while a deadline is set, for N9 below.
+- **The bar** (`DeadlineBar`, without a deadline, for a source that takes edits): "Found in the text: Payment due 28
+  Nov 2026" (per kind "Payment due …", "Cancel by …", "Expires …", "Deadline …"; VoiceOver reads the long date), the
+  identifier `documentDetail.deadlineSuggestion.<yyyy-MM-dd>`, and two buttons: **"Add Deadline"**
+  (`documentDetail.deadlineSuggestion.add`) sets the day through `DocumentEditor` with the kind's localized name as
+  the label ("Payment", "Cancellation", "Expiry", "Deadline"), and **"Dismiss"** (`…dismiss`) writes
+  `.dismissDeadlineSuggestion(day)`, which syncs; the text is then read again for a later candidate.
+- **N9:** "Remove Deadline" on the day the text suggests dismisses that day in the same save
+  (`.clearDeadline(dismissing:)`), so removing a deadline right after adding the suggestion does not offer it again. A
+  deadline on another day is removed without a dismissal.
+- **The sample** "Electricity bill October" has no deadline and its text says "Zahlbar bis <today + 14>"
+  (`FixtureCatalog.electricityBillDueLine`), relative to `AppDay` like the sample deadlines.
+- **Tests.** Kit: `DueDateDetectorTests` (every cue kind in German and English, the previous line, a bare `bis`,
+  ranges, numbers and codes, dates that are never due, the window at −61/−60 and +1,095/+1,096 days, `31.12.28`,
+  the order and kinds, five pages, the rule, the tax notice, the offer) and `SyntheticLettersTests` (every letter's
+  `due`, with new letters: a contract, an ID renewal, a tax notice with two candidates, a reminder). Core:
+  `DocumentTextLoaderTests` (the rule on a store, the tax notice dismissed twice through the editor, which documents,
+  nothing written, SQL proof that only that document and its text row are read), `DocumentEditorDeadlineTests` (the
+  dismissal writes only its column, the `max` rule, trashed, rollback), and `DetectionLetterTests` (the due dates of
+  every letter rendered as a text PDF). App: `DeadlineSuggestionTests` (the bill's text relative to two days, offered
+  without a deadline only, Add, the info panel's Add, Dismiss, N9). UI: `EditingSmokeTests` sees the bill's suggestion
+  for `-UITestToday` + 14, audits it over the PDF, measures its contrast on the Mac, adds it (the bar then shows the
+  deadline), finds the bill in Deadlines and marks it done. Screenshots `9-deadline-suggestion`, `10-deadline-added`.
 
 **Tests.** Kit: `DeadlineDayTests` (day numbers), `DeadlineStatusTests` (around midnight and both daylight saving
 changes in Berlin), `LibrarySelectionTests` (open only, the order under shuffles, the other lists' order, the count with

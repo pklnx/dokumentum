@@ -63,6 +63,12 @@ public enum DetectionLimits {
 
     /// A detected date lies from 1900-01-01 to this many days after the document's `createdAt`.
     public static let dateWindowDays = 31
+    /// A due date (#12, part 2b; plan §5) lies from this many days before the document's `createdAt`…
+    public static let dueWindowBefore = 60
+    /// …to this many days after it (three years); a two-digit due year pivots on this end's year (review N4).
+    public static let dueWindowAfter = 1_095
+    /// The due-date detector reads this many pages with text, the first ones.
+    public static let dueDatePages = 5
     public static let earliestYear = ClassificationLimits.earliestYear
     /// A structural sender name: 2 to 80 characters, at most 8 words, a letter in it, no placeholder.
     public static let nameCharacters = 2...ClassificationLimits.correspondentCharacters

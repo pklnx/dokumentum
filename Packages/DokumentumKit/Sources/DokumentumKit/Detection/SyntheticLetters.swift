@@ -44,6 +44,9 @@ public struct SyntheticLetter: Sendable {
     public let createdAt: Date
     public let sender: ExpectedSender
     public let date: SuggestedDate?
+    /// What `DueDateDetector` must find in `text` (#12, part 2b): the candidates in day order, with their kinds; empty
+    /// for a letter that names no due date.
+    public let due: [DueDateCandidate]
 
     /// The known correspondents' names: the recipient first.
     public var knownNames: [String] { [recipient] + otherKnown }
@@ -63,14 +66,14 @@ public struct SyntheticLetter: Sendable {
         SyntheticLetter(
             id: id, summary: summary, pageWidth: pageWidth * factor, pageHeight: pageHeight * factor,
             lines: lines.map { Line($0.text, x: $0.x * factor, top: $0.top * factor, size: $0.size * factor) },
-            recipient: recipient, otherKnown: otherKnown, createdAt: createdAt, sender: sender, date: date)
+            recipient: recipient, otherKnown: otherKnown, createdAt: createdAt, sender: sender, date: date, due: due)
     }
 
     /// The same letter, at the same millimetres from the top-left edge, on another page size.
     func onPage(width: Double, height: Double, id: String, summary: String) -> SyntheticLetter {
         SyntheticLetter(
             id: id, summary: summary, pageWidth: width, pageHeight: height, lines: lines, recipient: recipient,
-            otherKnown: otherKnown, createdAt: createdAt, sender: sender, date: date)
+            otherKnown: otherKnown, createdAt: createdAt, sender: sender, date: date, due: due)
     }
 }
 
@@ -108,11 +111,16 @@ public enum SyntheticLetters {
     private static func letter(
         _ id: String, _ summary: String, page: (width: Double, height: Double) = DetectionLimits.a4,
         recipient: String, known: [String] = [], sender: SyntheticLetter.ExpectedSender, date: SuggestedDate?,
-        _ lines: [SyntheticLetter.Line]
+        due: [DueDateCandidate] = [], _ lines: [SyntheticLetter.Line]
     ) -> SyntheticLetter {
         SyntheticLetter(
             id: id, summary: summary, pageWidth: page.width, pageHeight: page.height, lines: lines,
-            recipient: recipient, otherKnown: known, createdAt: createdAt, sender: sender, date: date)
+            recipient: recipient, otherKnown: known, createdAt: createdAt, sender: sender, date: date, due: due)
+    }
+
+    /// A due date of `due`: the day as `yyyy-MM-dd` and its kind.
+    static func due(_ day: String, _ kind: DueDateKind) -> DueDateCandidate {
+        DueDateCandidate(day: DeadlineDay(storedValue: day)!, kind: kind)
     }
 
     /// Short, for the tables below.
@@ -335,6 +343,7 @@ public enum SyntheticLetters {
         letter(
             "rechnung-zeitraum", "an invoice with `Rechnungsdatum`, a service period, a due date and a column footer",
             recipient: owner, sender: .structural("Muster Versand GmbH"), date: november13,
+            due: [due("2026-11-27", .payment)],
             [
                 L("Muster Versand GmbH", x: 25, top: 12, size: 16),
                 L("Rechnungsnummer: RE-2026-11-13-001", x: 125, top: 40, size: 9),
@@ -374,10 +383,65 @@ public enum SyntheticLetters {
         letter(
             "zahlungserinnerung", "a reminder with a due date; the date only in the text",
             recipient: owner, sender: .structural("Muster Telekom GmbH"), date: november13,
+            due: [due("2026-11-27", .payment)],
             [
                 L("Muster Telekom GmbH", x: 25, top: 12, size: 16),
                 L("Zahlungserinnerung vom 13.11.2026", x: 25, top: 95, size: 12),
                 L("Der Betrag von 49,99 EUR ist fällig am 27.11.2026.", x: 25, top: 105, size: 11),
+            ] + germanRecipient),
+        // The due-date letters of #12, part 2b (plan §5, Tests): a contract, an ID renewal, a tax notice with two
+        // candidates, and a reminder.
+        letter(
+            "vertrag-kuendigung",
+            "#12 part 2b: a contract's term as a range (no due date) and `Kündigung bis zum 30.09.2027`",
+            recipient: owner, sender: .structural("Muster Fitness GmbH"), date: november13,
+            due: [due("2027-09-30", .cancellation)],
+            [
+                L("Muster Fitness GmbH", x: 25, top: 12, size: 16),
+                L("Vertragsbestätigung vom 13.11.2026", x: 25, top: 95, size: 12),
+                L("Ihr Vertrag läuft vom 01.12.2026 bis 30.11.2027.", x: 25, top: 105, size: 11),
+                L(
+                    "Kündigung bis zum 30.09.2027 möglich, sonst verlängert er sich um ein Jahr.", x: 25, top: 112,
+                    size: 11),
+            ] + germanRecipient),
+        letter(
+            "ausweis-gueltig-bis",
+            "#12 part 2b: an ID renewal, `gültig bis 31.12.28` (a two-digit year, review N4) and a birth date",
+            recipient: owner, sender: .structural("Bürgerbüro Musterstadt"), date: november13,
+            due: [due("2028-12-31", .expiry)],
+            [
+                L("Bürgerbüro Musterstadt", x: 125, top: 12, size: 12),
+                L("Bürgerbüro Musterstadt · Rathausplatz 1 · 80331 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11),
+                L("Geburtsdatum: 05.03.1980", x: 125, top: 40, size: 9),
+                L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Ihr Personalausweis", x: 25, top: 95, size: 12),
+                L("Ihr Personalausweis ist gültig bis 31.12.28.", x: 25, top: 105, size: 11),
+                L("Bitte beantragen Sie rechtzeitig einen neuen Ausweis.", x: 25, top: 112, size: 11),
+            ] + germanRecipient),
+        letter(
+            "steuerbescheid-zwei-fristen",
+            "#12 part 2b: a tax notice with two candidates, `zahlbar bis 27.11.2026` and `Einspruchsfrist … bis 15.12.2026`",
+            recipient: owner, sender: .structural("Finanzamt Musterstadt"), date: november13,
+            due: [due("2026-11-27", .payment), due("2026-12-15", .deadline)],
+            [
+                L("Finanzamt Musterstadt", x: 125, top: 12, size: 12),
+                L("Finanzamt Musterstadt · Postfach 10 20 30 · 80284 Musterstadt", x: 25, top: 29, size: 7),
+                L("Herrn", x: 25, top: 35, size: 11),
+                L("Steuernummer: 123/456/78901", x: 125, top: 40, size: 9),
+                L("Datum 13.11.2026", x: 125, top: 45, size: 9),
+                L("Bescheid für 2025 über Einkommensteuer", x: 25, top: 95, size: 12),
+                L("Die Nachzahlung von 312,00 EUR ist zahlbar bis 27.11.2026.", x: 25, top: 105, size: 11),
+                L("Einspruchsfrist: Ein Einspruch ist bis 15.12.2026 möglich.", x: 25, top: 112, size: 11),
+            ] + germanRecipient),
+        letter(
+            "mahnung-bis-spaetestens", "#12 part 2b: a reminder, `bis spätestens 30.11.2026`",
+            recipient: owner, sender: .structural("Muster Energie GmbH"), date: november13,
+            due: [due("2026-11-30", .deadline)],
+            [
+                L("Muster Energie GmbH", x: 25, top: 12, size: 16),
+                L("Mahnung vom 13.11.2026", x: 25, top: 95, size: 12),
+                L("Bitte überweisen Sie den offenen Betrag bis spätestens 30.11.2026.", x: 25, top: 105, size: 11),
             ] + germanRecipient),
         letter(
             "probe2-bank-known", "the review's probe 2, the owner's bank (`Commerzbank AG`) known",
@@ -533,7 +597,7 @@ public enum SyntheticLetters {
         letter(
             "us-invoice", "a US invoice: `Invoice Date`, `Order Date`, `Due Date`",
             page: DetectionLimits.usLetter, recipient: "Jane Doe", sender: .structural("Tailspin Toys Inc."),
-            date: november13,
+            date: november13, due: [due("2026-12-13", .payment)],
             [
                 L("Tailspin Toys Inc.", x: 21.6, top: 14, size: 16),
                 L("Bill To", x: 21.6, top: 50, size: 10), L("Jane Doe", x: 21.6, top: 55, size: 10),

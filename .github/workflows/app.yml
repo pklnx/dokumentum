@@ -108,7 +108,9 @@ jobs:
       # DokumentumCore once on a cooperative pool of ONE thread (#174, docs/development/index.md, "Waiting in tests"):
       # a test that blocks a pool thread hangs here at once, instead of freezing at random on a 3-CPU runner. The two
       # tests of FoundationModelsRealModelTests that call the model fail fast in this mode by design (the framework's
-      # `.noRoom`), so they are skipped by name; the suite's model-free mapping test still runs. The step
+      # `.noRoom`), so they are skipped by name; the suite's model-free mapping test still runs. The real-Vision tests
+      # are skipped here too (#220): Vision's model compilation held the one thread for 272-372 s on the runner before
+      # they skipped themselves, which took the step to its bound. They run in the Default plan above. The step
       # has its own time bound: a hang ends it after 10 minutes, not after the job timeout. It runs in the required
       # job `app-macos`, after the Default plan, and so only when that plan runs (not for docs-only pull requests).
       - name: Core tests on a one-thread cooperative pool
@@ -119,4 +121,4 @@ jobs:
           DOKUMENTUM_TEST_TIMEOUT_SCALE: "3"
         run: |
           set -o pipefail
-          swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)'
+          swift test --package-path Packages/DokumentumCore --skip 'FoundationModelsRealModelTests/(theModelClassifiesASyntheticBill|aTextOfTheCapIsCutToTheBudget)' --skip 'VisionRecognitionTests' --skip 'DetectionLetterTests/aScannedLetter'
