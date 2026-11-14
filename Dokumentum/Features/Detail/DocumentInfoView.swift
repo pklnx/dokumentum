@@ -204,13 +204,13 @@ private struct DocumentInfoForm: View {
         }
     }
 
-    /// A new day keeps the stored label; the label draft is saved on its own.
+    /// A day-only edit (review N1 of #219): it keeps the stored label; the label draft is saved on its own.
     private func deadlineDayBinding(_ deadline: DocumentDeadline) -> Binding<Date> {
         Binding(
             get: { DeadlineText.date(of: deadline.day) },
             set: { date in
                 guard let day = DeadlineText.day(of: date) else { return }
-                model.edit(.deadline(day, label: deadline.label), of: document.instanceID)
+                model.edit(.deadlineDay(day), of: document.instanceID)
             })
     }
 
@@ -220,18 +220,10 @@ private struct DocumentInfoForm: View {
             set: { model.edit(.deadlineDone($0), of: document.instanceID) })
     }
 
-    /// Saves the label draft to its own document's deadline if the user changed it. A deadline removed meanwhile takes
-    /// no label; a draft that was not saved shows the stored label again.
+    /// Saves the label draft to its own document's deadline if the user changed it, as a label-only edit
+    /// (`LibraryModel.commitDeadlineLabel`).
     private func commitLabel() {
-        guard let commit = labelDraft.commit() else { return }
-        guard let deadline = model.snapshot.documents.first(where: { $0.instanceID == commit.document })?.deadline
-        else { return }
-        let outcome = model.edit(.deadline(deadline.day, label: commit.title), of: commit.document)
-        if outcome != .saved, outcome != .unchanged,
-            let stored = model.snapshot.documents.first(where: { $0.instanceID == commit.document })
-        {
-            labelDraft.show(commit.document, title: stored.deadline?.label ?? "")
-        }
+        model.commitDeadlineLabel(&labelDraft)
     }
 
     // MARK: Date and inbox

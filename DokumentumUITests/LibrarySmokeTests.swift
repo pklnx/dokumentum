@@ -24,6 +24,7 @@ final class LibrarySmokeTests: XCTestCase {
     }
 
     private static let tax = 1
+    private static let important = 2
     private static let auto = 3
     private static let golf = 4
     /// Electricity bill (Tax, Inbox, a PDF), Medical invoice (Tax, Inbox), Water bill (Tax, no file),
@@ -179,6 +180,16 @@ final class LibrarySmokeTests: XCTestCase {
         ui.revealSidebarRow("sidebar.deadlines", file: file, line: line)
         XCTAssertTrue(
             Self.waitForCount(2, of: ui.element("sidebar.deadlines")), "the Deadlines count is not 2", file: file,
+            line: line)
+        // The whole value, not only its count (review N2 of #219): it says "overdue or due soon", so it differs from
+        // the "2 documents" of the Important tag, which also counts 2 (tests read no localized text).
+        let important = ui.element(Self.tagRow(Self.important))
+        XCTAssertTrue(
+            Self.waitForCount(2, of: important), "the Important tag does not count 2", file: file, line: line)
+        let deadlinesValue = ui.element("sidebar.deadlines").value as? String ?? ""
+        let documentsValue = important.value as? String ?? ""
+        XCTAssertNotEqual(
+            deadlinesValue, documentsValue, "the Deadlines row reads as documents: \(deadlinesValue)", file: file,
             line: line)
         ui.activate("sidebar.deadlines", file: file, line: line)
         let medical = ui.element(Self.documentRow(Self.medicalInvoice))

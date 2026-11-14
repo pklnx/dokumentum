@@ -12,8 +12,15 @@ import SwiftUI
 struct DeadlineBar: View {
     @Bindable var model: LibraryModel
 
+    /// The deadline the bar shows for `document`: its open deadline, unless it is in the trash (its edits are refused
+    /// there, so "Mark as Done" must not show; review N5 of #219). `nil`: no bar.
+    static func shownDeadline(of document: LibraryDocument?) -> DocumentDeadline? {
+        guard let document, !document.isTrashed else { return nil }
+        return document.openDeadline
+    }
+
     var body: some View {
-        if let document = model.selectedDocument, !document.isTrashed, let deadline = document.openDeadline {
+        if let document = model.selectedDocument, let deadline = Self.shownDeadline(of: document) {
             let status = DeadlineStatus(deadline, today: model.today)
             VStack(spacing: 0) {
                 // The buttons next to the line while it fits on one line beside them, under it otherwise (a narrow

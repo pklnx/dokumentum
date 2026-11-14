@@ -1242,7 +1242,9 @@ optional label, its overview and its editing. Due-date suggestions from the text
 ten characters exactly, otherwise ignored), and `UITestApp` passes the runner's local day in every launch. The status,
 the count, the sample deadlines and "Add Deadline"'s default read it; unit tests pass their own day
 (`LibraryModel(today:)`, `FixtureLibrarySource(today:)`, `FixtureSeeder.write(…today:)`). `LibraryModel` reads it again
-at each read of the library and at `NSCalendarDayChanged` (`observeDayChanges`, run by the root view). Day arithmetic is
+at each read of the library, at `NSCalendarDayChanged` and on the iPhone at `UIApplication.significantTimeChangeNotification`
+(`observeDayChanges`, run by the root view), and when the window's scene becomes active (review N4 of #219: whether iOS
+delivers the day change to an app suspended across midnight is not documented). Day arithmetic is
 integer arithmetic on the Gregorian day number (`DeadlineDay.dayNumber`, `adding(days:)`, `days(until:)`), so a daylight
 saving change cannot shift a status.
 
@@ -1266,21 +1268,27 @@ by title (`localizedStandardCompare`), then by `instanceID`. `LibrarySelection.f
 in the trash, the same line in callout medium, primary on the window's background, its identifier naming the status
 (`documentDetail.deadline.overdue|today|upcoming`), and two buttons, "Mark as Done" (`documentDetail.deadline.markDone`,
 writes `.deadlineDone(true)`; the document then leaves Deadlines) and "Edit…" (`documentDetail.deadline.edit`, opens the
-info panel). Nothing for a done deadline or none. The buttons stand next to the line while it fits on one line beside
+info panel). Nothing for a done deadline, none, or a document in the trash, whose edits are refused
+(`DeadlineBar.shownDeadline(of:)`). The buttons stand next to the line while it fits on one line beside
 them (`ViewThatFits`), under it otherwise (the iPhone, large text sizes). Part 2b adds the suggestion to this bar.
 
 **The info panel's "Deadline" section** (after the correspondent and type): without a deadline "Add Deadline"
 (`documentInfo.deadline.add`, 7 days after today; part 2b pre-fills the suggestion's day); with one a date-only picker
 "Due Date" limited to the years 1000–9999 (so the stored day is always ten characters, review N8), the label field
 (saved on Return, on focus loss, on a selection change and when the panel closes, only if changed, as the title:
-`TitleDraft`), the "Completed" switch and "Remove Deadline". Identifiers `documentInfo.deadline.date|label|done|remove`.
+`TitleDraft`, through `LibraryModel.commitDeadlineLabel`), the "Completed" switch and "Remove Deadline". The picker
+sends a day-only edit and the label field a label-only edit (review N1 of #219), so neither carries a value from the
+panel's snapshot that a sync may have changed meanwhile. Identifiers `documentInfo.deadline.date|label|done|remove`.
 A picker date is read as its day in the current time zone; a day is shown as noon of it (`DeadlineText`).
 
-**Editing** (`DocumentEditor`, Core; plan §6). Three changes, each with the editor's usual rules (the same value writes
+**Editing** (`DocumentEditor`, Core; plan §6). Five changes, each with the editor's usual rules (the same value writes
 nothing, a gone or trashed document is refused, `touch()`, one save, rolled back on failure):
 - `.deadline(day, label:)`: a day other than the one the document reads is a new deadline: it writes the day, the label,
   `deadlineSetAt` = now and clears `deadlineDoneAt` in one save. The day it already reads writes only a changed label
   and leaves the stored day string byte for byte (N8: a later build's `2026-11-27T14:00` survives).
+- `.deadlineDay(day)`: the day alone (the picker): a new day is a new deadline as above, and the stored label stays.
+- `.deadlineLabel(label)`: the label alone (the label field): it carries no day, so it never writes the day,
+  `deadlineSetAt` or `deadlineDoneAt`, however stale the caller's view; `.noDeadline` without a deadline.
 - `.deadlineDone(Bool)`: writes only `deadlineDoneAt` (now, or `nil`); `.noDeadline` for a document without one.
 - `.clearDeadline(dismissing:)`: empties `deadlineDay`, `deadlineLabel`, `deadlineSetAt` and `deadlineDoneAt`. With a
   day it also dismisses suggestions up to it in the same save (N9; part 2b passes the offered suggestion, part 2a's
@@ -1290,7 +1298,7 @@ nothing, a gone or trashed document is refused, `touch()`, one save, rolled back
   stored string as it is. Part 2b's dismissal goes through the same rule.
 
 `DocumentEditorDeadlineTests` (Core) pins these, with SQL proof under `swift test` that a label edit and a done toggle
-update only their own column. The mapping (`DocumentListQuery` → `DocumentSummary` → `LibraryMapping` →
+update only their own column, and that a label edit with a stale view of the day writes only the label. The mapping (`DocumentListQuery` → `DocumentSummary` → `LibraryMapping` →
 `LibraryDocument`) carries `deadline` and `dismissedSuggestionDay`; they are columns of the document row, so the list
 read still names no text, file or thumbnail table (`DocumentListQuerySQLTests`).
 

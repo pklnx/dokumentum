@@ -7,6 +7,10 @@ import Testing
 
 @testable import Dokumentum
 
+#if os(iOS)
+    import UIKit
+#endif
+
 /// The Deadlines overview in the app (#12, part 2a): "today" from `AppDay` (`-UITestToday` in Debug), the sample
 /// deadlines relative to it, the Deadlines list in its order with Q7's count behind the lead-time seam, Done taking a
 /// document out of the list, and the day change. In-memory stores and fixed days only; never the real clock.
@@ -151,6 +155,55 @@ struct DeadlineLibraryTests {
         #expect(model.counts.count(for: .upcoming) == 2)
     }
 
+    /// Review N1 of #219: the info panel's label commit is a label-only edit. The library's snapshot is stale (a sync
+    /// moved the water bill's deadline to day +5 and marked it done in the main context, and the library has not read
+    /// again), and the label commit must not send the snapshot's day +2 back: the day stays +5, done stays, `setAt`
+    /// stays the sync's.
+    @Test func aLabelCommitOnAStaleSnapshotWritesOnlyTheLabel() throws {
+        let container = try makeInMemoryContainer()
+        FixtureSeeder.seedForUITests(container.mainContext, today: Self.today)
+        let model = LibraryModel(source: StoreLibrarySource(container: container), today: { Self.today })
+        model.selection = .upcoming
+        #expect(model.snapshot.documents.first { $0.instanceID == Self.waterBill }?.deadline?.day == Self.day(2))
+
+        // The "sync": another editor on the main context; the model does not read the library again.
+        let synced = Date(timeIntervalSinceReferenceDate: 815_000_000)
+        let sync = DocumentEditor(context: container.mainContext, now: { synced })
+        #expect(try sync.apply(.deadlineDay(Self.day(5)), to: Self.waterBill) == .saved)
+        #expect(try sync.apply(.deadlineDone(true), to: Self.waterBill) == .saved)
+        #expect(model.snapshot.documents.first { $0.instanceID == Self.waterBill }?.deadline?.day == Self.day(2))
+
+        var draft = TitleDraft()
+        draft.show(Self.waterBill, title: "Pay")
+        draft.text = "Zahlen"
+        model.commitDeadlineLabel(&draft)
+
+        let stored = try #require(
+            try ModelContext(container).fetch(FetchDescriptor<Document>()).first { $0.instanceID == Self.waterBill })
+        #expect(stored.deadline?.day == Self.day(5))
+        #expect(stored.deadlineLabel == "Zahlen")
+        #expect(stored.deadlineSetAt == synced)
+        #expect(stored.deadlineDoneAt == synced)
+        #expect(!draft.isChanged)
+    }
+
+    /// Review N5 of #219: the bar shows an open deadline, but none for a document in the trash (its edits are refused
+    /// there), a done deadline or none.
+    @Test func theBarShowsNoDeadlineOfATrashedDocument() throws {
+        let rows = FixtureLibrarySource(today: Self.today).snapshot().documents
+        var water = try #require(rows.first { $0.instanceID == Self.waterBill })
+        #expect(DeadlineBar.shownDeadline(of: water) == water.deadline)
+        water.deletedAt = Date(timeIntervalSinceReferenceDate: 815_000_000)
+        #expect(water.openDeadline != nil)
+        #expect(DeadlineBar.shownDeadline(of: water) == nil)
+        let car = try #require(rows.first { $0.instanceID == Self.carInsurance })
+        #expect(car.deadline != nil)
+        #expect(DeadlineBar.shownDeadline(of: car) == nil)
+        let bill = try #require(rows.first { $0.instanceID == FixtureCatalog.documentID(1) })
+        #expect(DeadlineBar.shownDeadline(of: bill) == nil)
+        #expect(DeadlineBar.shownDeadline(of: nil) == nil)
+    }
+
     // MARK: The day changes
 
     /// A box for a test's "today", which the model reads through its closure.
@@ -174,9 +227,11 @@ struct DeadlineLibraryTests {
         #expect(model.documents.count == 3)
     }
 
-    /// `observeDayChanges` follows `NSCalendarDayChanged` on the center it is given (a private one, so no other test's
-    /// notification reaches it).
-    @Test func theModelFollowsTheDayChangeNotification() async throws {
+    /// `observeDayChanges` follows each of its notifications on the center it is given (a private one, so no other
+    /// test's notification reaches it): `NSCalendarDayChanged`, and on the iPhone the significant time change (review N4
+    /// of #219).
+    @Test(arguments: LibraryModel.dayChangeNotifications)
+    func theModelFollowsTheDayChangeNotification(name: Notification.Name) async throws {
         let clock = Clock(Self.today)
         let model = LibraryModel(source: FixtureLibrarySource(today: Self.today), today: { clock.day })
         let center = NotificationCenter()
@@ -184,9 +239,15 @@ struct DeadlineLibraryTests {
         defer { observing.cancel() }
         clock.day = Self.day(1)
         // Posted again each round, so a post before the observer is registered cannot be lost.
-        try await TestSupport.waitUntil("the model did not read the new day") {
-            center.post(name: .NSCalendarDayChanged, object: nil)
+        try await TestSupport.waitUntil("the model did not read the new day after \(name.rawValue)") {
+            center.post(name: name, object: nil)
             return model.today == Self.day(1)
         }
     }
+
+    #if os(iOS)
+        @Test func theIPhoneAlsoFollowsTheSignificantTimeChange() {
+            #expect(LibraryModel.dayChangeNotifications.contains(UIApplication.significantTimeChangeNotification))
+        }
+    #endif
 }

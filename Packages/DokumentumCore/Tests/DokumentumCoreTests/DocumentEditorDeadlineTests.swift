@@ -152,6 +152,55 @@ struct DocumentEditorDeadlineTests {
         #expect(library.saves.count == 3)
     }
 
+    // MARK: Day-only and label-only edits (review N1 of #219)
+
+    /// The info panel's label field sends `.deadlineLabel`, which carries no day. When the panel's snapshot is stale
+    /// (sync merged a new day, done, into the main context before the library read again), the label edit still writes
+    /// only the label: never the old day back, never `setAt`, never clearing `doneAt`.
+    @Test func aLabelEditWithAStaleSnapshotWritesOnlyTheLabel() throws {
+        // The store already holds the synced 2026-12-04, done; the panel still shows 2026-11-27, open.
+        let library = try makeLibrary(day: "2026-12-04", label: "Pay", setAt: Self.setAt, doneAt: Self.doneAt)
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        var expected = Fields(library.document)
+        #expect(try library.editor.apply(.deadlineLabel(" Zahlen "), to: library.document.instanceID) == .saved)
+        (expected.label, expected.modifiedAt) = ("Zahlen", Self.edited)
+        #expect(try library.stored() == expected)
+        #expect(try library.stored().day == "2026-12-04")
+        #expect(try library.stored().setAt == Self.setAt)
+        #expect(try library.stored().doneAt == Self.doneAt)
+        #expect(try library.editor.apply(.deadlineLabel("Zahlen"), to: library.document.instanceID) == .unchanged)
+        #expect(library.saves.count == 1)
+    }
+
+    /// The date picker sends `.deadlineDay`, which carries no label: a new day is a new deadline (`setAt` now, done
+    /// cleared) and keeps the stored label, also one a sync wrote after the panel read it; the day it already reads
+    /// writes nothing.
+    @Test func aDayEditKeepsTheStoredLabel() throws {
+        let library = try makeLibrary(day: "2026-11-27T14:00", label: "Synced", setAt: Self.setAt, doneAt: Self.doneAt)
+        defer { NotificationCenter.default.removeObserver(library.observer) }
+        let instanceID = library.document.instanceID
+        var expected = Fields(library.document)
+        #expect(try library.editor.apply(.deadlineDay(try Self.day("2026-11-27")), to: instanceID) == .unchanged)
+        #expect(try library.stored() == expected)
+        #expect(try library.editor.apply(.deadlineDay(try Self.day("2026-12-04")), to: instanceID) == .saved)
+        (expected.day, expected.setAt, expected.doneAt, expected.modifiedAt) = (
+            "2026-12-04", Self.edited, nil, Self.edited
+        )
+        #expect(try library.stored() == expected)
+        #expect(library.saves.count == 1)
+
+        // Without a deadline: a label alone is refused; a day gives a deadline with an empty label.
+        let empty = try makeLibrary(container: library.container)
+        defer { NotificationCenter.default.removeObserver(empty.observer) }
+        #expect(try empty.editor.apply(.deadlineLabel("Pay"), to: empty.document.instanceID) == .noDeadline)
+        #expect(empty.saves.count == 0)
+        #expect(
+            try empty.editor.apply(.deadlineDay(try Self.day("2026-12-04")), to: empty.document.instanceID) == .saved)
+        #expect(try empty.stored().day == "2026-12-04")
+        #expect(try empty.stored().label == "")
+        #expect(try empty.stored().setAt == Self.edited)
+    }
+
     /// The value a document already has writes nothing and does not save.
     @Test func theSameValueWritesNothing() throws {
         let library = try makeLibrary(day: "2026-11-27", label: "Pay", setAt: Self.setAt)
@@ -264,7 +313,8 @@ struct DocumentEditorDeadlineTests {
         let changes: [DocumentEditor.Change] = [
             .deadline(try Self.day("2026-12-04"), label: "Pay"), .deadline(try Self.day("2026-11-27"), label: "Neu"),
             .deadlineDone(true), .clearDeadline(dismissing: nil),
-            .clearDeadline(dismissing: try Self.day("2027-01-01")),
+            .clearDeadline(dismissing: try Self.day("2027-01-01")), .deadlineDay(try Self.day("2026-12-04")),
+            .deadlineLabel("Neu"),
         ]
         for change in changes {
             #expect(try library.editor.apply(change, to: library.document.instanceID) == .trashed, "\(change)")
@@ -317,6 +367,7 @@ struct DocumentEditorDeadlineTests {
         let cases: [(DocumentEditor.Change, Set<String>)] = [
             (.deadline(try Self.day("2026-11-27"), label: "Zahlen"), ["ZDEADLINELABEL", "ZMODIFIEDAT", "Z_OPT"]),
             (.deadlineDone(true), ["ZDEADLINEDONEAT", "ZMODIFIEDAT", "Z_OPT"]),
+            (.deadlineLabel("Pay"), ["ZDEADLINELABEL", "ZMODIFIEDAT", "Z_OPT"]),
         ]
         for (change, columns) in cases {
             let recording = try SQLLog.Recording()
