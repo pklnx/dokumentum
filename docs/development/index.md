@@ -379,8 +379,8 @@ change also needs "Reset Development Environment" in the CloudKit Console, a mai
 Development schema is exported and compared field by field with the newest snapshot
 (`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The PR that records step 8's deploy adds every
 version up to the deployed one (`1`, `2` and `3` once V3 is in the build) to `Schema/production-versions.txt`; from then
-on `check-schema-snapshots.py --base <sha>` fails if one of those snapshots changes. V1 stays listed because the
-migration test writes a real V1 store. Deploying the schema to Production is the maintainer's.
+on `check-schema-snapshots.py --base <sha>` fails if one of those snapshots changes. V1 and V2 stay listed because
+the migration tests write a real V1 store and a real V2 store. Deploying the schema to Production is the maintainer's.
 
 **Development schema.** CloudKit creates record types when records are first saved, or all at once through
 `DebugSchemaInitializer.run()` (DEBUG, from #2's Sync lab, on a temporary store; never at launch and never
