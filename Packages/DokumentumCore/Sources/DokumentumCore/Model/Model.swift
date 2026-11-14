@@ -4,13 +4,13 @@ import SwiftData
 
 // The current schema version's models (`DokumentumMigrationPlan.current`). Features name these, never a
 // `DokumentumSchemaV<N>`; a new schema version moves the typealiases.
-public typealias Document = DokumentumSchemaV2.Document
-public typealias DocumentFile = DokumentumSchemaV2.DocumentFile
-public typealias DocumentThumbnail = DokumentumSchemaV2.DocumentThumbnail
-public typealias DocumentText = DokumentumSchemaV2.DocumentText
-public typealias Tag = DokumentumSchemaV2.Tag
-public typealias Correspondent = DokumentumSchemaV2.Correspondent
-public typealias DocumentType = DokumentumSchemaV2.DocumentType
+public typealias Document = DokumentumSchemaV3.Document
+public typealias DocumentFile = DokumentumSchemaV3.DocumentFile
+public typealias DocumentThumbnail = DokumentumSchemaV3.DocumentThumbnail
+public typealias DocumentText = DokumentumSchemaV3.DocumentText
+public typealias Tag = DokumentumSchemaV3.Tag
+public typealias Correspondent = DokumentumSchemaV3.Correspondent
+public typealias DocumentType = DokumentumSchemaV3.DocumentType
 
 extension Document {
     /// How the document came into the archive. An unknown stored value (from a newer build) reads as
@@ -42,6 +42,20 @@ extension Document {
             guard newValue != processingState, let stored = newValue.storedValue else { return }
             processingStateRaw = stored
         }
+    }
+
+    /// The document's deadline (#12), or `nil` when it has none. **The read rule:** only the first ten characters of
+    /// `deadlineDay` are read, as `yyyy-MM-dd` (`DeadlineDay(storedValue:)`), so a later build may append a time; a
+    /// value that does not read as a day reads as no deadline, and reading never writes the stored string back.
+    public var deadline: DocumentDeadline? {
+        guard let day = DeadlineDay(storedValue: deadlineDay) else { return nil }
+        return DocumentDeadline(day: day, label: deadlineLabel, setAt: deadlineSetAt, doneAt: deadlineDoneAt)
+    }
+
+    /// The day up to which due-date suggestions are dismissed (#12), by the read rule of `deadline`; `nil` for none
+    /// or a value it cannot read.
+    public var dismissedSuggestionDay: DeadlineDay? {
+        DeadlineDay(storedValue: deadlineDismissedDay)
     }
 
     /// `false` for a deleted document, whose properties must not be read (SwiftData traps), while a view

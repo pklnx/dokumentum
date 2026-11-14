@@ -11,11 +11,14 @@ import SwiftData
 ///   checksum, which SwiftData rejects.
 public enum DokumentumMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [DokumentumSchemaV1.self, DokumentumSchemaV2.self]
+        [DokumentumSchemaV1.self, DokumentumSchemaV2.self, DokumentumSchemaV3.self]
     }
 
     public static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: DokumentumSchemaV1.self, toVersion: DokumentumSchemaV2.self)]
+        [
+            .lightweight(fromVersion: DokumentumSchemaV1.self, toVersion: DokumentumSchemaV2.self),
+            .lightweight(fromVersion: DokumentumSchemaV2.self, toVersion: DokumentumSchemaV3.self),
+        ]
     }
 
     /// The current schema version: the last of `schemas`. The one place that names it for the store

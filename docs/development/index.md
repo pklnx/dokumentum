@@ -273,12 +273,27 @@ runs, and under `swift test`.
 
 ## Data model and sync
 
-The model is `DokumentumSchemaV2` in `Packages/DokumentumCore/Sources/DokumentumCore/Model/`, seven
+The model is `DokumentumSchemaV3` in `Packages/DokumentumCore/Sources/DokumentumCore/Model/`, seven
 `@Model` classes that `NSPersistentCloudKitContainer` mirrors to the private database of
 `iCloud.space.pklnx.Dokumentum` (record types `CD_<entity>`). V2 (#10, part 1a) is V1 plus the matching rule of a
 tag, correspondent or document type: `matchModeRaw` (frozen enum `MatchMode`, `""` for no rule) and `matchPattern`,
-both `String` with the default `""`; V1 stays in the code for the migration. Features name the typealiases in
-`Model.swift` (`Document`, `Tag`, …), never a schema version. Fields and reasons: [plan.md](./plan.md), section 3.3.
+both `String` with the default `""`. V3 (#12, part 1) is V2 plus one deadline per document, five `Document` fields:
+`deadlineDay` (`String`, `""` for no deadline), `deadlineLabel` (`String`, `""`), `deadlineSetAt` and
+`deadlineDoneAt` (`Date?`), and `deadlineDismissedDay` (`String`, `""`; due-date suggestions are dismissed up to this
+day). V1 and V2 stay in the code for the migration. Features name the typealiases in `Model.swift` (`Document`, `Tag`,
+…), never a schema version. Fields and reasons: [plan.md](./plan.md), section 3.3.
+
+**A deadline is a day, not a `Date`** (#12, T2): ISO 8601 `yyyy-MM-dd`, a calendar day with no time zone (a `Date` at
+Berlin midnight reads as the day before in London), which sorts in day order and reads plainly in a dump. Kit's
+`DeadlineDay` is the value, `DocumentDeadline` (day, label, `setAt`, `doneAt`) what `Document.deadline` returns.
+**The read rule**, frozen like the enums: `Document.deadline` and `Document.dismissedSuggestionDay` read only the first
+ten characters of the string (`DeadlineDay(storedValue:)`), so a later build may append a time (`2026-11-27T14:00`)
+without a schema change. A value that does not read as a day (`""`, `garbage`, `2026-02-30`) reads as none, and
+reading never rewrites it. `DeadlineDay.storedValue` writes exactly ten characters: only the years 1000–9999 are days.
+The accessors only read; the editing that writes these fields comes with #12's part 2a (`DocumentEditor`), and
+nothing automatic (processing, repair, rules, classifier, detection) writes them. `RowState.DocumentRow` holds all
+five, so a background writer's whole-row save backs off instead of writing an old deadline back ("Concurrent saves
+(I6)" below).
 
 **One source for the current version.** `DokumentumMigrationPlan.current` (the last of `schemas`) is the version
 `ArchiveStore.schema` opens, the model `DebugSchemaInitializer.makeContainer(at:)` creates the CloudKit Development
@@ -288,7 +303,8 @@ model is `ArchiveStore.schema`'s. A new version therefore needs no edit in those
 **CloudKit rules.** Every attribute has a default or is optional; every relationship is optional and has an
 inverse; nothing is `@Attribute(.unique)`; no delete rule is `deny`; no relationship is ordered. Synced enums
 are raw `String`s read through typed accessors with a fallback (`source`, `textSource`, `processingState`,
-`matchMode`); a setter never writes a fallback back. `SchemaTests` checks the model,
+`matchMode`); a setter never writes a fallback back. The deadline days follow the same rule (`deadline`,
+`dismissedSuggestionDay`). `SchemaTests` checks the model,
 `scripts/check-schema-snapshots.py` the committed snapshots.
 
 **Large data in records of their own.** `Document` holds no large field. The PDF (`DocumentFile`), the
@@ -351,16 +367,18 @@ decides what happens to orphans (plan of #3, T7). #31 moves this note to `sync.m
    snapshot by default.
 5. Add a `StoreMigrationTests` case that writes a store with V(N-1) and opens it with V(N): `writeEveryAttribute`
    sets every attribute of V(N-1) generically and the relationships it names (extend that list for a new
-   relationship; the case fails while one is left empty), and the case checks every value after the open.
+   relationship; the case fails while one is left empty), and the case checks every value after the open. The V1
+   case (`aV1StoreWithEveryFieldOpensWithTheCurrentVersion`) opens V1 with the current version through every stage:
+   add V(N)'s fields to its counts and its list.
 6. A change of an earlier version that is not in Production yet (release.md, M1, case C7) is made identically in
    every later version, so each stage stays lightweight.
 
 **Production freezes a version.** Until step 8 nothing is in Production, and V1 may still change in place (with
-its snapshot, in the same PR, with the reason, and identically in V2 and its snapshot, step 6 above; a non-additive
+its snapshot, in the same PR, with the reason, and identically in V2, V3 and their snapshots, step 6 above; a non-additive
 change also needs "Reset Development Environment" in the CloudKit Console, a maintainer step). Before the deploy the
 Development schema is exported and compared field by field with the newest snapshot
 (`scripts/check-cloudkit-schema.py`, [release.md](./release.md), M3). The PR that records step 8's deploy adds every
-version up to the deployed one (`1` and `2` once V2 is in the build) to `Schema/production-versions.txt`; from then
+version up to the deployed one (`1`, `2` and `3` once V3 is in the build) to `Schema/production-versions.txt`; from then
 on `check-schema-snapshots.py --base <sha>` fails if one of those snapshots changes. V1 stays listed because the
 migration test writes a real V1 store. Deploying the schema to Production is the maintainer's.
 

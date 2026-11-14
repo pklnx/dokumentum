@@ -24,7 +24,8 @@ struct RowStateTests {
                 RowState.DocumentRow(
                     id: sample, instanceID: sample, title: "", createdAt: date, modifiedAt: date, documentDate: date,
                     isInbox: true, pageCount: 0, fileSize: 0, textSourceRaw: "", processingStateRaw: "",
-                    processingDeviceID: "", contentHash: "", originalFileName: "", sourceRaw: "", tags: []))
+                    processingDeviceID: "", contentHash: "", originalFileName: "", sourceRaw: "", deadlineDay: "",
+                    deadlineLabel: "", deadlineDismissedDay: "", tags: []))
         case "Tag":
             return labels(
                 RowState.TagRow(
@@ -92,6 +93,48 @@ struct RowStateTests {
         type.matchModeRaw = ""
         #expect(RowState.capture(type) != typeBefore)
         #expect(try metadataRule(RowState.capture(type)) == ["", #"IBAN\s*DE\d{20}"#])
+    }
+
+    /// The deadline fields (#12, part 1) are captured with their values, so a deadline set, moved, labelled, done or
+    /// dismissed in a background writer's window shows as a changed row and the writer's whole-row save backs off
+    /// instead of writing the old deadline back. Each field is changed alone, and each change alone changes the row.
+    @Test func theDeadlineFieldsAreCapturedWithTheirValues() throws {
+        let document = Document(title: "Wasserrechnung")
+        let setAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let doneAt = Date(timeIntervalSinceReferenceDate: 800_086_400)
+        (document.deadlineDay, document.deadlineLabel) = ("2026-11-27T14:00", "Pay")
+        (document.deadlineSetAt, document.deadlineDoneAt) = (setAt, doneAt)
+        document.deadlineDismissedDay = "2026-12-15"
+
+        func row() throws -> RowState.DocumentRow {
+            guard case .document(let row) = RowState.capture(document) else { throw CaptureKindMismatch() }
+            return row
+        }
+        let captured = try row()
+        #expect(captured.deadlineDay == "2026-11-27T14:00")
+        #expect(captured.deadlineLabel == "Pay")
+        #expect(captured.deadlineSetAt == setAt)
+        #expect(captured.deadlineDoneAt == doneAt)
+        #expect(captured.deadlineDismissedDay == "2026-12-15")
+
+        let edits: [(String, (Document) -> Void)] = [
+            ("deadlineDay", { $0.deadlineDay = "2026-12-04" }),
+            ("deadlineLabel", { $0.deadlineLabel = "Kündigen" }),
+            ("deadlineSetAt", { $0.deadlineSetAt = setAt.addingTimeInterval(60) }),
+            ("deadlineDoneAt", { $0.deadlineDoneAt = nil }),
+            ("deadlineDismissedDay", { $0.deadlineDismissedDay = "2026-12-31" }),
+        ]
+        for (name, edit) in edits {
+            let before = RowState.capture(document)
+            edit(document)
+            #expect(RowState.capture(document) != before, "\(name)")
+        }
+        let edited = try row()
+        #expect(
+            [edited.deadlineDay, edited.deadlineLabel, edited.deadlineDismissedDay]
+                == ["2026-12-04", "Kündigen", "2026-12-31"])
+        #expect(edited.deadlineSetAt == setAt.addingTimeInterval(60))
+        #expect(edited.deadlineDoneAt == nil)
     }
 
     private struct CaptureKindMismatch: Error {}

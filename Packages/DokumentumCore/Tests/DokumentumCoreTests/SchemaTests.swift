@@ -70,6 +70,41 @@ struct SchemaTests {
         }
     }
 
+    /// V3 (#12, part 1) adds exactly the five deadline fields to `Document`: the day, the label and the dismissed day
+    /// as `String` with the default `""`, the two dates optional with no default; everything of V2 is unchanged (the
+    /// snapshot script checks that too).
+    @Test func theV3ModelAddsTheDeadlineFields() throws {
+        let v2 = try Self.model(of: DokumentumSchemaV2.self)
+        let v3 = try Self.model(of: DokumentumSchemaV3.self)
+        func properties(_ model: NSManagedObjectModel) -> Set<String> {
+            Set(
+                model.entities.flatMap { entity in
+                    entity.propertiesByName.keys.map { "\(entity.name ?? "?").\($0)" }
+                })
+        }
+        let added = properties(v3).subtracting(properties(v2))
+        #expect(
+            added == [
+                "Document.deadlineDay", "Document.deadlineLabel", "Document.deadlineSetAt", "Document.deadlineDoneAt",
+                "Document.deadlineDismissedDay",
+            ])
+        #expect(properties(v2).isSubset(of: properties(v3)))
+        let document = try #require(v3.entitiesByName["Document"])
+        for name in ["deadlineDay", "deadlineLabel", "deadlineDismissedDay"] {
+            let attribute = try #require(document.attributesByName[name], "\(name)")
+            #expect(attribute.attributeType == .stringAttributeType, "\(name)")
+            #expect(!attribute.isOptional, "\(name)")
+            #expect(attribute.defaultValue as? String == "", "\(name)")
+            #expect(!attribute.allowsExternalBinaryDataStorage, "\(name)")
+        }
+        for name in ["deadlineSetAt", "deadlineDoneAt"] {
+            let attribute = try #require(document.attributesByName[name], "\(name)")
+            #expect(attribute.attributeType == .dateAttributeType, "\(name)")
+            #expect(attribute.isOptional, "\(name)")
+            #expect(attribute.defaultValue == nil, "\(name)")
+        }
+    }
+
     /// (b) The rules of a CloudKit-mirrored model.
     @Test func theModelMeetsTheCloudKitRules() throws {
         let model = try Self.model(of: DokumentumMigrationPlan.current)
@@ -93,7 +128,7 @@ struct SchemaTests {
     }
 
     /// (c) The entity names become the CloudKit record types (`CD_<name>`), so they are pinned. A nested
-    /// model class (`DokumentumSchemaV2.Document`) still gives its plain name.
+    /// model class (`DokumentumSchemaV3.Document`) still gives its plain name.
     @Test func theEntityNamesAreTheSevenRecordTypes() throws {
         let names = try Self.model(of: DokumentumMigrationPlan.current).entities.compactMap { $0.name }
         #expect(
@@ -148,7 +183,11 @@ struct SchemaTests {
     /// for each.
     @Test func theMigrationPlanEndsWithTheCurrentVersion() throws {
         let versions = DokumentumMigrationPlan.schemas
-        #expect(versions.map { $0.versionIdentifier } == [Schema.Version(1, 0, 0), Schema.Version(2, 0, 0)])
+        #expect(
+            versions.map { $0.versionIdentifier } == [
+                Schema.Version(1, 0, 0), Schema.Version(2, 0, 0), Schema.Version(3, 0, 0),
+            ])
+        #expect(DokumentumMigrationPlan.stages.count == 2)
         #expect(DokumentumMigrationPlan.stages.count == versions.count - 1)
         // Every stage is lightweight, from each version to the next (never custom: a custom stage would run on each
         // device separately).
@@ -160,11 +199,17 @@ struct SchemaTests {
             #expect(ObjectIdentifier(from) == ObjectIdentifier(versions[index]), "stage \(index + 1)")
             #expect(ObjectIdentifier(to) == ObjectIdentifier(versions[index + 1]), "stage \(index + 1)")
         }
-        #expect(ObjectIdentifier(try #require(versions.last)) == ObjectIdentifier(DokumentumSchemaV2.self))
-        #expect(ObjectIdentifier(DokumentumMigrationPlan.current) == ObjectIdentifier(DokumentumSchemaV2.self))
-        #expect(ObjectIdentifier(Document.self) == ObjectIdentifier(DokumentumSchemaV2.Document.self))
-        #expect(ObjectIdentifier(DokumentumCore.Tag.self) == ObjectIdentifier(DokumentumSchemaV2.Tag.self))
-        #expect(ArchiveStore.schema.version == Schema.Version(2, 0, 0))
+        #expect(ObjectIdentifier(try #require(versions.last)) == ObjectIdentifier(DokumentumSchemaV3.self))
+        #expect(ObjectIdentifier(DokumentumMigrationPlan.current) == ObjectIdentifier(DokumentumSchemaV3.self))
+        #expect(ObjectIdentifier(Document.self) == ObjectIdentifier(DokumentumSchemaV3.Document.self))
+        #expect(ObjectIdentifier(DocumentFile.self) == ObjectIdentifier(DokumentumSchemaV3.DocumentFile.self))
+        #expect(
+            ObjectIdentifier(DocumentThumbnail.self) == ObjectIdentifier(DokumentumSchemaV3.DocumentThumbnail.self))
+        #expect(ObjectIdentifier(DocumentText.self) == ObjectIdentifier(DokumentumSchemaV3.DocumentText.self))
+        #expect(ObjectIdentifier(DokumentumCore.Tag.self) == ObjectIdentifier(DokumentumSchemaV3.Tag.self))
+        #expect(ObjectIdentifier(Correspondent.self) == ObjectIdentifier(DokumentumSchemaV3.Correspondent.self))
+        #expect(ObjectIdentifier(DocumentType.self) == ObjectIdentifier(DokumentumSchemaV3.DocumentType.self))
+        #expect(ArchiveStore.schema.version == Schema.Version(3, 0, 0))
         for number in 1...versions.count {
             _ = try Self.committedSnapshot(number)
         }
