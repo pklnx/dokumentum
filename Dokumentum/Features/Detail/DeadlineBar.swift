@@ -11,6 +11,7 @@ import SwiftUI
 /// symbol and the word "Overdue", never colour alone. When the line does not fit beside the buttons, they go under it.
 struct DeadlineBar: View {
     @Bindable var model: LibraryModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The deadline the bar shows for `document`: its open deadline, unless it is in the trash (its edits are refused
     /// there, so "Mark as Done" must not show; review N5 of #219). `nil`: no bar.
@@ -62,22 +63,19 @@ struct DeadlineBar: View {
         .accessibilityIdentifier(AccessibilityID.detailDeadline(status))
     }
 
-    /// Side by side while both fit at their full width, one under the other otherwise ("Als erledigt markieren" and
-    /// "Bearbeiten …" at larger text sizes on the iPhone: the audit reported "Text clipped" on the second one in a row
-    /// that could not give way, #219 fix round 1).
+    /// Side by side up to the default text size, one under the other from xLarge on (#219 fix round 1): "Als erledigt
+    /// markieren" and "Bearbeiten …" side by side were clipped at larger sizes on the iPhone (the audit's "Text
+    /// clipped"), and a row held at its full width with `fixedSize` kept its text from growing ("Dynamic Type font
+    /// sizes are partially unsupported"). The labels wrap when one alone is wider than the bar.
     @ViewBuilder
     private func buttons(_ document: LibraryDocument) -> some View {
         if model.canEdit {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    markDoneButton(document)
-                    editButton
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                VStack(alignment: .leading, spacing: 8) {
-                    markDoneButton(document)
-                    editButton
-                }
+            let layout =
+                dynamicTypeSize >= .xLarge
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                markDoneButton(document)
+                editButton
             }
         }
     }
@@ -97,13 +95,19 @@ struct DeadlineBar: View {
     private func button(
         _ title: LocalizedStringKey, identifier: String, action: @escaping () -> Void
     ) -> some View {
-        Button(title, action: action)
-            #if os(iOS)
-                // As "Try again": a bordered button with a primary label, which has the contrast the plain button's
-                // system blue lacks on white.
-                .buttonStyle(.bordered)
-                .tint(.primary)
-            #endif
-            .accessibilityIdentifier(identifier)
+        Button(action: action) {
+            // The label may wrap and grow in height: a bordered button holds its text to one line otherwise, and the
+            // iPhone audit reported "Text clipped" on "Als erledigt markieren" at larger text sizes (#219 fix round 1).
+            Text(title)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #if os(iOS)
+            // As "Try again": a bordered button with a primary label, which has the contrast the plain button's
+            // system blue lacks on white.
+            .buttonStyle(.bordered)
+            .tint(.primary)
+        #endif
+        .accessibilityIdentifier(identifier)
     }
 }

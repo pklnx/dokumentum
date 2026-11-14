@@ -1270,7 +1270,10 @@ in the trash, the same line in callout medium, primary on the window's backgroun
 writes `.deadlineDone(true)`; the document then leaves Deadlines) and "Edit…" (`documentDetail.deadline.edit`, opens the
 info panel). Nothing for a done deadline, none, or a document in the trash, whose edits are refused
 (`DeadlineBar.shownDeadline(of:)`). The buttons stand next to the line while it fits on one line beside
-them (`ViewThatFits`), under it otherwise (the iPhone, large text sizes). Part 2b adds the suggestion to this bar.
+them (`ViewThatFits`), under it otherwise (the iPhone, large text sizes). The two buttons stand side by side up to the
+default text size and one under the other from xLarge on, and their labels wrap: side by side with "Als erledigt
+markieren" the iPhone audit reported "Text clipped", and a row held at full width (`fixedSize`) "Dynamic Type font sizes
+are partially unsupported" (#219 fix round 1). Part 2b adds the suggestion to this bar.
 
 **The info panel's "Deadline" section** (after the correspondent and type): without a deadline "Add Deadline"
 (`documentInfo.deadline.add`, 7 days after today; part 2b pre-fills the suggestion's day); with one a date-only picker
