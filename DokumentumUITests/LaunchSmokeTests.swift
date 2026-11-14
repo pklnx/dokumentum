@@ -13,6 +13,9 @@ final class LaunchSmokeTests: XCTestCase {
     /// What detection finds on `din-a-stadtwerke` (`SyntheticLetters`): sample data, the same in every language.
     private static let letter = "din-a-stadtwerke"
     private static let sender = "Stadtwerke Musterstadt GmbH"
+    /// The app's locale in this test, pinned so the iPhone's date picker writes the date in known forms. A run with
+    /// `DOKUMENTUM_UI_LANGUAGE` adds its own `-AppleLocale` after it; its forms are accepted too.
+    private static let dateLocale = "de_DE"
 
     @MainActor
     func testTheAppLaunchesAndShowsItsRootView() throws {
@@ -21,6 +24,8 @@ final class LaunchSmokeTests: XCTestCase {
             .localOnDisk(name: "LaunchSmoke"),
             extraArguments: [
                 "-UITestImportLetter", Self.letter, "-UITestClassifierAvailability", "deviceNotEligible",
+                // The date's forms below are this locale's, whatever the runner's (review B N5 of #209).
+                "-AppleLocale", Self.dateLocale,
             ])
         defer { quit(launched.app) }
         XCTAssertTrue(launched.element(rootIdentifier).waitForExistence(timeout: 60), "The root view did not appear")
@@ -77,17 +82,21 @@ final class LaunchSmokeTests: XCTestCase {
             let day = value.map { Calendar.current.dateComponents([.year, .month, .day], from: $0) }
             XCTAssertEqual(day, DateComponents(year: 2026, month: 11, day: 13), "not the detected date: \(shown)")
         } else {
-            // 13 November 2026 as the app's date picker can write it in this run's locale (review B N1 of #209).
+            // 13 November 2026 as the app's date picker writes it in the pinned locale (review B N1, N5 of #209).
             var components = DateComponents(year: 2026, month: 11, day: 13, hour: 12)
             components.calendar = Calendar.current
             let day = try XCTUnwrap(components.date)
-            let forms =
+            let locales =
+                [Locale(identifier: Self.dateLocale)] + (UITestApp.language.map { [Locale(identifier: $0)] } ?? [])
+            let forms = locales.flatMap { locale in
                 [DateFormatter.Style.short, .medium, .long].map { style in
                     let formatter = DateFormatter()
+                    formatter.locale = locale
                     formatter.dateStyle = style
                     formatter.timeStyle = .none
                     return formatter.string(from: day)
-                } + [day.formatted(date: .numeric, time: .omitted), day.formatted(date: .abbreviated, time: .omitted)]
+                }
+            }
             XCTAssertTrue(forms.contains { shown.contains($0) }, "not the detected date: \(shown), forms \(forms)")
         }
         ui.attachWindowScreenshot("2-detected-sender-and-date", to: self)

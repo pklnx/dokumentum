@@ -23,24 +23,23 @@ struct DetectionLetterTests {
     static let visionLetters = [
         "din-b-stadtbibliothek", "finanzamt", "probe2-bank-known", "uk-acme", "us-invoice",
     ]
-    /// **Recorded reads** of the 7 pt return-address lines of two scans, measured on macOS 27.2 (Vision `.accurate`,
-    /// de-DE and en-US, language correction) and the same in every run there (reviews of #209: 7 of 7 and 5 of 5):
-    /// the structural name comes out one letter off. The test accepts exactly the right name or exactly this read,
-    /// and nothing else (`nil`, another name, the recipient). With the sender known, the known name in the letterhead
-    /// wins (`aScannedLetterOfAKnownSenderLinksItAndCreatesNothing`).
-    static let recordedReturnLineReads = [
-        "din-b-stadtbibliothek": "Stadtbibiothek Musterstadt", "finanzamt": "Finanzamt Musterstact",
-    ]
+    /// The two scans whose 7 pt return-address line Vision reads a letter or two off, differently per platform
+    /// (reviews of #209): `Stadtbibiothek Musterstadt` and `Finanzamt Musterstact` on macOS 27.2, `Stadtbibliothek
+    /// Musterstad!` and `Finanzamt Mustorstact` on the iOS 27.0 simulator, each the same in every run there. For them
+    /// the test accepts the right name or a structural name **near-equal** to it (`NameSimilarity`, the rule that
+    /// links a known sender, `aScannedLetterOfAKnownSenderLinksItAndCreatesNothing`), and nothing else: not `nil`,
+    /// not another name, not the recipient.
+    static let returnLineMisreads: Set<String> = ["din-b-stadtbibliothek", "finanzamt"]
 
     /// The letter's known correspondents, each with an id of its own.
     static func records(_ letter: SyntheticLetter) -> [MetadataMatcher.Record] {
         letter.knownNames.map { MetadataMatcher.Record(id: UUID(), name: $0) }
     }
 
-    /// Expects the stage's result to give the letter's sender and date. `alsoAccepted`: a structural name accepted
-    /// besides the expected one (a recorded OCR read).
+    /// Expects the stage's result to give the letter's sender and date. `acceptsNearEqual`: a structural name
+    /// near-equal to the expected one is accepted too (an OCR misread, `NameSimilarity`).
     static func expectDetected(
-        _ letter: SyntheticLetter, in result: ProcessingResult, alsoAccepted: String? = nil,
+        _ letter: SyntheticLetter, in result: ProcessingResult, acceptsNearEqual: Bool = false,
         sourceLocation: SourceLocation = #_sourceLocation
     ) throws {
         let layout = try #require(result.firstPageLayout, "no layout", sourceLocation: sourceLocation)
@@ -66,10 +65,13 @@ struct DetectionLetterTests {
                 sender == .existing(id: record.id, name: name), "\(letter.id): \(lines)", sourceLocation: sourceLocation
             )
         case .structural(let name):
-            let accepted = [name] + (alsoAccepted.map { [$0] } ?? [])
-            #expect(
-                accepted.map { DetectedSender.name($0) }.contains { $0 == sender }, "\(letter.id): \(lines)",
-                sourceLocation: sourceLocation)
+            if acceptsNearEqual, case .name(let found) = sender, found != name {
+                #expect(
+                    NameSimilarity.isNearEqual(found, name), "\(letter.id): \(found) is not near \(name): \(lines)",
+                    sourceLocation: sourceLocation)
+            } else {
+                #expect(sender == .name(name), "\(letter.id): \(lines)", sourceLocation: sourceLocation)
+            }
         case .none:
             #expect(sender == nil, "\(letter.id): \(lines)", sourceLocation: sourceLocation)
         }
@@ -129,13 +131,13 @@ struct DetectionLetterTests {
         }
         let result = try await stage.value
         #expect(result.text?.source == .vision)
-        try Self.expectDetected(letter, in: result, alsoAccepted: Self.recordedReturnLineReads[id])
+        try Self.expectDetected(letter, in: result, acceptsNearEqual: Self.returnLineMisreads.contains(id))
     }
 
     /// Review B2 of #209: the two scans whose return-address line Vision misreads, with their sender **known**,
     /// through the queue (`done` path, the real stage with real Vision): the known record is linked, exactly, and no
-    /// correspondent is created. Counter-proof: the old order (each zone's structural name before the next zone's
-    /// known names) creates the misread name.
+    /// correspondent is created. Counter-proof: no near-equal exception (round 0's order alone) creates the misread
+    /// name.
     @Test(arguments: ["din-b-stadtbibliothek", "finanzamt"])
     func aScannedLetterOfAKnownSenderLinksItAndCreatesNothing(id: String) async throws {
         let letter = try #require(SyntheticLetters.letter(id))

@@ -724,10 +724,14 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     measured on macOS 27, that index skips the line breaks of `page.string`, so from the second line on it returns
     another character's bounds, and its boxes are glyph ink rather than the font's line box. At most 300 lines; the
     top zone and the footer are kept, the middle is cut (N5).
-  - **Known names first** (`SenderDetector`, review B2 of #209): a known correspondent's name read in the top zones
-    (the return-address line, then the letterhead and the info block) beats any structural name, so a correctly read
-    letterhead links the known record even when OCR misread the small return-address line; a structural name is
-    resolved and, failing that, created only when no known name is in the top zones. The footer comes last.
+  - **A misread return line** (`SenderDetector`, `NameSimilarity`; reviews B2, B4 of #209): the zones are tried as
+    #204 built them (each zone's known names, then its structural names), with one exception. The return-address
+    line's structural name yields to a known name in the letterhead that is **near-equal** to it: the same number of
+    words, each equal or within an edit distance of 1 (words of 4–7 characters) or 2 (8 or more); words up to 3
+    characters must be equal. So a 7 pt return line that OCR read a letter off (`Finanzamt Musterstact` under a
+    letterhead `Finanzamt Musterstadt`) links the known record and creates none, while a known third party named
+    beside a correctly read return line (`Gläubiger:`, `im Auftrag der`, `Auftraggeber:`, a parent company in the
+    footer) never wins. A fuzzy match of a structural name against every record, before one is created, is #206's.
   - **Rules first, then the classifier, then detection** for correspondent and date: user edit > #10 rules > #8
     classifier > #11 detection (Q3, Apple Intelligence wins). Where it runs depends on the state the text result
     write sets:
@@ -771,10 +775,11 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     name, a date or any text of the document.
   - **Tests:** the Kit detectors on layouts and the `SyntheticLetters` corpus (#204); every corpus letter rendered as
     a text PDF through the real stage (`TestLetter`, `DetectionLetterTests`), five as scans through real Vision
-    (skipped where Vision cannot run). On macOS 27.2 Vision reads the 7 pt return-address line of two of them one
-    letter off, the same in every run (`Stadtbibiothek Musterstadt`, `Finanzamt Musterstact`): the test accepts
-    exactly the right name or that recorded read, nothing else; dates and the other three letters match exactly.
-    With their sender known, both link the known record and create none, through the queue. The
+    (skipped where Vision cannot run). Vision reads the 7 pt return-address line of two of them a letter or two
+    off, differently per platform (macOS 27.2: `Stadtbibiothek Musterstadt`, `Finanzamt Musterstact`; the iOS 27.0
+    simulator: `Stadtbibliothek Musterstad!`, `Finanzamt Mustorstact`): the test accepts the right name or a
+    near-equal one, nothing else; dates and the other three letters match exactly. With their sender known, both
+    link the known record and create none, through the queue. The
     queue on both paths (`DetectionQueueTests`, `DetectionClassifyTests`), the app (`DetectionImportTests`) and the
     UI smoke (`LaunchSmokeTests` with `-UITestImportLetter` and `-UITestClassifierAvailability deviceNotEligible`,
     the `done` path).

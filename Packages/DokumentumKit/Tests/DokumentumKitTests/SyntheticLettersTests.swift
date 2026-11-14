@@ -20,6 +20,8 @@ struct SyntheticLettersTests {
             "swiss-left-references", "swiss-left-date",
             "us-letterhead-springfield", "us-legal-letterhead-springfield", "uk-letterhead-oxford",
             "din-a-small-recipient", "uk-small-recipient", "us-half-inch-margin", "finanzamt-known-misread-return-line",
+            "inkasso-creditor-info-block", "inkasso-on-behalf-info-block",
+            "inkasso-partner-letterhead", "footer-known-parent-return-line",
         ]
         for id in required { #expect(ids.contains(id), "\(id)") }
     }

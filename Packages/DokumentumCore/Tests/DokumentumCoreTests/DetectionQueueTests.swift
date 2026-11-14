@@ -223,6 +223,61 @@ struct DetectionQueueTests {
         #expect(try store.detected(id).correspondentID == keeper)
     }
 
+    /// Delta review A of #209 (DN1): a collection agency's letter with a correctly read return-address line, through
+    /// the `done` path. The owner known and named in the info block, a known record in the recipient block (c/o), and
+    /// a known creditor in the info block (`Auftraggeber: …`) never win over the return line: the agency is created
+    /// (counter-proof: round 1's order, every top-zone known name before any structural name).
+    @Test(arguments: InkassoCase.allCases)
+    func aCorrectReturnLineBeatsOtherKnownNames(case probe: InkassoCase) async throws {
+        typealias L = SyntheticLetter.Line
+        let owner: [L] = [
+            L("Herrn", x: 25, top: 35, size: 11), L("Max Mustermann", x: 25, top: 40, size: 11),
+            L("Musterweg 2", x: 25, top: 45, size: 11), L("80331 München", x: 25, top: 50, size: 11),
+        ]
+        var lines = [
+            L("Muster Inkasso GmbH · Postfach 1 23 · 12345 Musterstadt", x: 25, top: 29, size: 7),
+            L("Datum 13.11.2026", x: 125, top: 45, size: 9), L("Forderung vom 13.11.2026", x: 25, top: 95, size: 12),
+            L("Sehr geehrter Herr Mustermann,", x: 25, top: 105, size: 11),
+            L("bitte begleichen Sie den offenen Betrag.", x: 25, top: 112, size: 11),
+        ]
+        var known = [letterRecipient]
+        switch probe {
+        case .ownerInTheInfoBlock:
+            lines += owner + [L("Max Mustermann", x: 125, top: 50, size: 9)]
+        case .knownInTheRecipientBlock:
+            lines += [
+                L("Stadtwerke Musterstadt GmbH", x: 25, top: 35, size: 11),
+                L("z. Hd. Max Mustermann", x: 25, top: 40, size: 11), L("Hauptstraße 1", x: 25, top: 45, size: 11),
+                L("80331 München", x: 25, top: 50, size: 11),
+            ]
+            known.append(stadtwerkeName)
+        case .creditorInTheInfoBlock:
+            lines += owner + [L("Auftraggeber: Stadtwerke Musterstadt GmbH", x: 125, top: 40, size: 9)]
+            known.append(stadtwerkeName)
+        }
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        for name in known { try store.insertMetadata(.correspondent, name) }
+        let id = try insertPending(store)
+        let layout = SyntheticLetters.layout(lines)
+        let text = lines.sorted { ($0.top, $0.x) < ($1.top, $1.x) }.map(\.text).joined(separator: "\n")
+        let stage = ClosureStage { _, progress in
+            progress(1, 1)
+            return ProcessingResult(
+                pageCount: 1, text: ExtractedText(pages: [text], source: .pdfText), firstPageLayout: layout)
+        }
+
+        let report = await store.detectingQueue(stage: stage, clock: TestClock()).run()
+
+        #expect(report.createdCorrespondents == 1)
+        #expect(try store.detected(id).correspondent == "Muster Inkasso GmbH")
+    }
+
+    enum InkassoCase: String, CaseIterable, CustomTestStringConvertible {
+        case ownerInTheInfoBlock, knownInTheRecipientBlock, creditorInTheInfoBlock
+        var testDescription: String { rawValue }
+    }
+
     /// A tombstone is never linked: a new live record is created instead.
     @Test func aTombstoneIsNeverLinked() async throws {
         let store = try ProcessingStore()
