@@ -38,19 +38,20 @@ final class LaunchSmokeTests: XCTestCase {
         let row = ui.app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "documentList.row.")
         ).firstMatch
-        // An import of one file opens it on the iPhone; on the Mac the list shows its row.
-        let showInfo = ui.element("documentDetail.showInfo")
-        let imported = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in row.exists || showInfo.exists }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [imported], timeout: UITestApp.timeout(60)), .completed, "the letter was not imported")
-        if !showInfo.exists {
-            #if os(macOS)
-                row.click()
-            #else
-                row.tap()
-            #endif
-        }
+        #if os(macOS)
+            // The Mac's toolbar has the info button also without a selection: the row decides.
+            XCTAssertTrue(row.waitForExistence(timeout: UITestApp.timeout(60)), "the letter was not imported")
+            row.click()
+        #else
+            // An import of one file opens it on the iPhone; otherwise its row is tapped.
+            let showInfo = ui.element("documentDetail.showInfo")
+            let imported = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in row.exists || showInfo.exists }, object: nil)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [imported], timeout: UITestApp.timeout(60)), .completed,
+                "the letter was not imported")
+            if !showInfo.exists { row.tap() }
+        #endif
         ui.activate("documentDetail.showInfo")
         let correspondent = ui.element("documentInfo.correspondent")
         XCTAssertTrue(correspondent.waitForExistence(timeout: 20), "no info")
