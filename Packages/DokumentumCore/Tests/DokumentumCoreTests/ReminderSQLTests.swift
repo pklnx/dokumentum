@@ -93,6 +93,24 @@ struct ReminderSQLTests {
         #expect(open.title == "Alt")
     }
 
+    /// The oldest copy is chosen among all copies before any filter (review A N5 / B N7 of #222): an oldest copy without
+    /// a deadline means no reminder, although a newer copy has an open one, in either store order.
+    @Test(arguments: [false, true])
+    func anOldestCopyWithoutADeadlineRemindsNot(newestFirst: Bool) async throws {
+        let container = try TestSupport.makeContainer()
+        let context = ModelContext(container)
+        let instanceID = UUID()
+        let oldest = Document(title: "Without", createdAt: Date(timeIntervalSince1970: 1_790_000_000))
+        oldest.instanceID = instanceID
+        let newer = Document(title: "With", createdAt: Date(timeIntervalSince1970: 1_791_000_000))
+        newer.instanceID = instanceID
+        newer.deadlineDay = "2026-11-27"
+        for document in newestFirst ? [newer, oldest] : [oldest, newer] { context.insert(document) }
+        try context.save()
+
+        #expect(try await ReminderStoreReader(container: container).read().isEmpty)
+    }
+
     /// Synchronous on purpose: `SQLLog` records the statements of one thread.
     @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
     func theReaderReadsNoLargeTable() throws {
