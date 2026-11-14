@@ -429,19 +429,24 @@ extension ProcessingQueue {
     /// 2. it decides each field's emptiness on this row (`ClassificationFields`). Tags (#10, T13, P1): the tags are
     ///    empty unless the document has a user tag, a tag whose own rule does not match `text` (the text record
     ///    `held` names, as the step read it); only the rules of the document's own tags are evaluated (review N1),
-    ///    and a tag whose rule is invalid, times out or sits on a tombstone is a user tag (N2);
-    /// 3. it resolves the names against the live records it fetches (`MetadataMatcher`): an existing correspondent
-    ///    or type is linked, else one is inserted (P1); a tag only when exactly one live tag has the name, never a
-    ///    new one, and the tags are added to the document's rule tags;
+    ///    and a tag whose rule is invalid, times out, sits on a tombstone (N2) or has copies sharing its
+    ///    `instanceID` (#207) is a user tag;
+    /// 3. it resolves the names against the live records it fetches without records that have copies
+    ///    (`MetadataFill.live()`, #207), so names are **resolved as if the copies did not exist** (`MetadataMatcher`):
+    ///    an existing correspondent or type is linked, else one is inserted (P1); a tag only when exactly one live
+    ///    tag has the name, never a new one, and the tags are added to the document's rule tags;
     /// 4. with `detection` (#11, Approach 5), detection then fills the date and the correspondent if they are still
     ///    empty: the classifier's values win (the maintainer's Q3), and a new correspondent is created only when the
-    ///    classifier left the correspondent empty. The metadata is fetched once for both (`MetadataFill`), and only
-    ///    when a name is resolved;
+    ///    classifier left the correspondent empty. The metadata is fetched once for the copies, the names and
+    ///    detection (`MetadataFill`), and only when the document links a tag, correspondent or type or a name is
+    ///    resolved;
     /// 5. it sets only the fields it fills and `done`, and never calls `touch()`;
     /// 6. it reads the document row and every metadata row it found linked or links again in a second fresh
     ///    context (`RowState.read`) and saves only if all are unchanged (a linked record must still be live under
     ///    the same name, and the rule of each of the document's tags unchanged); otherwise it rolls back and writes
-    ///    nothing.
+    ///    nothing. A linked record with copies is not captured and not checked (#207): the check keeps the first
+    ///    copy it reads, which need not be the linked one; the write does not write its row and reads none of its
+    ///    fields. It never links one either (step 3).
     ///
     /// `text` is the text the step read; `nil` (the step's `finish`) reads the text record by key, only when the tags
     /// or the date need it.
@@ -478,21 +483,32 @@ extension ProcessingQueue {
             }
             let read = RowState.capture(document)
             var related: [RowKey: RowState] = [:]
-            if let record = document.correspondent {
+            let tags = document.tags ?? []
+            // One fetch of the metadata for the copies, the classifier's names and detection (review A of #205 for
+            // #11; #207).
+            var fill = MetadataFill(context: context)
+            // A linked record with copies sharing its `instanceID` is neither captured nor checked (#207): the check
+            // keeps the first copy it reads, which need not be the linked one, and the write would back off for ever.
+            // The write never writes that row (the link is unchanged) and no decision reads its fields.
+            let copies =
+                document.correspondent != nil || document.documentType != nil || !tags.isEmpty
+                ? try fill.copies() : MetadataFill.Copies()
+            if let record = document.correspondent, !copies.correspondents.contains(record.instanceID) {
                 related[RowKey(entity: .correspondent, instanceID: record.instanceID)] = RowState.capture(record)
             }
-            if let record = document.documentType {
+            if let record = document.documentType, !copies.documentTypes.contains(record.instanceID) {
                 related[RowKey(entity: .documentType, instanceID: record.instanceID)] = RowState.capture(record)
             }
-            // Every tag of the document, with its rule (T13): a rule edited in the window makes the write back off.
-            let tags = document.tags ?? []
-            for tag in tags {
+            // Every tag of the document without copies, with its rule (T13): a rule edited in the window makes the
+            // write back off.
+            for tag in tags where !copies.tags.contains(tag.instanceID) {
                 related[RowKey(entity: .tag, instanceID: tag.instanceID)] = RowState.capture(tag)
             }
             // T13: only needed when there are tags to add to.
             let hasUserTags =
                 !tags.isEmpty
-                && (suggestion.tags.isEmpty || Self.hasUserTag(tags, text: textOfDocument(), budget: budget))
+                && (suggestion.tags.isEmpty
+                    || Self.hasUserTag(tags, copied: copies.tags, text: textOfDocument(), budget: budget))
             let fields = ClassificationFields(
                 title: document.title, createdAt: document.createdAt, modifiedAt: document.modifiedAt,
                 documentDate: document.documentDate, hasCorrespondent: document.correspondent != nil,
@@ -507,11 +523,9 @@ extension ProcessingQueue {
             {
                 document.documentDate = stored
             }
-            // One fetch of the metadata for the classifier's names and detection (review A of #205 for #11).
-            var fill = MetadataFill(context: context)
+            // The names resolve as if the copies did not exist (`live()`, #207), as the rules and detection do.
             if fields.correspondentIsEmpty, let name = suggestion.correspondent {
-                let metadata = try fill.records()
-                let live = keeperOrder(metadata.correspondents.filter(\.isLive), \.createdAt, \.instanceID)
+                let live = keeperOrder(Array(try fill.live().correspondents.values), \.createdAt, \.instanceID)
                 if let id = MetadataMatcher.match(name, among: live.map { .init(id: $0.instanceID, name: $0.name) }),
                     let record = live.first(where: { $0.instanceID == id })
                 {
@@ -524,8 +538,7 @@ extension ProcessingQueue {
                 }
             }
             if fields.documentTypeIsEmpty, let name = suggestion.documentType {
-                let metadata = try fill.records()
-                let live = keeperOrder(metadata.documentTypes.filter(\.isLive), \.createdAt, \.instanceID)
+                let live = keeperOrder(Array(try fill.live().documentTypes.values), \.createdAt, \.instanceID)
                 if let id = MetadataMatcher.match(name, among: live.map { .init(id: $0.instanceID, name: $0.name) }),
                     let record = live.first(where: { $0.instanceID == id })
                 {
@@ -538,7 +551,7 @@ extension ProcessingQueue {
                 }
             }
             if fields.tagsAreEmpty, !suggestion.tags.isEmpty {
-                let live = try fill.records().tags.filter(\.isLive)
+                let live = Array(try fill.live().tags.values)
                 let candidates = live.map { MetadataMatcher.Record(id: $0.instanceID, name: $0.name) }
                 var linked: [Tag] = []
                 for name in suggestion.tags {
@@ -581,8 +594,12 @@ extension ProcessingQueue {
     /// T13: whether `tags` (a document's, not empty) hold a user tag, one that its own rule does not explain on
     /// `text`. Only these tags' rules are evaluated (review N1), so an edit of an unrelated rule never makes the
     /// write back off. A tag without a rule, on a tombstone (N2), with an invalid rule or one that timed out (the
-    /// outcome leaves it out) is a user tag.
-    static func hasUserTag(_ tags: [Tag], text: String, budget: MatchingBudget = .production) -> Bool {
+    /// outcome leaves it out) is a user tag, and so is a tag whose `instanceID` is in `copied` (#207): its rule is
+    /// not read, as the write does not check its row.
+    static func hasUserTag(
+        _ tags: [Tag], copied: Set<UUID> = [], text: String, budget: MatchingBudget = .production
+    ) -> Bool {
+        if tags.contains(where: { copied.contains($0.instanceID) }) { return true }
         let rules = tags.compactMap(MatchingStore.liveRule)
         guard !rules.isEmpty else { return true }
         let ruleTags = MatchingRules.evaluate(text: text, rules: rules, budget: budget).tags

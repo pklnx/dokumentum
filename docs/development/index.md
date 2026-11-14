@@ -439,6 +439,21 @@ its write and the check before the save meet the same row. The other copy is nei
 its references stay as they are, also one to a record that a merge made a tombstone (`SharedInstanceIDTests`). The
 order is applied in memory after the fetch, so the SQL the tests pin stays as it is.
 
+**Metadata copies** (a tag, correspondent or type sharing its `instanceID` with another record) are **absent for every
+background write that links or checks metadata** except the repair (#205, #207): the text write, the bulk run, detection
+and the classification write never link one, never read its rule, and the classification write does not capture or
+check a linked one (see "The result write" and "The shared fill"). Names are resolved as if the copies did not exist.
+**The repair keeps the first copy read on both sides**: its read (`RepairStore.read`/`touched`) and its check
+(`RowState.read`) go through `RowRecords`, which keeps the first record of an `instanceID` it reads, so a merge or a
+repoint and its check meet the same copy; the repair does not reduce copies (no deterministic keeper across devices,
+and deleting or tombstoning one could lose links; plan of #207). **Fetch order** (plan review N5 of #207): both of the
+repair's reads take the metadata first, in a fresh context, and in #207's probes they kept the same copy (the
+first-inserted, 20 of 20). #205 measured another order (3 of 10 unstable) in a write context where relationship faults
+came first. The classification fix does not depend on the order; the repair's agreement and `CopiedMetadataTests`'
+repair cases do, so a failure there without a code change points here first. **Residual:** each document whose
+suggested correspondent or type only copies carry gets a new record, which the repair's same-name merge makes a
+tombstone of the copied keeper: one more tombstone per such document (plan review N3 of #207).
+
 **The processing queue** (#4, part 5). `ProcessingClaimRules` (DokumentumKit) decides per document; `ProcessingQueue`
 (DokumentumCore, an actor) carries it out, one document at a time, off the main actor. Every document is claimed at
 import by the importing device (`processingDeviceID`, `processingClaimedAt`, state `pending`); another device waits
@@ -666,7 +681,8 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     **Tags** (#10, T13, the maintainer's P1) count as empty unless the document has a **user tag**: a tag whose own
     matching rule does not match the document's text. The write evaluates only the rules of the document's own tags
     (re-review N1), on the text the step read for the model (the same text record the write expects); a tag without a
-    rule, with an invalid rule or one that times out, or on a tombstone is a user tag (N2). So a document whose only
+    rule, with an invalid rule or one that times out, on a tombstone (N2), or with copies sharing its `instanceID`
+    (#207; its rule is not read) is a user tag. So a document whose only
     tags the rules added (on import or by "Apply Matching Rules") still gets the classifier's tags, **added** to its
     own, at most three new and none twice; a document with a tag the user set gets none, as before. No field records
     who set a tag, so a tag the user set by hand that its rule also matches counts as a rule tag, and the classifier
@@ -674,15 +690,20 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     the classification write; the classification normally follows the text write in the same run (T7).
   - **The result write** (`writeClassification`, T3): one synchronous call under the write discipline above. A fresh
     context fetches the document and re-checks `classify`, the exact claim, not trashed and the same text record; it
-    decides each field's emptiness on that row; it resolves names against the live records it fetches
+    decides each field's emptiness on that row; it resolves names against the live records it fetches without records
+    that have copies (`MetadataFill.live()`, #207), so names are **resolved as if the copies did not exist**
     (`MetadataMatcher`: an equal normalized name in keeper order, else the longest word prefix either way, a tie none;
     without a match a new correspondent or type is inserted, P1; a tag only when exactly one live tag has the name,
     review N7, and never a new one; tags are added to the document's rule tags, never replacing them); it sets only
     the fields it fills and `done`, without `touch()`, so a later edit is still the first; its check reads the document
     row and every metadata row it found linked or links again (`RowState.read`: a linked record must still be live
     under the same name, and each of the document's tags must keep its rule, so a rule edit of one of them in the
-    window makes the write back off, while an edit of an unrelated rule does not, N1, N3). On a mismatch it rolls back and the
-    next run decides again with the cached answer. The suggested date is stored as the detail's date picker stores a
+    window makes the write back off, while an edit of an unrelated rule does not, N1, N3). **A linked record with
+    copies** sharing its `instanceID` is not captured and not checked (#207): the check keeps the first copy it reads,
+    which need not be the linked one, so the write would back off on every run; the write never writes that row (the
+    link is unchanged) and no decision reads its fields, and a copied tag counts as a user tag. A copy that arrives by
+    sync between the fetch and the check can still make the write back off once; the next run sees it. On a mismatch
+    it rolls back and the next run decides again with the cached answer. The suggested date is stored as the detail's date picker stores a
     day: the time of day of the current `documentDate`, in the current calendar.
   - **Never overwriting an edit** holds on this store: an edit saved before the fetch makes its field non-empty (and
     title and date edited); one saved between the fetch and the check makes the write back off; the residual window
@@ -788,8 +809,9 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     "detect again" on request (N7). **Detection versus #8's cut-off (P9):** the classifier skips documents created
     before its cut-off, while detection fills such a document on the `done` path when its text is first extracted.
   - **Reads:** the text write fetches the metadata only when a rule exists or the correspondent is empty with a
-    layout; the classification write fetches it once for the classifier's names and detection together
-    (`MetadataFill.records()`), only when a name is resolved (`ProcessingSQLTests`).
+    layout; the classification write fetches it once for the copies, the classifier's names and detection together
+    (`MetadataFill.records()`), only when the document links a tag, correspondent or type (to tell copies apart,
+    #207) or a name is resolved (`ProcessingSQLTests`).
   - **Report and log:** `detectedCorrespondents`, `createdCorrespondents`, `detectedDates`; the log has counts and fixed
     codes only (`detection.correspondent`, `detection.created`, `detection.date`, `detection.noStash`), never a
     name, a date or any text of the document.
@@ -881,8 +903,10 @@ relationship, so a linked row must be one the write read. The rows a document ha
 no decision of a fill reads them (emptiness is the document row's link, which the check compares). On the `classify`
 path, detection fills after the classifier (#11's Q3), so the fill's detection step runs in both classification exits
 as well, its links merged into the classification write's related rows; the rules stay first. **A record with copies sharing its `instanceID`** is treated like a tombstone everywhere
-in matching (the fill, the rule snapshot, the editor): never a rule, never linked (`MatchingStore.withoutCopies`,
-review A of #205, B1). The write's check reads a key through `RowRecords`, which keeps the first copy read, and the
+in matching (the fill, the rule snapshot, the editor) and in the classification write (#207): never a rule, never
+linked (`MatchingStore.withoutCopies`, one counting rule with `MatchingStore.copied`; review A of #205, B1), never
+captured or checked when a document already links it, and the classifier's names are resolved as if the copies did not
+exist (`MetadataFill.live()`). The write's check reads a key through `RowRecords`, which keeps the first copy read, and the
 order of a fetch without sort descriptors is not stable between contexts (measured: of two live copies, the write's
 context read the younger one first in 3 of 10 runs and the check's context the older one). So a fill that linked any
 copy could meet another copy in its check, and the text write would back off for ever, redoing its OCR each run.

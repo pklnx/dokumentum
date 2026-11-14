@@ -435,4 +435,35 @@ struct ProcessingSQLTests {
             #expect(!SQLLog.statement(statement, names: "ZDOCUMENTTHUMBNAIL"), "\(statement)")
         }
     }
+
+    /// #207: the classification write fetches the metadata to tell copies apart only when the document links a tag,
+    /// correspondent or type (or a name is resolved). A `finish` with no stash entry and no links reads only the
+    /// check's two whole-table fetches; one whose document links a correspondent reads the fill's two as well
+    /// (counter-proof: fetch the copies unconditionally, and the first reads 4).
+    @Test(.enabled(if: SQLLog.isReadable, "Core Data logs no SQL in the xctest runner (measured on #29)"))
+    func theClassificationWriteFetchesTheMetadataOnlyWhenTheDocumentLinksSome() throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let plain = try store.insertClassify(text: stadtwerkeLetter.text)
+        let linked = try store.insertClassify(text: stadtwerkeLetter.text)
+        try store.link(linked, .correspondent, try store.insertMetadata(.correspondent, "Meine Wahl"))
+        let held = ProcessingQueue.Held(
+            stateRaw: "classify", deviceID: deviceA, claimedAt: processingStart, file: nil, checksFile: false)
+
+        func finish(_ id: UUID) throws -> [String] {
+            let recording = try SQLLog.Recording()
+            let (outcome, _) = ProcessingQueue.classificationWrite(
+                id, expecting: held, suggestion: CheckedSuggestion(), text: nil,
+                detection: ClassificationDetection(date: .fromText, stashed: nil), now: processingStart,
+                calendar: testCalendar, in: store.container, beforeCheck: nil)
+            #expect(outcome == .saved)
+            return try recording.statements()
+        }
+        let withoutLinks = try finish(plain)
+        let withALink = try finish(linked)
+
+        #expect(metadataFetches(withoutLinks) == 2, "the check's only: \(withoutLinks)")
+        #expect(metadataFetches(withALink) == 4, "the check's two and the fill's two: \(withALink)")
+        #expect(try store.classified(linked).correspondent == "Meine Wahl")
+    }
 }
