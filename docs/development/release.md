@@ -36,7 +36,7 @@ maintainer M0 switch off Xcode Cloud PR/Main: done 2026-11-13
            dry run: initialize → export → compare, no deploy (right after #155 merges, or on soak day 1)
            M2 soak: 7 days, Development, synthetic documents (starts once #155 is on main)
            M3 initialize → export → compare → schema to Production (cannot be undone)
-agent      part 4 (#185): production-versions.txt lists V1 and V2, MARKETING_VERSION YY.MM.1
+agent      part 4 (#185): production-versions.txt lists V1, V2 and V3, MARKETING_VERSION YY.MM.1
 gate       release.yml at the release commit (+ local UISmoke while #173 is open)
 maintainer M4 App Store Connect record · M5 OK · M6 archive, validate, tag, upload
            M7 clean slate · M8 install from TestFlight + device checklist
@@ -109,9 +109,9 @@ workflows would spend the quota on checks that already run elsewhere.
 - [ ] Post the results on #31; #155 merges after them.
 - [ ] **If case C7 shows that `DocumentText.extractedText` must become an external-storage `Data` field**: V1 changes
       in place (allowed before Production, #2's plan). **The same change is made identically in
-      `DokumentumSchemaV2`** (and every later version not yet in Production), with both snapshots, so the V1 → V2 stage
-      stays lightweight (#10, part 1a). CloudKit cannot change the type of the existing STRING field
-      `CD_extractedText`, so this needs a reset, in this order:
+      `DokumentumSchemaV2` and `DokumentumSchemaV3`** (and every later version not yet in Production), with every
+      snapshot, so the V1 → V2 and V2 → V3 stages stay lightweight (#10, part 1a; #12, part 1). CloudKit cannot
+      change the type of the existing STRING field `CD_extractedText`, so this needs a reset, in this order:
   1. [ ] the change merges right after M1;
   2. [ ] CloudKit Console › `iCloud.space.pklnx.Dokumentum` › Development › "Reset Development Environment";
   3. [ ] the clean slate on both devices ("Clean slate", for a development build);
@@ -119,11 +119,13 @@ workflows would spend the quota on checks that already run elsewhere.
   5. [ ] only then M2 starts. The soak runs once, on the final schema.
 - [ ] Then the dry run of M3's export and comparison ("Production deploy", "Dry run"), right after #155 merges or on
       soak day 1.
-- [ ] **The first open of a V1 store by a V2 build** (#10, part 1a), on each device whose Development store was
-      written by a build from before V2: after the V2 build's first launch, the library shows the same documents and
-      metadata as before, and the sidebar footer does not say "Sync off". No automated test covers a CloudKit-mirrored
-      store; a failed open would fall back to a local store ("Sync off"), with no data lost. It needs no run of its
-      own: it is an item of the M1 results or of soak day 1's log, whichever first runs a V2 build.
+- [ ] **The first open of an older store by a newer build**: a V1 store by a V2 build (#10, part 1a), and a V1 or
+      V2 store by a V3 build (#12, part 1), on each device whose Development store was written by a build from before
+      that version: after the newer build's first launch, the library shows the same documents and metadata as before,
+      and the sidebar footer does not say "Sync off". No automated test covers a CloudKit-mirrored store
+      (`StoreMigrationTests` opens local V1 and V2 stores with the current version); a failed open would fall back to
+      a local store ("Sync off"), with no data lost. It needs no run of its own: it is an item of the M1 results or of
+      soak day 1's log, whichever first runs a V3 build.
 
 ### M2. Soak test
 
@@ -251,7 +253,7 @@ Defects: none / #<issue>.
 
 **New builds during the soak** are fine for merges that touch neither the model nor sync (T1). From the start of the
 soak until part 4 merges, the coordinator holds every PR labelled `schema`, touching any `schema-v<N>.txt` or
-`DokumentumSchemaV<N>` (the latest is V2, #10 part 1a), or adding a version. A schema change, or a Development reset
+`DokumentumSchemaV<N>` (the latest is V3, #12 part 1), or adding a version. A schema change, or a Development reset
 in M3, restarts the soak from day 1.
 
 **Exit criteria** (P11), all of them, then M3:
@@ -280,8 +282,8 @@ stray field is classified as in "Classifying a failed comparison" (a reset decid
 first day). M3 itself still exports and compares again after the soak.
 
 1. [ ] **The build.** On the MacBook Air, run from Xcode a Debug build (the Sync lab exists only in Debug) of `main`
-   at a commit whose latest snapshot `Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema/schema-v<N>.txt` (V2
-   since #10, part 1a; `DokumentumSchemaV<N>`, which the Sync lab initializes) is the one part 4 freezes: no schema
+   at a commit whose latest snapshot `Packages/DokumentumCore/Tests/DokumentumCoreTests/Schema/schema-v<N>.txt` (V3
+   since #12, part 1; `DokumentumSchemaV<N>`, which the Sync lab initializes) is the one part 4 freezes: no schema
    PR has merged since the soak started (T1). It is development-signed, so it talks to CloudKit
    Development. Then Sync lab › "Initialize CloudKit schema". Post the commit SHA.
 2. [ ] **The export.** Either way:
@@ -310,7 +312,8 @@ first day). M3 itself still exports and compares again after the soak.
    - every field is an attribute or to-one relationship of the latest version with its type, a system field
      (`___…`), `CD_entityName`, a `CDMR` field, or the `CD_<attribute>_ckAsset` field (ASSET) of a string or binary
      attribute. Apple, "Reading CloudKit Records for Core Data": every variable-length attribute (String, Binary Data)
-     gets that field, so V1 has 14 of them (12 strings, 2 binaries) and V2 20 (its six rule fields are strings); a
+     gets that field, so V1 has 14 of them (12 strings, 2 binaries), V2 20 (its six rule fields are strings) and V3 23
+     (`deadlineDay`, `deadlineLabel` and `deadlineDismissedDay` are strings, the two deadline dates are not); a
      `uuid`, `date`, `int64` or `bool` attribute never has one;
    - an `int64` or `bool` field may be `NUMBER` (or `NUMBER PREFERRED AS INT64`): that is how CloudKit Development
      types a numeric field that a save created before the schema initializer ran (Apple, "Integrating a Text-Based
@@ -320,8 +323,8 @@ first day). M3 itself still exports and compares again after the soak.
 4. **If not clean, classify every problem first**, before any reset ("Classifying a failed comparison" below).
 5. [ ] **If clean:** CloudKit Console › Development › "Deploy Schema Changes…" to Production. **This cannot be
    undone.** Post the date. Part 4 (#185) then lists every version up to the deployed one in
-   `production-versions.txt` (`1` and `2` once V2 is in the build: the migration test keeps a real V1 store, so V1
-   stays frozen too).
+   `production-versions.txt` (`1`, `2` and `3` once V3 is in the build: the migration tests keep real V1 and V2
+   stores, so V1 and V2 stay frozen too).
 6. **If a stray field or a wrong field type remains** (an extra record type or field, for example from an earlier
    draft or a branch run on a device, or a field of the snapshot with another type) and the maintainer decided on the reset: **do not
    deploy.** Instead:

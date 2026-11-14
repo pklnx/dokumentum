@@ -19,10 +19,10 @@
             let store = try #require(NSManagedObjectModel.makeManagedObjectModel(for: ArchiveStore.schema))
             let initializer = SchemaDump.text(of: container.managedObjectModel, header: "")
             #expect(initializer == SchemaDump.text(of: store, header: ""))
-            // The fields of the newest version are there, so the comparison above is not between two old models.
-            let tag = try #require(container.managedObjectModel.entitiesByName["Tag"])
-            #expect(tag.attributesByName["matchModeRaw"]?.attributeType == .stringAttributeType)
-            #expect(tag.attributesByName["matchPattern"]?.attributeType == .stringAttributeType)
+            // A field of the newest version (V3, #12 part 1) is there, so the comparison above is not between two
+            // old models.
+            let document = try #require(container.managedObjectModel.entitiesByName["Document"])
+            #expect(document.attributesByName["deadlineDay"]?.attributeType == .stringAttributeType)
             #expect(container.persistentStoreCoordinator.persistentStores.isEmpty)
             #expect(!FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
         }

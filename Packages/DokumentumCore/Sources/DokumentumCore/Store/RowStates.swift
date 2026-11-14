@@ -43,6 +43,13 @@ enum RowState: Equatable, Sendable {
         var originalFileName: String
         var sourceRaw: String
         var deletedAt: Date?
+        /// The deadline (#12): a deadline set, moved, labelled, done or dismissed in a writer's window makes it back
+        /// off, so the writer's whole-row save never writes the old deadline back.
+        var deadlineDay: String
+        var deadlineLabel: String
+        var deadlineSetAt: Date?
+        var deadlineDoneAt: Date?
+        var deadlineDismissedDay: String
         var correspondent: UUID?
         var documentType: UUID?
         var tags: Set<UUID>
@@ -122,7 +129,9 @@ enum RowState: Equatable, Sendable {
                 processingStateRaw: document.processingStateRaw, processingDeviceID: document.processingDeviceID,
                 processingClaimedAt: document.processingClaimedAt, contentHash: document.contentHash,
                 originalFileName: document.originalFileName, sourceRaw: document.sourceRaw,
-                deletedAt: document.deletedAt, correspondent: document.correspondent?.instanceID,
+                deletedAt: document.deletedAt, deadlineDay: document.deadlineDay, deadlineLabel: document.deadlineLabel,
+                deadlineSetAt: document.deadlineSetAt, deadlineDoneAt: document.deadlineDoneAt,
+                deadlineDismissedDay: document.deadlineDismissedDay, correspondent: document.correspondent?.instanceID,
                 documentType: document.documentType?.instanceID, tags: Set((document.tags ?? []).map(\.instanceID)),
                 file: document.file?.persistentModelID, thumbnail: document.thumbnail?.persistentModelID,
                 text: document.text?.persistentModelID))

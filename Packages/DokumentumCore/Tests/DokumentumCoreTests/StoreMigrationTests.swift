@@ -7,8 +7,9 @@ import SwiftData
 import Testing
 
 /// Every store opens through `DokumentumMigrationPlan`. **The template for later versions:** schema version N
-/// adds a test that writes a store with V(N-1) (`writeEveryAttribute` and `writeCoreDataStore` with
-/// `DokumentumSchemaV<N-1>.models`) and opens it with V(N), and the round trip moves to V(N).
+/// adds a test that writes a store with V(N-1) (`writeEveryAttribute` with `DokumentumSchemaV<N-1>.models`) and opens
+/// it with V(N), the V1 test's counts grow by V(N)'s fields (it opens V1 with the current version, through every
+/// stage), and the round trip moves to V(N).
 struct StoreMigrationTests {
     /// Large enough for external storage (Core Data moves binary data over about 100 KB into a file).
     static let pdf = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
@@ -55,6 +56,11 @@ struct StoreMigrationTests {
         document.originalFileName = "strom.pdf"
         document.sourceRaw = "scan"
         document.deletedAt = date.addingTimeInterval(20)
+        document.deadlineDay = "2026-11-27T14:00"
+        document.deadlineLabel = "Zahlen „bis Freitag“"
+        document.deadlineSetAt = date.addingTimeInterval(30)
+        document.deadlineDoneAt = date.addingTimeInterval(40)
+        document.deadlineDismissedDay = "2026-12-15"
         let file = DocumentFile(documentID: document.id, pdfData: pdf, createdAt: date)
         let thumbnail = DocumentThumbnail(documentID: document.id, imageData: image, createdAt: date)
         let text = DocumentText(documentID: document.id, extractedText: text, createdAt: date)
@@ -86,6 +92,10 @@ struct StoreMigrationTests {
                     + "textSource=\(d.textSourceRaw) state=\(d.processingStateRaw) device=\(d.processingDeviceID) "
                     + "claimed=\(String(describing: d.processingClaimedAt)) hash=\(d.contentHash) "
                     + "name=\(d.originalFileName) source=\(d.sourceRaw) deleted=\(String(describing: d.deletedAt)) "
+                    + "deadlineDay=\(d.deadlineDay) deadlineLabel=\(d.deadlineLabel) "
+                    + "deadlineSetAt=\(String(describing: d.deadlineSetAt)) "
+                    + "deadlineDoneAt=\(String(describing: d.deadlineDoneAt)) "
+                    + "deadlineDismissedDay=\(d.deadlineDismissedDay) "
                     + "correspondent=\(String(describing: d.correspondent?.instanceID)) "
                     + "type=\(String(describing: d.documentType?.instanceID)) tags=\(ids(d.tags) { $0.instanceID }) "
                     + "file=\(String(describing: d.file?.instanceID)) "
@@ -136,8 +146,9 @@ struct StoreMigrationTests {
         return lines.sorted()
     }
 
-    /// Round trip of the current version on disk: everything written, the rule fields of V2 included, comes back
-    /// after the store is closed and reopened through the migration plan, the external-storage blobs included.
+    /// Round trip of the current version on disk: everything written, the rule fields of V2 and the deadline fields of
+    /// V3 included, comes back after the store is closed and reopened through the migration plan, the external-storage
+    /// blobs included.
     @Test func everyFieldSurvivesAReopen() throws {
         SQLLog.enable()
         let url = try TestSupport.makeTemporaryDirectory().appending(path: "RoundTrip.store")
@@ -155,6 +166,14 @@ struct StoreMigrationTests {
         // The five records with a rule hold both of its fields, so a rule field that is not stored fails here.
         let rules = written.filter { $0.contains(" mode=") && !$0.contains(" mode= ") && !$0.contains(" pattern= ") }
         #expect(rules.count == 5, "\(rules)")
+        // The document holds all five deadline fields with values, so a deadline field that is not stored fails here.
+        let document = try #require(written.first { $0.hasPrefix("Document ") })
+        for field in [
+            "deadlineDay=2026-11-27T14:00 ", "deadlineLabel=Zahlen „bis Freitag“ ",
+            "deadlineSetAt=Optional(", "deadlineDoneAt=Optional(", "deadlineDismissedDay=2026-12-15 ",
+        ] {
+            #expect(document.contains(field), "\(field)")
+        }
         // The blobs went to external storage, so the round trip covered that path.
         let externalFolder = url.deletingLastPathComponent().appending(path: ".RoundTrip_SUPPORT/_EXTERNAL_DATA")
         let external = try FileManager.default.contentsOfDirectory(atPath: externalFolder.path)
@@ -167,7 +186,7 @@ struct StoreMigrationTests {
     }
 
     /// A store written by Core Data with the V1 model, as another build or device writes it, opens through the
-    /// migration plan with its data (in V2 since #10, part 1a).
+    /// migration plan with its data (in the current version, through every stage).
     @Test func aCoreDataV1StoreOpensThroughThePlan() throws {
         SQLLog.enable()
         let url = try TestSupport.makeTemporaryDirectory().appending(path: "CoreData-V1.store")
@@ -186,37 +205,27 @@ struct StoreMigrationTests {
         #expect(document.isInbox, "the default written by the model")
     }
 
-    /// V1 → V2 (#10, part 1a): a store written with V1's model, every attribute of every entity set to a value
-    /// other than its default and every relationship set, opens with V2 through the migration plan. Every V1 value
-    /// and link is kept, and the fields V2 adds read their defaults: the rule fields `""`, so no rule.
+    /// V1 → current (#10, part 1a; through every stage since #12, part 1, review N2): a store written with V1's model,
+    /// every attribute of every entity set to a value other than its default and every relationship set, opens with the
+    /// current version through the migration plan, V1 → V2 → V3. Every V1 value and link is kept, and every field a
+    /// later version adds reads its default: V2's rule fields `""`, so no rule; V3's deadline fields `""` and `nil`, so no
+    /// deadline. This is the path of a device whose Development store is still V1 (release.md, M1).
     ///
     /// SwiftData opens such a store even when V1 is missing from the plan: it then infers the same lightweight
     /// migration (measured on #198; probe P-1 of #10's plan found the same for a model changed in place). So this
     /// test checks what the open keeps, not that the stage is listed; `SchemaTests` pins the versions and stages.
-    @Test func aV1StoreWithEveryFieldOpensWithV2() throws {
+    @Test func aV1StoreWithEveryFieldOpensWithTheCurrentVersion() throws {
         SQLLog.enable()
         let url = try TestSupport.makeTemporaryDirectory().appending(path: "EveryField-V1.store")
         let v1 = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV1.models))
         let written = try Self.writeEveryAttribute(at: url, model: v1)
-        let records = Set(written.map { $0.split(separator: " ").prefix(2).joined(separator: " ") })
-        #expect(records.count == 8, "one record of each entity and a second tag: \(records.sorted())")
-        // Every relationship of V1 links something in the written store, so a relationship that a later version's
-        // `writeEveryAttribute` forgets to set fails here instead of comparing equal as empty on both sides.
-        let linked = Set(
-            written.compactMap { line -> String? in
-                let parts = line.split(separator: " ")
-                guard parts.count == 3, let arrow = parts[2].range(of: "->"), arrow.upperBound != parts[2].endIndex
-                else { return nil }
-                return "\(parts[0]).\(parts[2][..<arrow.lowerBound])"
-            })
-        let relationships = Set(
-            v1.entities.flatMap { entity in entity.relationshipsByName.keys.map { "\(entity.name ?? "?").\($0)" } })
-        #expect(linked == relationships, "relationships left empty: \(relationships.subtracting(linked).sorted())")
+        try Self.expectEveryRecordAndRelationship(in: written, of: v1)
 
         let container = try TestSupport.makeContainerOnDisk(at: url)
         let context = ModelContext(container)
-        #expect(ArchiveStore.schema.version == Schema.Version(2, 0, 0))
-        // Read through the typealiases (V2): the V1 values are there and the rule fields read as no rule.
+        #expect(ArchiveStore.schema.version == Schema.Version(3, 0, 0))
+        // Read through the typealiases (the current version): the V1 values are there, the rule fields read as no
+        // rule and the deadline fields as no deadline.
         let tags = try context.fetch(FetchDescriptor<DokumentumCore.Tag>())
         let correspondents = try context.fetch(FetchDescriptor<Correspondent>())
         let types = try context.fetch(FetchDescriptor<DocumentType>())
@@ -232,25 +241,105 @@ struct StoreMigrationTests {
         let document = try #require(try context.fetch(FetchDescriptor<Document>()).first)
         #expect(document.correspondent?.name == "Correspondent.name 1 ü")
         #expect(document.tags?.count == 2)
+        #expect(document.title == "Document.title 1 ü")
+        #expect(document.deadline == nil && document.dismissedSuggestionDay == nil)
 
         // Every V1 attribute and relationship, read again with the current model's Core Data form: unchanged.
         let current = try #require(
             NSManagedObjectModel.makeManagedObjectModel(for: DokumentumMigrationPlan.current.models))
         let read = try Self.readEveryAttribute(at: url, model: current, keeping: v1)
         #expect(read.kept == written)
-        #expect(read.added.count == 8, "two fields on two tags, one correspondent and one type: \(read.added)")
         #expect(
-            read.added.allSatisfy { $0.hasSuffix("=\"\"") }, "every field V2 adds reads its default: \(read.added)")
-        let addedFields = Set(
-            read.added.map { line in
+            read.added.count == 13,
+            "V2: two fields on two tags, one correspondent and one type; V3: five on the document: \(read.added)")
+        try Self.expectDefaults(read.added, in: current)
+        #expect(
+            Self.fields(of: read.added) == [
+                "Tag.matchModeRaw", "Tag.matchPattern", "Correspondent.matchModeRaw", "Correspondent.matchPattern",
+                "DocumentType.matchModeRaw", "DocumentType.matchPattern", "Document.deadlineDay",
+                "Document.deadlineLabel", "Document.deadlineSetAt", "Document.deadlineDoneAt",
+                "Document.deadlineDismissedDay",
+            ])
+    }
+
+    /// V2 → V3 (#12, part 1): a store written with V2's model, every attribute set to a value other than its default
+    /// and every relationship set, opens with V3 through the migration plan. Every V2 value and link is kept, the rule
+    /// fields included, and the five deadline fields read their defaults (`""` and `nil`), so no deadline.
+    @Test func aV2StoreWithEveryFieldOpensWithV3() throws {
+        SQLLog.enable()
+        let url = try TestSupport.makeTemporaryDirectory().appending(path: "EveryField-V2.store")
+        let v2 = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV2.models))
+        let written = try Self.writeEveryAttribute(at: url, model: v2)
+        try Self.expectEveryRecordAndRelationship(in: written, of: v2)
+        #expect(written.contains { $0.hasSuffix(" matchPattern=\"Tag.matchPattern 1 ü\"") }, "V2's rule fields")
+
+        let container = try TestSupport.makeContainerOnDisk(at: url)
+        let context = ModelContext(container)
+        #expect(ArchiveStore.schema.version == Schema.Version(3, 0, 0))
+        // Read through the typealiases (V3): the V2 values are there, and there is no deadline.
+        let tags = try context.fetch(FetchDescriptor<DokumentumCore.Tag>())
+        #expect(Set(tags.map(\.matchPattern)) == ["Tag.matchPattern 1 ü", "Tag.matchPattern 2 ü"])
+        let type = try #require(try context.fetch(FetchDescriptor<DocumentType>()).first)
+        #expect(type.matchModeRaw == "DocumentType.matchModeRaw 1 ü" && type.matchMode == .unknown)
+        let document = try #require(try context.fetch(FetchDescriptor<Document>()).first)
+        #expect(document.title == "Document.title 1 ü")
+        #expect(document.tags?.count == 2)
+        #expect(document.deadline == nil && document.dismissedSuggestionDay == nil)
+        #expect([document.deadlineDay, document.deadlineLabel, document.deadlineDismissedDay] == ["", "", ""])
+        #expect(document.deadlineSetAt == nil && document.deadlineDoneAt == nil)
+
+        // Every V2 attribute and relationship, read again with V3's Core Data form: unchanged.
+        let v3 = try #require(NSManagedObjectModel.makeManagedObjectModel(for: DokumentumSchemaV3.models))
+        let read = try Self.readEveryAttribute(at: url, model: v3, keeping: v2)
+        #expect(read.kept == written)
+        #expect(read.added.count == 5, "five fields on the one document: \(read.added)")
+        try Self.expectDefaults(read.added, in: v3)
+        #expect(
+            Self.fields(of: read.added) == [
+                "Document.deadlineDay", "Document.deadlineLabel", "Document.deadlineSetAt", "Document.deadlineDoneAt",
+                "Document.deadlineDismissedDay",
+            ])
+    }
+
+    /// What `writeEveryAttribute` wrote with `model`: one record of each entity and a second tag, and every
+    /// relationship links something, so a relationship that a later version's `writeEveryAttribute` forgets to set
+    /// fails here instead of comparing equal as empty on both sides.
+    static func expectEveryRecordAndRelationship(in written: [String], of model: NSManagedObjectModel) throws {
+        let records = Set(written.map { $0.split(separator: " ").prefix(2).joined(separator: " ") })
+        #expect(records.count == 8, "one record of each entity and a second tag: \(records.sorted())")
+        let linked = Set(
+            written.compactMap { line -> String? in
+                let parts = line.split(separator: " ")
+                guard parts.count == 3, let arrow = parts[2].range(of: "->"), arrow.upperBound != parts[2].endIndex
+                else { return nil }
+                return "\(parts[0]).\(parts[2][..<arrow.lowerBound])"
+            })
+        let relationships = Set(
+            model.entities.flatMap { entity in entity.relationshipsByName.keys.map { "\(entity.name ?? "?").\($0)" } })
+        #expect(linked == relationships, "relationships left empty: \(relationships.subtracting(linked).sorted())")
+    }
+
+    /// Every line of `added` (`<entity> <instanceID> <attribute>=<value>`) holds the default of its attribute in
+    /// `model`: `""` for the strings, `nil` for an optional date.
+    static func expectDefaults(_ added: [String], in model: NSManagedObjectModel) throws {
+        for line in added {
+            let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
+            let assignment = try #require(parts.count == 3 ? parts[2] : nil, "\(line)")
+            let name = String(assignment.prefix { $0 != "=" })
+            let attribute = try #require(model.entitiesByName[parts[0]]?.attributesByName[name], "\(line)")
+            #expect(
+                assignment == "\(name)=\(Self.text(of: attribute.defaultValue))",
+                "a field a later version adds reads its default: \(line)")
+        }
+    }
+
+    /// The `<entity>.<attribute>` names of `added`.
+    static func fields(of added: [String]) -> Set<String> {
+        Set(
+            added.map { line in
                 let parts = line.split(separator: " ")
                 return "\(parts[0]).\(parts[2].prefix { $0 != "=" })"
             })
-        #expect(
-            addedFields == [
-                "Tag.matchModeRaw", "Tag.matchPattern", "Correspondent.matchModeRaw", "Correspondent.matchPattern",
-                "DocumentType.matchModeRaw", "DocumentType.matchPattern",
-            ])
     }
 
     /// Writes a new store at `url` with `model` (an older version's Core Data form, as another build writes it):

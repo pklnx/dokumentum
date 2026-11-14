@@ -161,7 +161,7 @@ extension imports neither store nor model (see 3.4).
 ### 3.3 Model (v1)
 | Entity | Fields (all with defaults, as CloudKit requires) |
 |---|---|
-| `Document` | id, instanceID, title, createdAt, modifiedAt, documentDate, isInbox, pageCount, fileSize, textSourceRaw, processingStateRaw, processingDeviceID, processingClaimedAt, contentHash (SHA-256 of the original bytes), originalFileName, sourceRaw, deletedAt (trash), correspondent, documentType, tags, file, thumbnail, text |
+| `Document` | id, instanceID, title, createdAt, modifiedAt, documentDate, isInbox, pageCount, fileSize, textSourceRaw, processingStateRaw, processingDeviceID, processingClaimedAt, contentHash (SHA-256 of the original bytes), originalFileName, sourceRaw, deletedAt (trash), deadlineDay, deadlineLabel, deadlineSetAt, deadlineDoneAt, deadlineDismissedDay, correspondent, documentType, tags, file, thumbnail, text |
 | `DocumentFile` | id, instanceID, createdAt, documentID, pdfData (external storage), document |
 | `DocumentThumbnail` | id, instanceID, createdAt, documentID, imageData (external storage), document |
 | `DocumentText` | id, instanceID, createdAt, documentID, extractedText, document |
@@ -189,9 +189,18 @@ Built in step 1 as `DokumentumSchemaV1` (#29). Names beyond the first draft:
   mode is the frozen enum `MatchMode` (none, any, all, exact, regex), always
   case-insensitive. Added additively as `DokumentumSchemaV2` (#10, part 1a),
   so V1 stores open through one lightweight stage.
+- `deadlineDay`, `deadlineLabel`, `deadlineSetAt`, `deadlineDoneAt` and
+  `deadlineDismissedDay` on documents (step 11, #12): one deadline per
+  document. The day is an ISO 8601 `yyyy-MM-dd` string (`""` for none), a
+  calendar day with no time zone, read by its first ten characters only, so
+  a later build may append a time; `deadlineSetAt` is when a user last set
+  it, `deadlineDoneAt` when it was marked done, and `deadlineDismissedDay`
+  the day up to which due-date suggestions are dismissed. Added additively
+  as `DokumentumSchemaV3` (#12, part 1), one lightweight stage from V2.
 
-Later steps add fields additively (notes, favorite, ASN, deadlines, saved
-views, trash retention; matching rules are the first, in V2). Names follow
+Later steps add fields additively (notes, favorite, ASN, saved views, trash
+retention; matching rules are the first, in V2, and deadlines the second, in
+V3). Names follow
 the old app where they fit, so the archive folder format (step 16) can stay
 compatible with its version 1.x.
 
