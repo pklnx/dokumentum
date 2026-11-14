@@ -65,6 +65,7 @@ struct LibraryRootView: View {
         .modifier(ImportSupport(controller: importController, launchStore: launchStore))
         #if DEBUG
             .modifier(sampleDocumentsCommand)
+            .modifier(SyncLabPresenter())
         #endif
         #if DEBUG || SEARCH_BENCHMARK
             .modifier(SearchBenchmarkPresenter())

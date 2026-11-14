@@ -103,6 +103,9 @@ public actor SearchIndexer: DocumentSearching {
     /// Whether this launch already rebuilt for a history error that was not an expiry (N5).
     private var rebuiltForHistoryError = false
     private var loggedHistoryErrors: Set<String> = []
+    /// The code ("domain code", `Log.code(of:)`) of the last history error of this launch, an expiry included, or
+    /// `nil` (T11 of #31: the Sync lab shows why a search missed). Read only; it changes nothing.
+    public private(set) var lastHistoryErrorCode: String?
 
     /// Builds started, the first one included (for tests).
     public private(set) var builds = 0
@@ -331,7 +334,8 @@ public actor SearchIndexer: DocumentSearching {
         switch read.history {
         case .changes(let changes):
             apply(changes, to: &live)
-        case .expired:
+        case .expired(let code):
+            lastHistoryErrorCode = code
             Log.search.notice("Search history expired; rebuilding the index")
             return .rebuild
         case .failed(let code):
@@ -437,6 +441,7 @@ public actor SearchIndexer: DocumentSearching {
     }
 
     private func logHistoryError(code: String) {
+        lastHistoryErrorCode = code
         guard loggedHistoryErrors.insert(code).inserted else { return }
         Log.search.error("Search history failed: \(code, privacy: .public)")
     }

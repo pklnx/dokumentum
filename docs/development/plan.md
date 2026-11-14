@@ -124,7 +124,8 @@ extension imports neither store nor model (see 3.4).
 - **Sync status** is shown: one line in the sidebar footer (last
   import/export event, iCloud account state, account change or sign-out,
   "iCloud storage full"), and an "iCloud Sync" detail opened from it. The
-  app works fully offline.
+  app works fully offline. What syncs how between the two devices, and the
+  protocol that measured it: `docs/development/sync.md`.
 - **Frozen enums.** Values that sync (`processingState`, `textSource`,
   `source`) are stored as raw `String`s and mapped to a fallback when a
   value is unknown, so an older TestFlight build on the other device never

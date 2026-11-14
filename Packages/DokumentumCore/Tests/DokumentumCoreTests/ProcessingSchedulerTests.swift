@@ -283,6 +283,164 @@ struct ProcessingSchedulerTests {
         #expect(runner.interrupts.count == 1)
     }
 
+    // MARK: The hold (#31, T14)
+
+    /// While held, neither `resume()` (a scene activation, a background task) nor a store change nor an import starts
+    /// a run; `releaseHold()` runs the queue.
+    @Test func aHoldKeepsResumeAndTriggersFromRunningUntilReleased() async throws {
+        let runner = StubRunner()
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+        let requests = TestSignal()
+        scheduler.didRequestRun = { requests.fire() }
+        scheduler.start()
+        await setup.runs.wait(for: 1)
+
+        scheduler.hold()
+        #expect(scheduler.isHeld)
+        #expect(!scheduler.isPaused, "the hold set the pause")
+        scheduler.resume()
+        #expect(!scheduler.isRunning, "resume() ended the hold")
+        setup.insertions.yield()
+        await requests.wait(for: 3, "the import was not handled")
+        setup.center.post(name: ModelContext.didSave, object: setup.container.mainContext)
+        await setup.debounce.waitForStarts(1)
+        setup.debounce.fire()
+        await requests.wait(for: 4, "the store change was not handled")
+        #expect(!scheduler.isRunning, "a trigger started a run while held")
+        #expect(!scheduler.isQueued)
+        #expect(runner.started.count == 1)
+
+        scheduler.releaseHold()
+        #expect(!scheduler.isHeld)
+        await setup.runs.wait(for: 2)
+        #expect(runner.started.count == 2)
+    }
+
+    /// The hold and the pause are two flags (Revision 2): hold, `pause()`, `releaseHold()` starts no run, because the
+    /// pause still holds; `resume()` then runs.
+    @Test func holdAndPauseAreSeparateFlags() async throws {
+        let runner = StubRunner()
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+        scheduler.start()
+        await setup.runs.wait(for: 1)
+
+        scheduler.hold()
+        scheduler.pause()
+        scheduler.releaseHold()
+        #expect(!scheduler.isHeld)
+        #expect(scheduler.isPaused, "releaseHold() ended the pause")
+        #expect(!scheduler.isRunning, "releaseHold() ran while paused")
+        #expect(runner.started.count == 1)
+
+        scheduler.resume()
+        await setup.runs.wait(for: 2)
+        #expect(runner.started.count == 2)
+
+        // And the other way round: pause, hold, `resume()` starts nothing; `releaseHold()` runs.
+        scheduler.pause()
+        scheduler.hold()
+        scheduler.resume()
+        #expect(!scheduler.isRunning, "resume() ran while held")
+        scheduler.releaseHold()
+        await setup.runs.wait(for: 3)
+        #expect(runner.started.count == 3)
+    }
+
+    /// A hold during a run interrupts it as `pause()` does: the attempt is given back at once and the run is
+    /// cancelled; the run that `hold()` ended does not drain.
+    @Test func aHoldDuringARunInterruptsIt() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+        let drains = TestSignal()
+        scheduler.didDrain = { drains.fire() }
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.hold()
+        #expect(runner.interrupts.count == 1, "the refund is synchronous")
+        gate.release()
+        await setup.runs.wait(for: 1)
+        #expect(runner.cancelled.withLock { $0 } == [true], "the run was not cancelled")
+        #expect(drains.count == 0, "a run ended by hold() drained")
+        #expect(!scheduler.isRunning)
+
+        scheduler.releaseHold()
+        await setup.runs.wait(for: 2)
+        await drains.wait(for: 1, "the run after releaseHold() did not drain")
+        #expect(runner.cancelled.withLock { $0 } == [true, false])
+    }
+
+    /// A `releaseHold()` while the run that `hold()` interrupted is still ending queues one more run, which starts
+    /// once the interrupted one has returned (review B, N3 of PR #155; as `resume()` does after a `pause()`).
+    @Test func aReleaseWhileTheInterruptedRunIsEndingRunsAgain() async throws {
+        let gate = Checkpoint()
+        defer { gate.release() }
+        let runner = StubRunner(gate: gate)
+        let setup = try makeScheduler(runner: runner)
+        defer { setup.scheduler.stop() }
+        let scheduler = setup.scheduler
+
+        scheduler.start()
+        await gate.reached()
+        scheduler.hold()
+        scheduler.releaseHold()
+        #expect(scheduler.isRunning, "the interrupted run has not returned yet")
+        #expect(scheduler.isQueued, "the release did not queue a run behind the ending one")
+        gate.release()
+        await setup.runs.wait(for: 2)
+        #expect(runner.started.count == 2)
+        #expect(runner.cancelled.withLock { $0 } == [true, false])
+    }
+
+    /// The hold writes nothing (T14): with the real queue and a pending document of this device, a hold before the
+    /// launch run and a `resume()` while held save nothing and run no stage; `releaseHold()` processes the document.
+    @Test func theHoldWritesNothing() async throws {
+        let store = try ProcessingStore()
+        defer { store.remove() }
+        let id = try store.insert(device: deviceA, claimedAt: processingStart)
+        let container = store.container
+        let saves = TestSignal()
+        let token = NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: nil, queue: nil) {
+            notification in
+            guard let context = notification.object as? ModelContext,
+                ObjectIdentifier(context.container) == ObjectIdentifier(container)
+            else { return }
+            saves.fire()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        let stage = TestStage()
+        let scheduler = ProcessingScheduler(
+            runner: store.queue(deviceA, stage: stage, clock: TestClock()),
+            observer: StoreChangeObserver(container: container, sleep: ManualDebounce().sleep),
+            insertions: AsyncStream { _ in }, sleep: ManualDebounce().sleep)
+        defer { scheduler.stop() }
+        let runs = TestSignal()
+        scheduler.didFinishRun = { _ in runs.fire() }
+
+        scheduler.hold()
+        scheduler.start()
+        scheduler.resume()
+        #expect(!scheduler.isRunning)
+        #expect(scheduler.lastReport == nil)
+        #expect(stage.count == 0)
+        #expect(saves.count == 0, "the hold saved")
+        #expect(try store.row(id).stateRaw == "pending")
+
+        scheduler.releaseHold()
+        await runs.wait(for: 1)
+        #expect(stage.count == 1)
+        #expect(scheduler.lastReport?.done == 1)
+        #expect(try store.row(id).stateRaw == "done")
+    }
+
     /// `didDrain` (the background tasks' hook, plan of #6, part 5) comes once when the runs end and none follows:
     /// not after each run of a queued chain, and not after a run that `pause()` ended.
     @Test func theRunsDrainOnceAndNotWhenPaused() async throws {

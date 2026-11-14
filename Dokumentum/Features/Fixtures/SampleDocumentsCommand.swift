@@ -73,6 +73,7 @@
     /// The iPhone sidebar's toolbar menu.
     struct DebugToolbarMenu: View {
         @Environment(\.addSampleDocuments) private var addSampleDocuments
+        @Environment(\.showSyncLab) private var showSyncLab
 
         var body: some View {
             Menu {
@@ -83,6 +84,14 @@
                 }
                 .accessibilityIdentifier(AccessibilityID.debugAddSampleDocuments)
                 .disabled(addSampleDocuments == nil)
+                // The Sync lab (#31, part 2), as a sheet.
+                Button {
+                    showSyncLab?()
+                } label: {
+                    Text(verbatim: "Sync Lab")
+                }
+                .accessibilityIdentifier(SyncLabID.menuItem)
+                .disabled(showSyncLab == nil)
             } label: {
                 Label {
                     Text(verbatim: "Debug")
@@ -98,6 +107,7 @@
     struct DebugCommands: Commands {
         @FocusedValue(\.addSampleDocuments) private var addSampleDocuments
         @FocusedValue(\.runSearchBenchmark) private var runSearchBenchmark
+        @Environment(\.openWindow) private var openWindow
 
         var body: some Commands {
             CommandMenu(Text(verbatim: "Debug")) {
@@ -114,6 +124,13 @@
                     Text(verbatim: "Run Search Benchmark")
                 }
                 .disabled(runSearchBenchmark == nil)
+                Divider()
+                // The Sync lab (#31, part 2), in a window of its own.
+                Button {
+                    openWindow(id: SyncLabWindow.id)
+                } label: {
+                    Text(verbatim: "Sync Lab…")
+                }
             }
         }
     }

@@ -78,6 +78,9 @@ protocol BackgroundTaskScheduling: AnyObject {
 /// - **Registration (#194):** launch registers only the processing task. Each continued request registers its own
 ///   `continued.<UUID>` just before it is submitted, and is submitted only when that registration succeeded. Each
 ///   identifier is registered once per process: the SDK kills an app that registers one twice.
+/// - **The Sync lab's hold** (#31, T14; Debug builds): while the scheduler is held (`ProcessingScheduler.isHeld`), an
+///   import asks for no continued processing, so no "Processing documents" progress shows that could not move, and a
+///   processing task that starts completes at once instead of waiting for a drain that cannot come.
 @MainActor
 final class BackgroundProcessing {
     private let scheduler: ProcessingScheduler
@@ -149,6 +152,8 @@ final class BackgroundProcessing {
     /// or adds them to the one asked for or running.
     func userImported(_ instanceIDs: [UUID]) {
         guard !instanceIDs.isEmpty else { return }
+        // A held scheduler processes nothing until the hold ends (the Sync lab, #31 T14): no progress to show.
+        guard !scheduler.isHeld else { return }
         tracked.formUnion(instanceIDs)
         if continued != nil {
             reportProgress()
@@ -243,6 +248,12 @@ final class BackgroundProcessing {
     }
 
     private func processingStarted(_ task: any BackgroundTaskHandle) {
+        // A held scheduler never drains (the Sync lab, #31 T14): the task ends at once, and the scheduler stays as
+        // it was (paused in the background).
+        guard !scheduler.isHeld else {
+            task.complete(success: false)
+            return
+        }
         processing = task
         task.onExpiration { [weak self, weak task] in
             guard let self, let task else { return }

@@ -24,11 +24,17 @@ struct RepairSchedulerTests {
         var hasCompletedImportPerRun: [Bool] { importFlags.withLock { $0 } }
 
         func run(hasCompletedImport: Bool) async -> RepairReport? {
-            importFlags.withLock { $0.append(hasCompletedImport) }
+            let number = importFlags.withLock {
+                $0.append(hasCompletedImport)
+                return $0.count
+            }
             started.fire()
             if let gate { await gate.pass() }
             finished.fire()
-            return RepairReport()
+            // Each run's report carries its number, so a test can tell which one the scheduler kept.
+            var report = RepairReport()
+            report.counts.tombstones = number
+            return report
         }
     }
 
@@ -63,10 +69,13 @@ struct RepairSchedulerTests {
 
         setup.scheduler.start()
         setup.scheduler.start()
+        #expect(setup.scheduler.lastReport == nil)
         await setup.runs.wait(for: 1)
         #expect(setup.scheduler.completedRuns == 1)
         #expect(runner.started.count == 1, "a second start() does not run again")
         #expect(runner.hasCompletedImportPerRun == [false])
+        // The Sync lab shows the last report's counts (#31, part 2).
+        #expect(setup.scheduler.lastReport?.counts.tombstones == 1)
     }
 
     /// Requests during a run queue exactly one more run, however many arrive.
@@ -92,6 +101,7 @@ struct RepairSchedulerTests {
         await setup.runs.wait(for: 2)
         #expect(runner.started.count == 2)
         #expect(queuedAtEnd.withLock { $0 } == [true, false], "five requests queued one run, and only one")
+        #expect(scheduler.lastReport?.counts.tombstones == 2, "the last report is the second run's")
     }
 
     /// The end of an import restarts the debounce; when it is over, a run follows. A successful import is

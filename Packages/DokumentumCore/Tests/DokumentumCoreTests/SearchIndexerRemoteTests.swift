@@ -66,6 +66,7 @@ struct SearchIndexerRemoteTests {
         }
         indexer.start()
         await recorder.ready.wait()
+        #expect(await indexer.lastHistoryErrorCode == nil)
         armed.turnOn()
 
         try SearchStore.setText("Neustand", of: document, in: store.container)
@@ -88,6 +89,8 @@ struct SearchIndexerRemoteTests {
         #expect(await indexer.search("neustand").matches == [document])
         #expect(await indexer.search("altstand").matches == [])
         #expect(await indexer.builds == 2)
+        // The Sync lab shows why a search missed (T11 of #31): an expiry is recorded too (review B, N2 of PR #155).
+        #expect(await indexer.lastHistoryErrorCode != nil, "the expiry left no history error code")
         // A subscriber keeps the newest element only, so it may not see each `.building` step, but one at least.
         let rebuild = Array(recorder.states.dropFirst(elementsBefore))
         #expect(rebuild.last == .ready)

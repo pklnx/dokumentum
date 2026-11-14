@@ -37,6 +37,10 @@ struct DokumentumApp: App {
     let syncMonitor: CloudSyncMonitor?
     /// Where the sidebar footer's line comes from.
     let syncStatus: SyncStatusSource?
+    #if DEBUG
+        /// The Sync lab (#31, part 2): Debug builds only.
+        let syncLab: SyncLab
+    #endif
     /// The "Suggestions" settings (#8, part 3): this device's switch and the classifier's availability, for the Mac's
     /// Settings window and the iPhone's settings sheet.
     let suggestionSettings: SuggestionSettings
@@ -127,13 +131,13 @@ struct DokumentumApp: App {
             let classifier: any DocumentClassifying = FoundationModelsClassifier()
         #endif
         let documentImporter = DocumentImporter(container: container, deviceID: deviceID)
+        #if DEBUG
+            let takeoverInterval = ProcessingTakeoverArgument.seconds(arguments: ProcessInfo.processInfo.arguments)
+        #else
+            let takeoverInterval: TimeInterval? = nil
+        #endif
         // The processing queue (#4, part 5), for the stores on disk only, like the repair.
         if let storeChanges {
-            #if DEBUG
-                let takeoverInterval = ProcessingTakeoverArgument.seconds(arguments: ProcessInfo.processInfo.arguments)
-            #else
-                let takeoverInterval: TimeInterval? = nil
-            #endif
             // The classification step (#8) with the on-device model. Created here, before the share queue below
             // imports anything, so the first launch's cut-off (P9) comes before those documents.
             let processing = ProcessingScheduler.start(
@@ -192,6 +196,13 @@ struct DokumentumApp: App {
         #else
             importer = documentImporter
         #endif
+        #if DEBUG
+            // Through the app's importer (on iOS the one that asks for continued processing) and the app's schedulers.
+            syncLab = SyncLab(
+                container: container, launchStore: launchStore, deviceID: deviceID, importer: importer,
+                processing: processing, repair: repair, search: search, monitor: syncMonitor,
+                takeoverInterval: takeoverInterval, classificationSuite: settingsSuite)
+        #endif
     }
 
     var body: some Scene {
@@ -208,6 +219,9 @@ struct DokumentumApp: App {
             )
             #if os(iOS)
                 .environment(shareQueue)
+            #endif
+            #if DEBUG
+                .environment(syncLab)
             #endif
             // The iPhone's settings sheet reads it (`SettingsButton`).
             .environment(suggestionSettings)
@@ -246,6 +260,13 @@ struct DokumentumApp: App {
             Settings {
                 SettingsView(model: suggestionSettings, matching: matchingRun)
             }
+        #endif
+        #if DEBUG && os(macOS)
+            // The Sync lab's own window (#31, part 2), from Debug › Sync Lab….
+            Window(Text(verbatim: "Sync Lab"), id: SyncLabWindow.id) {
+                SyncLabView(lab: syncLab)
+            }
+            .modelContainer(container)
         #endif
     }
 }
