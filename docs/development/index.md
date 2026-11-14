@@ -728,7 +728,9 @@ document is seen `done` or gone. Of copies sharing an `instanceID`, the queue us
     #204 built them (each zone's known names, then its structural names), with one exception. The return-address
     line's structural name yields to a known name in the letterhead that is **near-equal** to it: the same number of
     words, each equal or within an edit distance of 1 (words of 4–7 characters) or 2 (8 or more); words up to 3
-    characters must be equal. So a 7 pt return line that OCR read a letter off (`Finanzamt Musterstact` under a
+    characters must be equal, and so must words of digits. The known name must stand in the letterhead, be the
+    only near-equal one, and the letterhead must not print the return line's own name (then it was read correctly,
+    `Elektro Meier` beside a known `Elektro Meyer`). So a 7 pt return line that OCR read a letter off (`Finanzamt Musterstact` under a
     letterhead `Finanzamt Musterstadt`) links the known record and creates none, while a known third party named
     beside a correctly read return line (`Gläubiger:`, `im Auftrag der`, `Auftraggeber:`, a parent company in the
     footer) never wins. A fuzzy match of a structural name against every record, before one is created, is #206's.
